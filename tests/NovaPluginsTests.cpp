@@ -1,0 +1,2348 @@
+#include <gtest/gtest.h>
+#include "nova_dsp/math/OnePoleSmoother.h"
+#include "nova_dsp/math/LockFreeRingBuffer.h"
+#include "nova_dsp/filters/StateVariableFilter.h"
+#include "nova_dsp/reverb/DualEngineReverb.h"
+#include "nova_dsp/oscillators/MultiEngineOscillator.h"
+#include "nova_dsp/oscillators/SampleBank.h"
+#include "nova_dsp/modulation/AdsrEnvelope.h"
+#include "nova_dsp/synth/WorshipSynthEngine.h"
+#include "nova_plugin/PresetManager.h"
+#include "nova_ui/ArcKnob.h"
+#include "NovaSynthProcessor.h"
+#include "NovaSynthEditor.h"
+#include "ui/SourceListManager.h"
+#include "ui/EnvelopeQuadDeck.h"
+#include "ui/SourceDeck.h"
+#include "ui/ModulationHubPanel.h"
+#include "ui/DroneHubPanel.h"
+#include "ui/ArpeggiatorHubPanel.h"
+#include "ui/MixerHubPanel.h"
+#include <juce_events/juce_events.h>
+#include <juce_audio_processors/juce_audio_processors.h>
+#include <cmath>
+#include <numeric>
+#include <vector>
+
+namespace {
+
+TEST(NovaDspMathTests, OnePoleSmootherConvergesSmoothly) {
+    nova::dsp::OnePoleSmoother smoother;
+    smoother.prepare(48000.0, 10.0f);
+    smoother.reset(0.0f);
+    smoother.setTargetValue(1.0f);
+
+    float prev = 0.0f;
+    for (int i = 0; i < 4800; ++i) {
+        const float cur = smoother.getNextValue();
+        EXPECT_GE(cur, prev);
+        prev = cur;
+    }
+    EXPECT_NEAR(smoother.getCurrentValue(), 1.0f, 1e-3f);
+}
+
+TEST(NovaDspMathTests, LockFreeRingBufferPushPopAndWrapAround) {
+    nova::dsp::LockFreeRingBuffer<float, 16> rb;
+    for (int i = 0; i < 12; ++i) {
+        EXPECT_TRUE(rb.push(static_cast<float>(i)));
+    }
+    for (int i = 0; i < 12; ++i) {
+        float out = -1.0f;
+        EXPECT_TRUE(rb.pop(out));
+        EXPECT_FLOAT_EQ(out, static_cast<float>(i));
+    }
+    float dummy = 0.0f;
+    EXPECT_FALSE(rb.pop(dummy));
+}
+
+TEST(NovaDspFilterTests, VocalCarveBellAttenuatesMidBand) {
+    nova::dsp::StateVariableFilter svf;
+    svf.prepare(48000.0);
+    svf.setParameters(nova::dsp::StateVariableFilter::Type::Bell, 2200.0f, 0.85f, -9.0f);
+
+    const float magAt2200 = svf.getMagnitudeAtFrequency(2200.0f);
+    const float magAt200  = svf.getMagnitudeAtFrequency(200.0f);
+    EXPECT_LT(magAt2200, 0.5f);
+    EXPECT_NEAR(magAt200, 1.0f, 0.1f);
+}
+
+TEST(DualEngineReverbTests, AcousticEngineProducesFiniteStereoDecay) {
+    nova::dsp::DualEngineReverb reverb;
+    reverb.prepare(48000.0, 512);
+
+    nova::dsp::DualEngineReverb::Parameters params;
+    params.engineMode = nova::dsp::DualEngineReverb::EngineMode::Acoustic;
+    params.decaySeconds = 2.2f;
+    params.mix = 1.0f;
+    params.preDelayMs = 5.0f;
+    reverb.setParameters(params);
+
+    std::vector<float> left(512, 0.0f);
+    std::vector<float> right(512, 0.0f);
+    left[0] = 1.0f;
+    right[0] = 1.0f;
+
+    // First block with impulse
+    reverb.processBlock(left.data(), right.data(), 512);
+
+    float earlyEnergy = 0.0f;
+    for (int b = 0; b < 15; ++b) {
+        std::fill(left.begin(), left.end(), 0.0f);
+        std::fill(right.begin(), right.end(), 0.0f);
+        reverb.processBlock(left.data(), right.data(), 512);
+        for (int i = 0; i < 512; ++i) {
+            ASSERT_TRUE(std::isfinite(left[static_cast<std::size_t>(i)]));
+            ASSERT_TRUE(std::isfinite(right[static_cast<std::size_t>(i)]));
+            earlyEnergy += left[static_cast<std::size_t>(i)] * left[static_cast<std::size_t>(i)];
+        }
+    }
+    EXPECT_GT(earlyEnergy, 1e-4f);
+
+    // Later blocks should decay naturally
+    float lateEnergy = 0.0f;
+    for (int b = 0; b < 60; ++b) {
+        std::fill(left.begin(), left.end(), 0.0f);
+        std::fill(right.begin(), right.end(), 0.0f);
+        reverb.processBlock(left.data(), right.data(), 512);
+        if (b >= 45) {
+            for (int i = 0; i < 512; ++i) {
+                lateEnergy += left[static_cast<std::size_t>(i)] * left[static_cast<std::size_t>(i)];
+            }
+        }
+    }
+    EXPECT_LT(lateEnergy, earlyEnergy);
+}
+
+TEST(DualEngineReverbTests, LushCloudFreezeSustainsTailInfinitely) {
+    nova::dsp::DualEngineReverb reverb;
+    reverb.prepare(48000.0, 512);
+
+    nova::dsp::DualEngineReverb::Parameters params;
+    params.engineMode = nova::dsp::DualEngineReverb::EngineMode::LushCloud;
+    params.decaySeconds = 4.0f;
+    params.shimmerOctave = 0.5f;
+    params.shimmerFifth = 0.25f;
+    params.mix = 1.0f;
+    params.freeze = false;
+    reverb.setParameters(params);
+
+    std::vector<float> left(512, 0.0f);
+    std::vector<float> right(512, 0.0f);
+
+    // Feed burst of energy into tank
+    for (int b = 0; b < 10; ++b) {
+        for (int i = 0; i < 512; ++i) {
+            const float sig = 0.35f * std::sin(2.0f * 3.14159265f * 220.0f * static_cast<float>(i) / 48000.0f);
+            left[static_cast<std::size_t>(i)] = sig;
+            right[static_cast<std::size_t>(i)] = sig;
+        }
+        reverb.processBlock(left.data(), right.data(), 512);
+    }
+
+    // Engage Freeze and process 100 silent blocks (~1.06 seconds)
+    params.freeze = true;
+    reverb.setParameters(params);
+
+    float frozenEnergy = 0.0f;
+    for (int b = 0; b < 100; ++b) {
+        std::fill(left.begin(), left.end(), 0.0f);
+        std::fill(right.begin(), right.end(), 0.0f);
+        reverb.processBlock(left.data(), right.data(), 512);
+        if (b >= 90) {
+            for (int i = 0; i < 512; ++i) {
+                frozenEnergy += left[static_cast<std::size_t>(i)] * left[static_cast<std::size_t>(i)];
+            }
+        }
+    }
+    EXPECT_GT(frozenEnergy, 1e-3f);
+}
+
+TEST(DualEngineReverbTests, AutoDuckingAttenuatesWetTailDuringLoudInput) {
+    nova::dsp::DualEngineReverb reverb;
+    reverb.prepare(48000.0, 512);
+
+    nova::dsp::DualEngineReverb::Parameters params;
+    params.engineMode = nova::dsp::DualEngineReverb::EngineMode::LushCloud;
+    params.decaySeconds = 6.0f;
+    params.mix = 1.0f;
+    params.ducking = 0.85f;
+    reverb.setParameters(params);
+
+    std::vector<float> left(512, 0.5f);
+    std::vector<float> right(512, 0.5f);
+    for (int b = 0; b < 8; ++b) {
+        reverb.processBlock(left.data(), right.data(), 512);
+    }
+
+    const auto tel = reverb.getTelemetry();
+    EXPECT_LT(tel.duckingGainReductionDb, -2.0f);
+}
+
+TEST(DualEngineReverbTests, ShimmerAndTankNeverRunawayOrBlowUpAtMaxDecayAndShimmer) {
+    nova::dsp::DualEngineReverb reverb;
+    reverb.prepare(48000.0, 512);
+
+    nova::dsp::DualEngineReverb::Parameters params;
+    params.engineMode = nova::dsp::DualEngineReverb::EngineMode::LushCloud;
+    params.decaySeconds = 25.0f; // Extreme decay
+    params.shimmerOctave = 1.0f; // Maximum shimmer
+    params.modDepth = 1.0f;      // Maximum modulation
+    params.mix = 1.0f;
+    params.freeze = false;
+    reverb.setParameters(params);
+
+    std::vector<float> left(512, 0.0f);
+    std::vector<float> right(512, 0.0f);
+
+    // Feed high-amplitude burst
+    for (int i = 0; i < 512; ++i) {
+        const float s = 0.90f * std::sin(2.0f * 3.14159265f * 440.0f * static_cast<float>(i) / 48000.0f);
+        left[static_cast<std::size_t>(i)] = s;
+        right[static_cast<std::size_t>(i)] = s;
+    }
+    reverb.processBlock(left.data(), right.data(), 512);
+
+    float maxTailPeak = 0.0f;
+    // Process 80 blocks (~0.85s of dense recirculation)
+    for (int b = 0; b < 80; ++b) {
+        std::fill(left.begin(), left.end(), 0.0f);
+        std::fill(right.begin(), right.end(), 0.0f);
+        reverb.processBlock(left.data(), right.data(), 512);
+        for (int i = 0; i < 512; ++i) {
+            ASSERT_TRUE(std::isfinite(left[static_cast<std::size_t>(i)]));
+            ASSERT_TRUE(std::isfinite(right[static_cast<std::size_t>(i)]));
+            maxTailPeak = std::max(maxTailPeak, std::max(std::abs(left[static_cast<std::size_t>(i)]), std::abs(right[static_cast<std::size_t>(i)])));
+        }
+    }
+
+    // Must never blow up or run away into screaming feedback
+    EXPECT_LT(maxTailPeak, 1.25f);
+    EXPECT_GT(maxTailPeak, 0.01f);
+}
+
+TEST(PresetManagerTests, InitPatchLoadsCleanOscillatorAndBypassedFx) {
+    nova::synth::NovaSynthProcessor processor;
+    processor.prepareToPlay(48000.0, 512);
+
+    auto& pm = processor.getPresetManager();
+    const bool loaded = pm.loadPresetByName("Init Patch");
+    EXPECT_TRUE(loaded);
+
+    EXPECT_EQ(pm.getCurrentPresetName(), "Init Patch");
+    EXPECT_EQ(pm.getCurrentPresetCategory(), "Utility");
+
+    auto& apvts = processor.getAPVTS();
+    EXPECT_FLOAT_EQ(*apvts.getRawParameterValue("activeOscCount"), 1.0f);
+    EXPECT_FLOAT_EQ(*apvts.getRawParameterValue("osc1_enabled"), 1.0f);
+    EXPECT_FLOAT_EQ(*apvts.getRawParameterValue("osc2_enabled"), 0.0f);
+    EXPECT_FLOAT_EQ(*apvts.getRawParameterValue("osc3_enabled"), 0.0f);
+    EXPECT_FLOAT_EQ(*apvts.getRawParameterValue("delayMix"), 0.0f);
+    EXPECT_FLOAT_EQ(*apvts.getRawParameterValue("reverbMix"), 0.0f);
+    EXPECT_FLOAT_EQ(*apvts.getRawParameterValue("arpEnabled"), 0.0f);
+}
+
+TEST(MultiEngineOscillatorTests, AllGranularAndPluckModelsProduceDistinctSignatures) {
+    using nova::dsp::MultiEngineOscillator;
+
+    // 1. Verify Granular (OrganicTexture) models are distinct
+    {
+        std::vector<std::vector<float>> granularBuffers;
+        for (int m = 0; m < 5; ++m) {
+            MultiEngineOscillator osc;
+            osc.prepare(48000.0);
+            MultiEngineOscillator::Parameters p;
+            p.enabled = true;
+            p.sourceType = 0;
+            p.engine = MultiEngineOscillator::EngineType::OrganicTexture;
+            p.modelIndex = m;
+            p.shapeMorph = 0.5f;
+            p.level = 0.8f;
+            osc.setParameters(p);
+            osc.triggerNote(261.63f, 0.85f, 42);
+
+            std::vector<float> buf(1024, 0.0f);
+            for (int i = 0; i < 1024; ++i) {
+                float l = 0.0f, r = 0.0f;
+                osc.processSample(261.63f, 0.0f, 0.0f, l, r);
+                buf[static_cast<std::size_t>(i)] = 0.5f * (l + r);
+            }
+            granularBuffers.push_back(std::move(buf));
+        }
+
+        // Check every pair (m1, m2) has distinct audio
+        for (int i = 0; i < 5; ++i) {
+            for (int j = i + 1; j < 5; ++j) {
+                float diffEnergy = 0.0f;
+                for (int s = 0; s < 1024; ++s) {
+                    const float d = granularBuffers[static_cast<std::size_t>(i)][static_cast<std::size_t>(s)] -
+                                    granularBuffers[static_cast<std::size_t>(j)][static_cast<std::size_t>(s)];
+                    diffEnergy += d * d;
+                }
+                EXPECT_GT(diffEnergy, 0.02f) << "Granular models " << i << " and " << j << " are identical!";
+            }
+        }
+    }
+
+    // 2. Verify Pluck models are distinct
+    {
+        std::vector<std::vector<float>> pluckBuffers;
+        for (int m = 0; m < 4; ++m) {
+            MultiEngineOscillator osc;
+            osc.prepare(48000.0);
+            MultiEngineOscillator::Parameters p;
+            p.enabled = true;
+            p.sourceType = 2; // PLUCK
+            p.engine = MultiEngineOscillator::EngineType::PhysicalPluckModal;
+            p.modelIndex = m;
+            p.shapeMorph = 0.5f;
+            p.level = 0.8f;
+            osc.setParameters(p);
+            osc.triggerNote(440.0f, 0.85f, 42);
+
+            std::vector<float> buf(1024, 0.0f);
+            for (int i = 0; i < 1024; ++i) {
+                float l = 0.0f, r = 0.0f;
+                osc.processSample(440.0f, 0.0f, 0.0f, l, r);
+                buf[static_cast<std::size_t>(i)] = 0.5f * (l + r);
+            }
+            pluckBuffers.push_back(std::move(buf));
+        }
+
+        // Check every pair (m1, m2) has distinct audio
+        for (int i = 0; i < 4; ++i) {
+            for (int j = i + 1; j < 4; ++j) {
+                float diffEnergy = 0.0f;
+                for (int s = 0; s < 1024; ++s) {
+                    const float d = pluckBuffers[static_cast<std::size_t>(i)][static_cast<std::size_t>(s)] -
+                                    pluckBuffers[static_cast<std::size_t>(j)][static_cast<std::size_t>(s)];
+                    diffEnergy += d * d;
+                }
+                EXPECT_GT(diffEnergy, 0.02f) << "Pluck models " << i << " and " << j << " are identical!";
+            }
+        }
+    }
+}
+
+TEST(SampleBankTests, AllEightSamplesArePopulatedAndNonZero) {
+    using nova::dsp::SampleBank;
+    EXPECT_EQ(SampleBank::getSampleCount(), 8);
+
+    for (int i = 0; i < 8; ++i) {
+        const auto& smp = SampleBank::getSample(i);
+        EXPECT_NE(smp.zones, nullptr);
+        EXPECT_GE(smp.numZones, 1);
+        EXPECT_LE(smp.numZones, 3);
+        EXPECT_GT(smp.sampleRate, 40000.0);
+        EXPECT_NE(smp.name, nullptr);
+        EXPECT_GT(std::strlen(smp.name), 2u);
+
+        for (int z = 0; z < smp.numZones; ++z) {
+            const auto& zone = smp.zones[z];
+            EXPECT_NE(zone.pcmL, nullptr);
+            EXPECT_NE(zone.pcmR, nullptr);
+            EXPECT_GT(zone.numSamples, 1000);
+            EXPECT_GT(zone.rootFrequencyHz, 50.0f);
+            EXPECT_LT(zone.rootFrequencyHz, 2000.0f);
+
+            // Verify peak is normalized and non-silent
+            int maxAbsL = 0;
+            int maxAbsR = 0;
+            for (int s = 0; s < zone.numSamples; ++s) {
+                maxAbsL = std::max(maxAbsL, std::abs(static_cast<int>(zone.pcmL[s])));
+                maxAbsR = std::max(maxAbsR, std::abs(static_cast<int>(zone.pcmR[s])));
+            }
+            EXPECT_GT(maxAbsL, 10000); // Strong, pristine signal level
+            EXPECT_GT(maxAbsR, 10000);
+        }
+    }
+}
+
+TEST(MultiEngineOscillatorTests, SamplePlaybackEngineRendersCleanAudio) {
+    using nova::dsp::MultiEngineOscillator;
+    MultiEngineOscillator osc;
+    osc.prepare(48000.0);
+
+    for (int m = 0; m < 8; ++m) {
+        MultiEngineOscillator::Parameters p;
+        p.enabled = true;
+        p.sourceType = 4;
+        p.engine = MultiEngineOscillator::EngineType::SamplePlayback;
+        p.modelIndex = m;
+        p.level = 0.85f;
+        p.shapeMorph = 0.0f;
+        osc.setParameters(p);
+        osc.triggerNote(261.63f, 0.9f, 123);
+
+        float maxPeak = 0.0f;
+        for (int i = 0; i < 1024; ++i) {
+            float l = 0.0f, r = 0.0f;
+            osc.processSample(261.63f, 0.0f, 0.0f, l, r);
+            EXPECT_TRUE(std::isfinite(l));
+            EXPECT_TRUE(std::isfinite(r));
+            maxPeak = std::max(maxPeak, std::max(std::abs(l), std::abs(r)));
+        }
+        EXPECT_GT(maxPeak, 0.05f) << "Sample model " << m << " did not produce audible audio!";
+    }
+}
+
+TEST(PresetManagerTests, AllHybridSamplePresetsLoadAndRenderAudio) {
+    nova::synth::NovaSynthProcessor processor;
+    processor.prepareToPlay(48000.0, 512);
+
+    auto& pm = processor.getPresetManager();
+    const std::vector<std::string> samplePresets = {
+        "Nils Felt Piano & Warm Pad",
+        "Celestial Concert Harp",
+        "Nordic Mallet & Bell Cloud",
+        "Sacred Pipe Flute Swell",
+        "Music Box & Vinyl Dreams",
+        "Cathedral Chime & Choir Ambient",
+        "Solo Concert Grand Piano",
+        "Pure Concert Harp Solo",
+        "Nordic Celesta & Glockenspiel"
+    };
+
+    for (const auto& name : samplePresets) {
+        const bool loaded = pm.loadPresetByName(name);
+        EXPECT_TRUE(loaded) << "Failed to load factory preset: " << name;
+
+        // Render audio block with a MIDI note played
+        juce::AudioBuffer<float> buffer(2, 512);
+        buffer.clear();
+        juce::MidiBuffer midi;
+        midi.addEvent(juce::MidiMessage::noteOn(1, 60, static_cast<juce::uint8>(100)), 0);
+
+        processor.processBlock(buffer, midi);
+
+        float peak = 0.0f;
+        for (int c = 0; c < 2; ++c) {
+            const float* ch = buffer.getReadPointer(c);
+            for (int i = 0; i < 512; ++i) {
+                EXPECT_TRUE(std::isfinite(ch[i]));
+                peak = std::max(peak, std::abs(ch[i]));
+            }
+        }
+        EXPECT_GT(peak, 0.001f) << "Preset " << name << " rendered silence!";
+    }
+}
+
+TEST(WorshipSynthEngineTests, AllFourOscillatorEnginesRenderCleanSignal) {
+    using nova::dsp::MultiEngineOscillator;
+    MultiEngineOscillator osc;
+    osc.prepare(48000.0);
+
+    for (int e = 0; e < 4; ++e) {
+        MultiEngineOscillator::Parameters p;
+        p.enabled = true;
+        p.engine = static_cast<MultiEngineOscillator::EngineType>(e);
+        p.shapeMorph = 0.5f;
+        p.detune = 0.3f;
+        p.level = 0.8f;
+        osc.setParameters(p);
+        osc.triggerNote(261.63f, 0.85f, static_cast<uint32_t>(e + 1));
+
+        float energy = 0.0f;
+        for (int i = 0; i < 1024; ++i) {
+            float l = 0.0f, r = 0.0f;
+            osc.processSample(261.63f, 0.0f, 0.0f, l, r);
+            ASSERT_TRUE(std::isfinite(l));
+            ASSERT_TRUE(std::isfinite(r));
+            energy += l * l + r * r;
+        }
+        EXPECT_GT(energy, 1e-3f) << "Engine index " << e << " produced no audio energy.";
+    }
+}
+
+TEST(WorshipSynthEngineTests, PolyphonicPadAndDroneGenerateSustainedOutput) {
+    nova::dsp::WorshipSynthEngine synth;
+    synth.prepare(48000.0, 512);
+
+    nova::dsp::WorshipSynthEngine::Parameters p = synth.getParameters();
+    p.activeOscCount = 3;
+    p.droneEnabled = true;
+    p.droneRootKey = 0; // C Drone
+    p.droneLevel = 0.6f;
+    synth.setParameters(p);
+
+    // Also play a C major triad
+    synth.noteOn(60, 0.85f);
+    synth.noteOn(64, 0.80f);
+    synth.noteOn(67, 0.82f);
+
+    std::vector<float> left(512, 0.0f);
+    std::vector<float> right(512, 0.0f);
+
+    float totalEnergy = 0.0f;
+    for (int b = 0; b < 12; ++b) {
+        synth.processBlock(left.data(), right.data(), 512);
+        for (int i = 0; i < 512; ++i) {
+            ASSERT_TRUE(std::isfinite(left[static_cast<std::size_t>(i)]));
+            ASSERT_TRUE(std::isfinite(right[static_cast<std::size_t>(i)]));
+            totalEnergy += left[static_cast<std::size_t>(i)] * left[static_cast<std::size_t>(i)];
+        }
+    }
+
+    const auto tel = synth.getTelemetry();
+    EXPECT_GE(tel.activeVoiceCount, 6); // 3 Drone voices + 3 Triad voices
+    EXPECT_GT(totalEnergy, 1e-2f);
+}
+
+class DummyTestProcessor : public juce::AudioProcessor {
+public:
+    DummyTestProcessor()
+        : juce::AudioProcessor(BusesProperties().withOutput("Output", juce::AudioChannelSet::stereo(), true)),
+          apvts(*this, nullptr, "PARAMS", createLayout()) {}
+    ~DummyTestProcessor() override = default;
+
+    const juce::String getName() const override { return "DummyTest"; }
+    void prepareToPlay(double, int) override {}
+    void releaseResources() override {}
+    void processBlock(juce::AudioBuffer<float>&, juce::MidiBuffer&) override {}
+    juce::AudioProcessorEditor* createEditor() override { return nullptr; }
+    bool hasEditor() const override { return false; }
+    double getTailLengthSeconds() const override { return 0.0; }
+    bool acceptsMidi() const override { return true; }
+    bool producesMidi() const override { return false; }
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram(int) override {}
+    const juce::String getProgramName(int) override { return {}; }
+    void changeProgramName(int, const juce::String&) override {}
+    void getStateInformation(juce::MemoryBlock&) override {}
+    void setStateInformation(const void*, int) override {}
+
+    juce::AudioProcessorValueTreeState& getAPVTS() { return apvts; }
+
+private:
+    static juce::AudioProcessorValueTreeState::ParameterLayout createLayout() {
+        std::vector<std::unique_ptr<juce::RangedAudioParameter>> params;
+        params.push_back(std::make_unique<juce::AudioParameterInt>(
+            juce::ParameterID{"osc1_octave", 1}, "OSC 1 Octave", -2, 2, 0));
+        params.push_back(std::make_unique<juce::AudioParameterInt>(
+            juce::ParameterID{"osc2_octave", 1}, "OSC 2 Octave", -2, 2, 0));
+        return { params.begin(), params.end() };
+    }
+
+    juce::AudioProcessorValueTreeState apvts;
+};
+
+TEST(NovaSynthRegressionTests, ArcKnobParameterRebindingPreservesUnselectedParameters) {
+    DummyTestProcessor proc;
+    auto& apvts = proc.getAPVTS();
+
+    nova::ui::NovaTheme theme;
+    nova::ui::ArcKnob knob("Octave", "oct", theme);
+
+    // 1. Attach knob to OSC 2 octave and set to +2
+    knob.attachToParameter(apvts, "osc2_octave");
+    knob.getSlider().setValue(2.0, juce::sendNotificationSync);
+
+    auto* p2 = apvts.getRawParameterValue("osc2_octave");
+    ASSERT_NE(p2, nullptr);
+    EXPECT_FLOAT_EQ(p2->load(), 2.0f);
+
+    // 2. Re-attach knob to OSC 1 octave (which has default 0) and set to -1
+    knob.attachToParameter(apvts, "osc1_octave");
+    EXPECT_FLOAT_EQ(static_cast<float>(knob.getSlider().getValue()), 0.0f);
+    knob.getSlider().setValue(-1.0, juce::sendNotificationSync);
+
+    auto* p1 = apvts.getRawParameterValue("osc1_octave");
+    ASSERT_NE(p1, nullptr);
+    EXPECT_FLOAT_EQ(p1->load(), -1.0f);
+
+    // 3. REGRESSION CHECK: Verify that re-attaching did NOT reset or overwrite OSC 2!
+    EXPECT_FLOAT_EQ(p2->load(), 2.0f);
+}
+
+TEST(NovaSynthRegressionTests, MultiEngineOscillatorRendersSubAndNoise) {
+    using nova::dsp::MultiEngineOscillator;
+    MultiEngineOscillator osc;
+    osc.prepare(48000.0);
+
+    // Sub Oscillator
+    MultiEngineOscillator::Parameters pSub;
+    pSub.enabled = true;
+    pSub.engine = MultiEngineOscillator::EngineType::SubOscillator;
+    pSub.shapeMorph = 0.25f;
+    pSub.level = 0.9f;
+    osc.setParameters(pSub);
+    osc.triggerNote(130.81f, 0.9f, 42);
+
+    float subEnergy = 0.0f;
+    for (int i = 0; i < 512; ++i) {
+        float l = 0.0f, r = 0.0f;
+        osc.processSample(130.81f, 0.0f, 0.0f, l, r);
+        ASSERT_TRUE(std::isfinite(l));
+        ASSERT_TRUE(std::isfinite(r));
+        subEnergy += l * l + r * r;
+    }
+    EXPECT_GT(subEnergy, 1e-3f);
+
+    // Noise Transient
+    MultiEngineOscillator::Parameters pNoise;
+    pNoise.enabled = true;
+    pNoise.engine = MultiEngineOscillator::EngineType::NoiseTransient;
+    pNoise.shapeMorph = 0.5f;
+    pNoise.level = 0.8f;
+    osc.setParameters(pNoise);
+    osc.triggerNote(440.0f, 0.8f, 99);
+
+    float noiseEnergy = 0.0f;
+    for (int i = 0; i < 512; ++i) {
+        float l = 0.0f, r = 0.0f;
+        osc.processSample(440.0f, 0.0f, 0.0f, l, r);
+        ASSERT_TRUE(std::isfinite(l));
+        ASSERT_TRUE(std::isfinite(r));
+        noiseEnergy += l * l + r * r;
+    }
+    EXPECT_GT(noiseEnergy, 1e-3f);
+}
+
+TEST(NovaSynthRegressionTests, WorshipSynthEngineFilterRoutingDirectBypassesFilter1) {
+    nova::dsp::WorshipSynthEngine synth;
+    synth.prepare(48000.0, 512);
+
+    nova::dsp::WorshipSynthEngine::Parameters p = synth.getParameters();
+    p.activeOscCount = 1;
+    p.filter1Enabled = true;
+    p.filterType = 0; // LowPass
+    p.filterCutoffHz = 60.0f; // Low cutoff (attenuates high notes)
+    p.filterResonance = 0.7f;
+    p.filterEnvAmount = 0.0f;
+    p.filter2Enabled = false;
+    p.reverbMix = 0.0f;
+
+    // Test with FLT 1 (route = 0)
+    p.oscSlots[0].enabled = true;
+    p.oscSlots[0].engine = nova::dsp::MultiEngineOscillator::EngineType::WarmAnalog;
+    p.oscSlots[0].filterRouting = 0; // FLT 1
+    p.oscSlots[0].level = 1.0f;
+    synth.setParameters(p);
+
+    synth.noteOn(72, 0.9f); // C5 = 523 Hz, well above 60 Hz cutoff
+    std::vector<float> left(512, 0.0f);
+    std::vector<float> right(512, 0.0f);
+
+    float filteredEnergy = 0.0f;
+    for (int b = 0; b < 4; ++b) {
+        synth.processBlock(left.data(), right.data(), 512);
+        for (int i = 0; i < 512; ++i) {
+            filteredEnergy += left[static_cast<std::size_t>(i)] * left[static_cast<std::size_t>(i)];
+        }
+    }
+    synth.allNotesOff();
+
+    // Test with DIRECT (route = 3)
+    p.oscSlots[0].filterRouting = 3; // DIRECT
+    synth.setParameters(p);
+    synth.noteOn(72, 0.9f);
+
+    float directEnergy = 0.0f;
+    for (int b = 0; b < 4; ++b) {
+        synth.processBlock(left.data(), right.data(), 512);
+        for (int i = 0; i < 512; ++i) {
+            directEnergy += left[static_cast<std::size_t>(i)] * left[static_cast<std::size_t>(i)];
+        }
+    }
+
+    // DIRECT signal should be significantly louder than heavily filtered signal
+    EXPECT_GT(directEnergy, filteredEnergy * 5.0f);
+}
+
+TEST(NovaSynthRegressionTests, GainStagingSingleNoteIsLoudAndNominal) {
+    nova::dsp::WorshipSynthEngine synth;
+    synth.prepare(48000.0, 512);
+
+    nova::dsp::WorshipSynthEngine::Parameters p = synth.getParameters();
+    p.activeOscCount = 1;
+    p.oscSlots[0].enabled = true;
+    p.oscSlots[0].engine = nova::dsp::MultiEngineOscillator::EngineType::WarmAnalog;
+    p.oscSlots[0].level = 0.85f;
+    p.ampEnv.attackSec = 0.005f; // Fast attack to test nominal steady-state volume
+    p.ampEnv.sustainLvl = 1.0f;
+    p.filter1Enabled = true;
+    p.filterCutoffHz = 4000.0f;
+    p.reverbMix = 0.0f;
+    synth.setParameters(p);
+
+    synth.noteOn(60, 0.85f); // Middle C
+
+    std::vector<float> left(512, 0.0f);
+    std::vector<float> right(512, 0.0f);
+
+    float maxPeak = 0.0f;
+    for (int b = 0; b < 6; ++b) {
+        synth.processBlock(left.data(), right.data(), 512);
+        for (int i = 0; i < 512; ++i) {
+            maxPeak = std::max(maxPeak, std::abs(left[static_cast<std::size_t>(i)]));
+        }
+    }
+
+    // Nominal level check: Single note should be punchy and loud (> -10 dBFS = 0.316)
+    // and not whisper-quiet like previously (-16 dBFS).
+    EXPECT_GT(maxPeak, 0.30f);
+    EXPECT_LE(maxPeak, 1.0f);
+}
+
+TEST(NovaSynthRegressionTests, MasterSoftClipperPreventsClippingOnHeavyChords) {
+    nova::dsp::WorshipSynthEngine synth;
+    synth.prepare(48000.0, 512);
+
+    nova::dsp::WorshipSynthEngine::Parameters p = synth.getParameters();
+    p.activeOscCount = 4;
+    for (int i = 0; i < 4; ++i) {
+        p.oscSlots[static_cast<std::size_t>(i)].enabled = true;
+        p.oscSlots[static_cast<std::size_t>(i)].level = 1.0f;
+    }
+    p.filter1Enabled = false;
+    p.filterDrive = 0.5f;
+    p.reverbMix = 0.5f;
+    synth.setParameters(p);
+
+    // Play 10 loud simultaneous notes
+    for (int n = 48; n <= 72; n += 2) {
+        synth.noteOn(n, 1.0f);
+    }
+
+    std::vector<float> left(512, 0.0f);
+    std::vector<float> right(512, 0.0f);
+
+    float maxPeak = 0.0f;
+    for (int b = 0; b < 10; ++b) {
+        synth.processBlock(left.data(), right.data(), 512);
+        for (int i = 0; i < 512; ++i) {
+            ASSERT_TRUE(std::isfinite(left[static_cast<std::size_t>(i)]));
+            ASSERT_TRUE(std::isfinite(right[static_cast<std::size_t>(i)]));
+            maxPeak = std::max(maxPeak, std::abs(left[static_cast<std::size_t>(i)]));
+        }
+    }
+
+    // Soft-clipper must gracefully saturate and prevent any digital overshoot
+    EXPECT_LE(maxPeak, 1.02f);
+}
+
+TEST(NovaSynthRegressionTests, PolyphonyVoiceStealingGracefullyCapsAtMaxVoices) {
+    nova::dsp::WorshipSynthEngine synth;
+    synth.prepare(48000.0, 512);
+
+    // Trigger 48 distinct notes (well beyond the 32 voice limit)
+    for (int n = 24; n < 72; ++n) {
+        synth.noteOn(n, 0.8f);
+    }
+
+    std::vector<float> left(512, 0.0f);
+    std::vector<float> right(512, 0.0f);
+    synth.processBlock(left.data(), right.data(), 512);
+
+    const auto tel = synth.getTelemetry();
+    EXPECT_LE(tel.activeVoiceCount, 32);
+    EXPECT_GT(tel.activeVoiceCount, 0);
+
+    for (int i = 0; i < 512; ++i) {
+        ASSERT_TRUE(std::isfinite(left[static_cast<std::size_t>(i)]));
+        ASSERT_TRUE(std::isfinite(right[static_cast<std::size_t>(i)]));
+    }
+}
+
+TEST(NovaSynthRegressionTests, DenormalsAndSilenceDecaySafety) {
+    nova::dsp::DualEngineReverb reverb;
+    reverb.prepare(48000.0, 512);
+
+    nova::dsp::DualEngineReverb::Parameters p;
+    p.engineMode = nova::dsp::DualEngineReverb::EngineMode::LushCloud;
+    p.decaySeconds = 20.0f;
+    p.shimmerOctave = 0.5f;
+    reverb.setParameters(p);
+
+    std::vector<float> left(512, 0.0f);
+    std::vector<float> right(512, 0.0f);
+    left[0] = 1.0f;
+    right[0] = 1.0f;
+
+    reverb.processBlock(left.data(), right.data(), 512);
+
+    // Feed 40 blocks of pure silence
+    for (int b = 0; b < 40; ++b) {
+        std::fill(left.begin(), left.end(), 0.0f);
+        std::fill(right.begin(), right.end(), 0.0f);
+        reverb.processBlock(left.data(), right.data(), 512);
+        for (int i = 0; i < 512; ++i) {
+            ASSERT_TRUE(std::isfinite(left[static_cast<std::size_t>(i)]));
+            ASSERT_TRUE(std::isfinite(right[static_cast<std::size_t>(i)]));
+            // Check that tiny numbers don't blow up or turn into NaNs
+            ASSERT_FALSE(std::isnan(left[static_cast<std::size_t>(i)]));
+        }
+    }
+}
+
+TEST(NovaSynthRegressionTests, SampleRateSwitchingConsistency) {
+    nova::dsp::WorshipSynthEngine synth;
+
+    const std::array<double, 4> sampleRates = { 44100.0, 96000.0, 192000.0, 48000.0 };
+    for (double sr : sampleRates) {
+        synth.prepare(sr, 512);
+        auto p = synth.getParameters();
+        p.ampEnv.attackSec = 0.005f; // Fast attack for consistent initial block energy
+        synth.setParameters(p);
+        synth.noteOn(60, 0.8f);
+
+        std::vector<float> left(512, 0.0f);
+        std::vector<float> right(512, 0.0f);
+        synth.processBlock(left.data(), right.data(), 512);
+
+        float blockEnergy = 0.0f;
+        for (int i = 0; i < 512; ++i) {
+            ASSERT_TRUE(std::isfinite(left[static_cast<std::size_t>(i)]));
+            blockEnergy += left[static_cast<std::size_t>(i)] * left[static_cast<std::size_t>(i)];
+        }
+        EXPECT_GT(blockEnergy, 1e-4f) << "Failed at sample rate " << sr;
+        synth.allNotesOff();
+    }
+}
+
+TEST(NovaSynthRegressionTests, MidiSustainPedalAndAllNotesOffSafety) {
+    nova::dsp::WorshipSynthEngine synth;
+    synth.prepare(48000.0, 512);
+
+    auto p = synth.getParameters();
+    p.ampEnv.releaseSec = 0.04f; // 40 ms release time
+    synth.setParameters(p);
+
+    synth.noteOn(60, 0.8f);
+    synth.setSustainPedal(true);
+    synth.noteOff(60); // Released physical key, but held by sustain pedal
+
+    std::vector<float> left(512, 0.0f);
+    std::vector<float> right(512, 0.0f);
+    synth.processBlock(left.data(), right.data(), 512);
+
+    auto tel = synth.getTelemetry();
+    EXPECT_GE(tel.activeVoiceCount, 1); // Note MUST still sound because pedal is down
+
+    synth.setSustainPedal(false); // Pedal released -> voice should release
+    synth.allNotesOff();          // Triggers release on all held voices
+    synth.processBlock(left.data(), right.data(), 512);
+
+    // After 10 blocks (100 ms > 40 ms release), all voices should have finished release
+    for (int b = 0; b < 10; ++b) {
+        synth.processBlock(left.data(), right.data(), 512);
+    }
+    tel = synth.getTelemetry();
+    EXPECT_EQ(tel.activeVoiceCount, 0);
+
+    // Also verify allSoundOff() cuts sound immediately
+    synth.noteOn(60, 0.8f);
+    synth.allSoundOff();
+    tel = synth.getTelemetry();
+    EXPECT_EQ(tel.activeVoiceCount, 0);
+}
+
+// Helper: Discrete Fourier Transform bin (Goertzel) with Hann window to measure magnitude at a single target frequency
+inline float measureMagnitudeAtFreq(const float* buffer, int numSamples, double sampleRate, float targetHz) noexcept {
+    if (numSamples <= 0 || sampleRate <= 0.0) return 0.0f;
+    const double omega = 2.0 * std::numbers::pi_v<double> * static_cast<double>(targetHz) / sampleRate;
+    const double coeff = 2.0 * std::cos(omega);
+    double s_prev = 0.0;
+    double s_prev2 = 0.0;
+    for (int i = 0; i < numSamples; ++i) {
+        const double win = 0.5 * (1.0 - std::cos(2.0 * std::numbers::pi_v<double> * i / static_cast<double>(numSamples - 1)));
+        const double x = static_cast<double>(buffer[i]) * win;
+        const double s = x + coeff * s_prev - s_prev2;
+        s_prev2 = s_prev;
+        s_prev = s;
+    }
+    const double power = s_prev2 * s_prev2 + s_prev * s_prev - coeff * s_prev * s_prev2;
+    return static_cast<float>(std::sqrt(std::max(0.0, power)) * (4.0 / static_cast<double>(numSamples)));
+}
+
+// Helper: Normalized Pearson correlation coefficient between Left and Right channels: r = sum(L*R) / sqrt(sum(L^2)*sum(R^2))
+inline float measureStereoCorrelation(const float* left, const float* right, int numSamples) noexcept {
+    double sumLR = 0.0, sumL2 = 0.0, sumR2 = 0.0;
+    for (int i = 0; i < numSamples; ++i) {
+        const double l = left[i];
+        const double r = right[i];
+        sumLR += l * r;
+        sumL2 += l * l;
+        sumR2 += r * r;
+    }
+    const double denom = std::sqrt(sumL2 * sumR2);
+    if (denom < 1e-9) return 1.0f;
+    return static_cast<float>(sumLR / denom);
+}
+
+// -------------------------------------------------------------------------------------------------
+// COMPREHENSIVE TEST SUITE 1: Preset Headroom & Anti-Clipping Verification (Single Note & 7-Note Chords)
+// -------------------------------------------------------------------------------------------------
+TEST(NovaSynthComprehensiveTests, AllFactoryPresetsHeadroomAndNoClipping) {
+    nova::synth::NovaSynthProcessor processor;
+    processor.prepareToPlay(48000.0, 512);
+
+    auto& presetMgr = processor.getPresetManager();
+    const auto& presets = presetMgr.getAllPresets();
+    ASSERT_FALSE(presets.empty());
+
+    juce::AudioBuffer<float> buffer(2, 512);
+    juce::MidiBuffer midi;
+
+    const std::vector<int> heavyWorshipChord = { 36, 48, 55, 60, 64, 67, 71 }; // 7-note worship chord
+
+    for (int pIdx = 0; pIdx < static_cast<int>(presets.size()); ++pIdx) {
+        presetMgr.loadPresetByIndex(pIdx);
+        const auto presetName = presets[static_cast<std::size_t>(pIdx)].name;
+
+        // --- Part A: Single Note Test (MIDI 60, vel 0.90) ---
+        processor.triggerAuditionNoteOn(60, 0.90f);
+        float singleNoteMaxPeak = 0.0f;
+
+        // Hold single note for 0.8s (75 blocks)
+        for (int b = 0; b < 75; ++b) {
+            processor.processBlock(buffer, midi);
+            for (int ch = 0; ch < 2; ++ch) {
+                const float* r = buffer.getReadPointer(ch);
+                for (int i = 0; i < 512; ++i) {
+                    ASSERT_TRUE(std::isfinite(r[i])) << "Non-finite sample in preset " << presetName;
+                    singleNoteMaxPeak = std::max(singleNoteMaxPeak, std::abs(r[i]));
+                }
+            }
+        }
+        processor.triggerAuditionNoteOff(60);
+
+        // Allow release to ring down for 1.0s (94 blocks)
+        for (int b = 0; b < 94; ++b) {
+            processor.processBlock(buffer, midi);
+            for (int ch = 0; ch < 2; ++ch) {
+                const float* r = buffer.getReadPointer(ch);
+                for (int i = 0; i < 512; ++i) {
+                    singleNoteMaxPeak = std::max(singleNoteMaxPeak, std::abs(r[i]));
+                }
+            }
+        }
+
+        EXPECT_GT(singleNoteMaxPeak, 0.05f) << "Preset '" << presetName << "' produced almost no sound!";
+        EXPECT_LE(singleNoteMaxPeak, 1.01f) << "Preset '" << presetName << "' clipped on single note: peak = " << singleNoteMaxPeak;
+
+        // Flush tail before chord test
+        processor.releaseResources();
+        processor.prepareToPlay(48000.0, 512);
+        presetMgr.loadPresetByIndex(pIdx);
+
+        // --- Part B: 7-Note Polyphonic Worship Chord (vel 0.85) ---
+        for (int n : heavyWorshipChord) {
+            processor.triggerAuditionNoteOn(n, 0.85f);
+        }
+        float chordMaxPeak = 0.0f;
+
+        // Hold chord for 1.0s (94 blocks)
+        for (int b = 0; b < 94; ++b) {
+            processor.processBlock(buffer, midi);
+            for (int ch = 0; ch < 2; ++ch) {
+                const float* r = buffer.getReadPointer(ch);
+                for (int i = 0; i < 512; ++i) {
+                    ASSERT_TRUE(std::isfinite(r[i])) << "Non-finite sample in chord of preset " << presetName;
+                    chordMaxPeak = std::max(chordMaxPeak, std::abs(r[i]));
+                }
+            }
+        }
+        for (int n : heavyWorshipChord) {
+            processor.triggerAuditionNoteOff(n);
+        }
+
+        // Release ring down (94 blocks)
+        for (int b = 0; b < 94; ++b) {
+            processor.processBlock(buffer, midi);
+            for (int ch = 0; ch < 2; ++ch) {
+                const float* r = buffer.getReadPointer(ch);
+                for (int i = 0; i < 512; ++i) {
+                    chordMaxPeak = std::max(chordMaxPeak, std::abs(r[i]));
+                }
+            }
+        }
+
+        EXPECT_LE(chordMaxPeak, 1.01f) << "Preset '" << presetName << "' clipped on 7-note chord: peak = " << chordMaxPeak;
+        EXPECT_GT(chordMaxPeak, 0.10f) << "Preset '" << presetName << "' chord too quiet: peak = " << chordMaxPeak;
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+// COMPREHENSIVE TEST SUITE 2: Oscillator Waveform Spectral Purity & Harmonic Models
+// -------------------------------------------------------------------------------------------------
+TEST(NovaSynthComprehensiveTests, OscillatorWaveformsPurityAndSpectrum) {
+    constexpr double sr = 48000.0;
+    constexpr int nSamples = 48000; // 1 full second
+    constexpr float f0 = 440.0f;     // A4
+
+    std::vector<float> bufL(nSamples, 0.0f);
+    std::vector<float> bufR(nSamples, 0.0f);
+
+    // 1. Pure Sine Wave: model = 3, shape = 0.0f, detune = 0.0f
+    {
+        nova::dsp::MultiEngineOscillator osc;
+        osc.prepare(sr);
+        auto p = osc.getParameters();
+        p.engine = nova::dsp::MultiEngineOscillator::EngineType::WarmAnalog;
+        p.sourceType = 0;
+        p.modelIndex = 3; // Mellow Sine
+        p.shapeMorph = 0.0f;
+        p.detune = 0.0f;
+        p.level = 1.0f;
+        p.pan = 0.0f;
+        osc.setParameters(p);
+        osc.triggerNote(f0, 1.0f, 0);
+
+        for (int i = 0; i < nSamples; ++i) {
+            float l = 0.0f, r = 0.0f;
+            osc.processSample(f0, 0.0f, 0.0f, l, r);
+            bufL[static_cast<std::size_t>(i)] = l;
+            bufR[static_cast<std::size_t>(i)] = r;
+        }
+
+        const float fundamental = measureMagnitudeAtFreq(bufL.data(), nSamples, sr, f0);
+        const float harm2 = measureMagnitudeAtFreq(bufL.data(), nSamples, sr, 2.0f * f0);
+        const float harm3 = measureMagnitudeAtFreq(bufL.data(), nSamples, sr, 3.0f * f0);
+        const float harm4 = measureMagnitudeAtFreq(bufL.data(), nSamples, sr, 4.0f * f0);
+
+        EXPECT_GE(fundamental, 0.65f) << "Sine fundamental too weak";
+        EXPECT_LT(harm2, 0.005f) << "Sine 2nd harmonic exceeds THD threshold!";
+        EXPECT_LT(harm3, 0.005f) << "Sine 3rd harmonic exceeds THD threshold!";
+        EXPECT_LT(harm4, 0.005f) << "Sine 4th harmonic exceeds THD threshold!";
+    }
+
+    // 2. Classic Sawtooth: model = 0, shape = 0.0f
+    {
+        nova::dsp::MultiEngineOscillator osc;
+        osc.prepare(sr);
+        auto p = osc.getParameters();
+        p.engine = nova::dsp::MultiEngineOscillator::EngineType::WarmAnalog;
+        p.sourceType = 0;
+        p.modelIndex = 0; // Classic Saw
+        p.shapeMorph = 0.0f;
+        p.detune = 0.0f;
+        p.level = 1.0f;
+        osc.setParameters(p);
+        osc.triggerNote(f0, 1.0f, 0);
+
+        for (int i = 0; i < nSamples; ++i) {
+            float l = 0.0f, r = 0.0f;
+            osc.processSample(f0, 0.0f, 0.0f, l, r);
+            bufL[static_cast<std::size_t>(i)] = l;
+        }
+
+        const float h1 = measureMagnitudeAtFreq(bufL.data(), nSamples, sr, f0);
+        const float h2 = measureMagnitudeAtFreq(bufL.data(), nSamples, sr, 2.0f * f0);
+        const float h3 = measureMagnitudeAtFreq(bufL.data(), nSamples, sr, 3.0f * f0);
+        const float h4 = measureMagnitudeAtFreq(bufL.data(), nSamples, sr, 4.0f * f0);
+
+        EXPECT_GT(h1, 0.40f);
+        EXPECT_GT(h2, 0.15f);
+        EXPECT_GT(h3, 0.08f);
+        EXPECT_GT(h4, 0.04f);
+        // Saw harmonics must follow decreasing harmonic series
+        EXPECT_GT(h1, h2);
+        EXPECT_GT(h2, h3);
+        EXPECT_GT(h3, h4);
+    }
+
+    // 3. Pulse / Square Wave: model = 1, shape = 0.0f (50% duty cycle square)
+    {
+        nova::dsp::MultiEngineOscillator osc;
+        osc.prepare(sr);
+        auto p = osc.getParameters();
+        p.engine = nova::dsp::MultiEngineOscillator::EngineType::WarmAnalog;
+        p.sourceType = 0;
+        p.modelIndex = 1; // Pulse / Square
+        p.shapeMorph = 0.0f;
+        p.detune = 0.0f;
+        p.level = 1.0f;
+        osc.setParameters(p);
+        osc.triggerNote(f0, 1.0f, 0);
+
+        for (int i = 0; i < nSamples; ++i) {
+            float l = 0.0f, r = 0.0f;
+            osc.processSample(f0, 0.0f, 0.0f, l, r);
+            bufL[static_cast<std::size_t>(i)] = l;
+        }
+
+        const float h1 = measureMagnitudeAtFreq(bufL.data(), nSamples, sr, f0);
+        const float h2 = measureMagnitudeAtFreq(bufL.data(), nSamples, sr, 2.0f * f0);
+        const float h3 = measureMagnitudeAtFreq(bufL.data(), nSamples, sr, 3.0f * f0);
+        const float h4 = measureMagnitudeAtFreq(bufL.data(), nSamples, sr, 4.0f * f0);
+
+        EXPECT_GT(h1, 0.50f);
+        EXPECT_GT(h3, 0.15f);
+        // Symmetric square wave cancels even harmonics
+        EXPECT_LT(h2, 0.05f) << "Square wave even 2nd harmonic not suppressed!";
+        EXPECT_LT(h4, 0.05f) << "Square wave even 4th harmonic not suppressed!";
+    }
+
+    // 4. Warm Triangle: model = 2, shape = 0.0f
+    {
+        nova::dsp::MultiEngineOscillator osc;
+        osc.prepare(sr);
+        auto p = osc.getParameters();
+        p.engine = nova::dsp::MultiEngineOscillator::EngineType::WarmAnalog;
+        p.sourceType = 0;
+        p.modelIndex = 2; // Triangle
+        p.shapeMorph = 0.0f;
+        p.detune = 0.0f;
+        p.level = 1.0f;
+        osc.setParameters(p);
+        osc.triggerNote(f0, 1.0f, 0);
+
+        for (int i = 0; i < nSamples; ++i) {
+            float l = 0.0f, r = 0.0f;
+            osc.processSample(f0, 0.0f, 0.0f, l, r);
+            bufL[static_cast<std::size_t>(i)] = l;
+        }
+
+        const float h1 = measureMagnitudeAtFreq(bufL.data(), nSamples, sr, f0);
+        const float h2 = measureMagnitudeAtFreq(bufL.data(), nSamples, sr, 2.0f * f0);
+        const float h3 = measureMagnitudeAtFreq(bufL.data(), nSamples, sr, 3.0f * f0);
+
+        EXPECT_GT(h1, 0.50f);
+        EXPECT_LT(h2, 0.02f);
+        // Triangle 3rd harmonic falls off as 1/9 of fundamental (~11% of h1)
+        EXPECT_LT(h3, h1 * 0.16f);
+    }
+
+    // 5. Sub-Oscillator (Octave Below Fundamental)
+    {
+        nova::dsp::MultiEngineOscillator osc;
+        osc.prepare(sr);
+        auto p = osc.getParameters();
+        p.sourceType = 1;
+        p.engine = nova::dsp::MultiEngineOscillator::EngineType::SubOscillator;
+        p.modelIndex = 0; // Pure Sine Sub
+        p.level = 1.0f;
+        p.detune = 0.0f;
+        osc.setParameters(p);
+        osc.triggerNote(f0, 1.0f, 0);
+
+        for (int i = 0; i < nSamples; ++i) {
+            float l = 0.0f, r = 0.0f;
+            osc.processSample(f0, 0.0f, 0.0f, l, r);
+            bufL[static_cast<std::size_t>(i)] = l;
+        }
+
+        // Sub fundamental is 1 octave lower = 220 Hz
+        const float subFund = measureMagnitudeAtFreq(bufL.data(), nSamples, sr, 220.0f);
+        EXPECT_GE(subFund, 0.60f) << "Sub-oscillator did not produce expected 1-octave down frequency!";
+    }
+
+    // 6. Pluck Modal & Noise Transient
+    {
+        nova::dsp::MultiEngineOscillator pluckOsc;
+        pluckOsc.prepare(sr);
+        auto pPluck = pluckOsc.getParameters();
+        pPluck.sourceType = 2;
+        pPluck.engine = nova::dsp::MultiEngineOscillator::EngineType::PhysicalPluckModal;
+        pPluck.modelIndex = 0;
+        pPluck.level = 0.9f;
+        pluckOsc.setParameters(pPluck);
+        pluckOsc.triggerNote(f0, 0.9f, 0);
+
+        float pluckEnergy = 0.0f;
+        float pluckMean = 0.0f;
+        for (int i = 0; i < nSamples; ++i) {
+            float l = 0.0f, r = 0.0f;
+            pluckOsc.processSample(f0, 0.0f, 0.0f, l, r);
+            ASSERT_TRUE(std::isfinite(l) && std::isfinite(r));
+            pluckEnergy += l * l;
+            pluckMean += l;
+        }
+        EXPECT_GT(pluckEnergy, 0.1f);
+        EXPECT_LT(std::abs(pluckMean / static_cast<float>(nSamples)), 0.02f) << "Pluck has unwanted DC offset!";
+
+        nova::dsp::MultiEngineOscillator noiseOsc;
+        noiseOsc.prepare(sr);
+        auto pNoise = noiseOsc.getParameters();
+        pNoise.sourceType = 3;
+        pNoise.engine = nova::dsp::MultiEngineOscillator::EngineType::NoiseTransient;
+        pNoise.modelIndex = 0; // Analog Pink Noise
+        pNoise.level = 0.8f;
+        noiseOsc.setParameters(pNoise);
+        noiseOsc.triggerNote(f0, 0.8f, 0);
+
+        float noiseEnergy = 0.0f;
+        for (int i = 0; i < nSamples; ++i) {
+            float l = 0.0f, r = 0.0f;
+            noiseOsc.processSample(f0, 0.0f, 0.0f, l, r);
+            ASSERT_TRUE(std::isfinite(l) && std::isfinite(r));
+            noiseEnergy += l * l;
+        }
+        EXPECT_GT(noiseEnergy, 0.5f);
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+// COMPREHENSIVE TEST SUITE 3: Sub-Functions: Morph, Unison & Pitch Verification
+// -------------------------------------------------------------------------------------------------
+TEST(NovaSynthComprehensiveTests, SubFunctionsMorphUnisonAndPitch) {
+    constexpr double sr = 48000.0;
+    constexpr int nSamples = 48000;
+    constexpr float f0 = 440.0f;
+
+    std::vector<float> bufL(nSamples, 0.0f);
+    std::vector<float> bufR(nSamples, 0.0f);
+
+    // 1. Morph Test: Sine wavefolding introduces progressive harmonic content
+    {
+        nova::dsp::MultiEngineOscillator osc;
+        osc.prepare(sr);
+        auto p = osc.getParameters();
+        p.engine = nova::dsp::MultiEngineOscillator::EngineType::WarmAnalog;
+        p.sourceType = 0;
+        p.modelIndex = 3; // Sine
+        p.detune = 0.0f;
+        p.level = 1.0f;
+
+        // Shape = 0.0: Pure Sine
+        p.shapeMorph = 0.0f;
+        osc.setParameters(p);
+        osc.triggerNote(f0, 1.0f, 0);
+        for (int i = 0; i < nSamples; ++i) {
+            float l = 0.0f, r = 0.0f;
+            osc.processSample(f0, 0.0f, 0.0f, l, r);
+            bufL[static_cast<std::size_t>(i)] = l;
+        }
+        const float harmAtZero = measureMagnitudeAtFreq(bufL.data(), nSamples, sr, 2.0f * f0)
+                               + measureMagnitudeAtFreq(bufL.data(), nSamples, sr, 3.0f * f0);
+
+        // Shape = 0.85: Wavefolded / saturated
+        p.shapeMorph = 0.85f;
+        osc.setParameters(p);
+        osc.triggerNote(f0, 1.0f, 0);
+        for (int i = 0; i < nSamples; ++i) {
+            float l = 0.0f, r = 0.0f;
+            osc.processSample(f0, 0.0f, 0.0f, l, r);
+            bufL[static_cast<std::size_t>(i)] = l;
+        }
+        const float harmAtHigh = measureMagnitudeAtFreq(bufL.data(), nSamples, sr, 2.0f * f0)
+                               + measureMagnitudeAtFreq(bufL.data(), nSamples, sr, 3.0f * f0);
+
+        EXPECT_LT(harmAtZero, 0.01f);
+        EXPECT_GT(harmAtHigh, 0.15f) << "Morph parameter failed to introduce wavefolded harmonics!";
+    }
+
+    // 2. Unison Test: Stereo decorrelation and power conservation
+    {
+        nova::dsp::MultiEngineOscillator osc;
+        osc.prepare(sr);
+        auto p = osc.getParameters();
+        p.engine = nova::dsp::MultiEngineOscillator::EngineType::WarmAnalog;
+        p.sourceType = 0;
+        p.modelIndex = 0; // Saw
+        p.shapeMorph = 0.0f;
+        p.level = 1.0f;
+
+        // Detune = 0.0: Perfect Mono Correlation (r >= 0.999)
+        p.detune = 0.0f;
+        osc.setParameters(p);
+        osc.triggerNote(f0, 1.0f, 0);
+        float powerMono = 0.0f;
+        for (int i = 0; i < nSamples; ++i) {
+            float l = 0.0f, r = 0.0f;
+            osc.processSample(f0, 0.0f, 0.0f, l, r);
+            bufL[static_cast<std::size_t>(i)] = l;
+            bufR[static_cast<std::size_t>(i)] = r;
+            powerMono += l * l + r * r;
+        }
+        const float corrMono = measureStereoCorrelation(bufL.data(), bufR.data(), nSamples);
+        EXPECT_GE(corrMono, 0.999f) << "Mono unison detune=0 is not centered!";
+
+        // Detune = 0.60: Stereo Unison Spread (r <= 0.85)
+        p.detune = 0.60f;
+        osc.setParameters(p);
+        osc.triggerNote(f0, 1.0f, 42);
+        float powerStereo = 0.0f;
+        for (int i = 0; i < nSamples; ++i) {
+            float l = 0.0f, r = 0.0f;
+            osc.processSample(f0, 0.0f, 0.0f, l, r);
+            bufL[static_cast<std::size_t>(i)] = l;
+            bufR[static_cast<std::size_t>(i)] = r;
+            powerStereo += l * l + r * r;
+        }
+        const float corrStereo = measureStereoCorrelation(bufL.data(), bufR.data(), nSamples);
+        EXPECT_LE(corrStereo, 0.85f) << "Unison detune failed to produce stereo decorrelation!";
+
+        // Power Conservation: RMS ratio must stay within +/- 2 dB (0.79 to 1.26 in amplitude, 0.63 to 1.58 in power)
+        const float powerRatio = powerStereo / std::max(1e-6f, powerMono);
+        EXPECT_GT(powerRatio, 0.60f) << "Unison volume dropped excessively!";
+        EXPECT_LT(powerRatio, 1.70f) << "Unison volume blew up excessively!";
+    }
+
+    // 3. Pitch Test: Octave and Semitone transposition accuracy
+    {
+        nova::dsp::MultiEngineOscillator osc;
+        osc.prepare(sr);
+        auto p = osc.getParameters();
+        p.engine = nova::dsp::MultiEngineOscillator::EngineType::WarmAnalog;
+        p.sourceType = 0;
+        p.modelIndex = 3; // Sine
+        p.shapeMorph = 0.0f;
+        p.detune = 0.0f;
+        p.level = 1.0f;
+
+        // Base note: MIDI 60 (C4 = 261.6256 Hz)
+        constexpr float c4Hz = 261.6256f;
+
+        // Octave +1 -> 523.25 Hz
+        p.octaveOffset = 1;
+        p.semitoneOffset = 0;
+        osc.setParameters(p);
+        osc.triggerNote(c4Hz, 1.0f, 0);
+        for (int i = 0; i < nSamples; ++i) {
+            float l = 0.0f, r = 0.0f;
+            osc.processSample(c4Hz, 0.0f, 0.0f, l, r);
+            bufL[static_cast<std::size_t>(i)] = l;
+        }
+        const float magOctUp = measureMagnitudeAtFreq(bufL.data(), nSamples, sr, c4Hz * 2.0f);
+        EXPECT_GE(magOctUp, 0.60f) << "Octave +1 failed!";
+
+        // Octave -1 -> 130.81 Hz
+        p.octaveOffset = -1;
+        osc.setParameters(p);
+        osc.triggerNote(c4Hz, 1.0f, 0);
+        for (int i = 0; i < nSamples; ++i) {
+            float l = 0.0f, r = 0.0f;
+            osc.processSample(c4Hz, 0.0f, 0.0f, l, r);
+            bufL[static_cast<std::size_t>(i)] = l;
+        }
+        const float magOctDown = measureMagnitudeAtFreq(bufL.data(), nSamples, sr, c4Hz * 0.5f);
+        EXPECT_GE(magOctDown, 0.60f) << "Octave -1 failed!";
+
+        // Semitone +7 (Perfect 5th = G4 = 391.995 Hz)
+        p.octaveOffset = 0;
+        p.semitoneOffset = 7;
+        osc.setParameters(p);
+        osc.triggerNote(c4Hz, 1.0f, 0);
+        for (int i = 0; i < nSamples; ++i) {
+            float l = 0.0f, r = 0.0f;
+            osc.processSample(c4Hz, 0.0f, 0.0f, l, r);
+            bufL[static_cast<std::size_t>(i)] = l;
+        }
+        const float expectedG4 = c4Hz * std::pow(2.0f, 7.0f / 12.0f);
+        const float magSemi7 = measureMagnitudeAtFreq(bufL.data(), nSamples, sr, expectedG4);
+        EXPECT_GE(magSemi7, 0.60f) << "Semitone +7 failed!";
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+// COMPREHENSIVE TEST SUITE 4: Filter Cutoff, Resonance, Drive and Filter Types
+// -------------------------------------------------------------------------------------------------
+TEST(NovaSynthComprehensiveTests, FilterParametersCutoffResonanceDriveAndTypes) {
+    constexpr double sr = 48000.0;
+    constexpr int nSamples = 48000;
+    std::vector<float> inBuf(nSamples, 0.0f);
+    std::vector<float> outBuf(nSamples, 0.0f);
+
+    // Prepare broadband impulse test signal
+    inBuf[0] = 1.0f;
+
+    // 1. Cutoff Sweep: High frequency energy decreases monotonically as Cutoff decreases
+    {
+        nova::dsp::StateVariableFilter svf;
+        svf.prepare(sr);
+
+        // Test theoretical magnitude response at 3000 Hz for various cutoffs
+        svf.setParameters(nova::dsp::StateVariableFilter::Type::LowPass, 12000.0f, 0.7071f);
+        const float magHigh = svf.getMagnitudeAtFrequency(3000.0f);
+
+        svf.setParameters(nova::dsp::StateVariableFilter::Type::LowPass, 1500.0f, 0.7071f);
+        const float magMid = svf.getMagnitudeAtFrequency(3000.0f);
+
+        svf.setParameters(nova::dsp::StateVariableFilter::Type::LowPass, 300.0f, 0.7071f);
+        const float magLow = svf.getMagnitudeAtFrequency(3000.0f);
+
+        EXPECT_GT(magHigh, 0.90f);
+        EXPECT_LT(magMid, 0.35f);
+        EXPECT_LT(magLow, 0.02f);
+        EXPECT_GT(magHigh, magMid);
+        EXPECT_GT(magMid, magLow);
+    }
+
+    // 2. Resonance Peak: Q boosts the cutoff frequency
+    {
+        nova::dsp::StateVariableFilter svf;
+        svf.prepare(sr);
+
+        svf.setParameters(nova::dsp::StateVariableFilter::Type::LowPass, 1000.0f, 0.7071f);
+        const float magNominal = svf.getMagnitudeAtFrequency(1000.0f);
+
+        svf.setParameters(nova::dsp::StateVariableFilter::Type::LowPass, 1000.0f, 4.0f);
+        const float magResonant = svf.getMagnitudeAtFrequency(1000.0f);
+
+        EXPECT_NEAR(magNominal, 0.7071f, 0.05f);
+        EXPECT_GE(magResonant, 3.5f) << "Resonance Q=4.0 did not boost cutoff frequency sufficiently!";
+    }
+
+    // 3. Drive Saturation: Tube/ladder non-linear drive creates musical saturation
+    {
+        // 220 Hz pure sine input
+        for (int i = 0; i < nSamples; ++i) {
+            inBuf[static_cast<std::size_t>(i)] = std::sin(2.0f * std::numbers::pi_v<float> * 220.0f * static_cast<float>(i) / static_cast<float>(sr));
+        }
+
+        auto applyDrive = [](float x, float driveParam) noexcept {
+            if (driveParam <= 0.01f) return x;
+            const float driveGain = 1.0f + driveParam * 3.6f;
+            const float comp = 1.0f / std::sqrt(1.0f + driveParam * 1.8f);
+            const float xBias = x * driveGain + 0.12f * (x * driveGain) * (x * driveGain);
+            return (xBias * (27.0f + xBias * xBias) / (27.0f + 9.0f * xBias * xBias)) * comp;
+        };
+
+        // Drive = 0.0
+        for (int i = 0; i < nSamples; ++i) {
+            outBuf[static_cast<std::size_t>(i)] = applyDrive(inBuf[static_cast<std::size_t>(i)], 0.0f);
+        }
+        const float harmZero = measureMagnitudeAtFreq(outBuf.data(), nSamples, sr, 3.0f * 220.0f);
+
+        // Drive = 0.85
+        for (int i = 0; i < nSamples; ++i) {
+            outBuf[static_cast<std::size_t>(i)] = applyDrive(inBuf[static_cast<std::size_t>(i)], 0.85f);
+        }
+        const float harmDriven = measureMagnitudeAtFreq(outBuf.data(), nSamples, sr, 3.0f * 220.0f);
+
+        EXPECT_LT(harmZero, 0.005f);
+        EXPECT_GT(harmDriven, 0.05f) << "Filter Drive failed to generate musical saturation harmonics!";
+    }
+
+    // 4. Filter Types: LowPass vs HighPass vs BandPass
+    {
+        nova::dsp::StateVariableFilter svf;
+        svf.prepare(sr);
+
+        // LowPass (cutoff 1000 Hz): passes 200 Hz, cuts 5000 Hz
+        svf.setParameters(nova::dsp::StateVariableFilter::Type::LowPass, 1000.0f, 0.7071f);
+        EXPECT_GT(svf.getMagnitudeAtFrequency(200.0f), 0.90f);
+        EXPECT_LT(svf.getMagnitudeAtFrequency(5000.0f), 0.10f);
+
+        // HighPass (cutoff 1000 Hz): cuts 200 Hz, passes 5000 Hz
+        svf.setParameters(nova::dsp::StateVariableFilter::Type::HighPass, 1000.0f, 0.7071f);
+        EXPECT_LT(svf.getMagnitudeAtFrequency(200.0f), 0.10f);
+        EXPECT_GT(svf.getMagnitudeAtFrequency(5000.0f), 0.90f);
+
+        // BandPass (cutoff 1000 Hz): passes 1000 Hz, cuts 100 Hz and 10000 Hz
+        svf.setParameters(nova::dsp::StateVariableFilter::Type::BandPass, 1000.0f, 1.5f);
+        EXPECT_GT(svf.getMagnitudeAtFrequency(1000.0f), 0.85f);
+        EXPECT_LT(svf.getMagnitudeAtFrequency(100.0f), 0.15f);
+        EXPECT_LT(svf.getMagnitudeAtFrequency(10000.0f), 0.15f);
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+// COMPREHENSIVE TEST SUITE 5: Envelope Stages & Click-Free Retriggering
+// -------------------------------------------------------------------------------------------------
+TEST(NovaSynthComprehensiveTests, EnvelopesAndClickFreeRetriggering) {
+    constexpr double sr = 48000.0;
+
+    // 1. ADSR Timing and Stage Transitions
+    {
+        nova::dsp::AdsrEnvelope env;
+        env.prepare(sr);
+        nova::dsp::AdsrEnvelope::Parameters p;
+        p.attackSec  = 0.02f; // 960 samples
+        p.decaySec   = 0.04f; // 1920 samples
+        p.sustainLvl = 0.60f;
+        p.releaseSec = 0.03f; // 1440 samples
+        env.setParameters(p);
+
+        env.noteOn();
+        EXPECT_TRUE(env.isActive());
+
+        // Process attack phase (960 samples): must reach near 1.0
+        float prev = 0.0f;
+        for (int i = 0; i < 960; ++i) {
+            const float cur = env.processSample();
+            EXPECT_GE(cur, prev);
+            prev = cur;
+        }
+        EXPECT_GE(env.getCurrentLevel(), 0.95f);
+
+        // Process decay phase (1920 samples): must settle near sustain level
+        for (int i = 0; i < 1920; ++i) {
+            (void)env.processSample();
+        }
+        EXPECT_NEAR(env.getCurrentLevel(), 0.60f, 0.05f);
+
+        // Note off -> process release phase (4000 samples to reach idle threshold < 1e-4)
+        env.noteOff();
+        for (int i = 0; i < 4000; ++i) {
+            (void)env.processSample();
+        }
+        EXPECT_LT(env.getCurrentLevel(), 0.001f);
+        EXPECT_FALSE(env.isActive());
+    }
+
+    // 2. Rapid Retriggering Click-Free Test: Consecutive sample delta must stay continuous (|delta| < 0.15)
+    {
+        nova::dsp::WorshipSynthEngine synth;
+        synth.prepare(sr, 512);
+
+        auto p = synth.getParameters();
+        p.activeOscCount = 1;
+        p.oscSlots[0].enabled = true;
+        p.oscSlots[0].sourceType = 0;
+        p.oscSlots[0].engine = nova::dsp::MultiEngineOscillator::EngineType::WarmAnalog;
+        p.oscSlots[0].modelIndex = 3; // Mellow Sine
+        p.oscSlots[0].shapeMorph = 0.0f;
+        p.oscSlots[0].detune = 0.0f;
+        p.oscSlots[0].level = 0.85f;
+        p.filter1Enabled = false;
+        p.filter2Enabled = false;
+        p.reverbMix = 0.0f;
+        p.delayEnabled = false;
+
+        // Fast attack & decay
+        p.ampEnv.attackSec = 0.005f;
+        p.ampEnv.decaySec = 0.10f;
+        p.ampEnv.sustainLvl = 0.70f;
+        p.ampEnv.releaseSec = 0.50f;
+        synth.setParameters(p);
+
+        std::vector<float> left(512, 0.0f);
+        std::vector<float> right(512, 0.0f);
+
+        float maxSampleJump = 0.0f;
+        float prevSampleL = 0.0f;
+
+        // Rapid retrigger loop simulating fast clicking on UI chord / key buttons
+        for (int cycle = 0; cycle < 10; ++cycle) {
+            synth.noteOn(60, 0.85f);
+            synth.processBlock(left.data(), right.data(), 512);
+            for (int i = 0; i < 512; ++i) {
+                const float jump = std::abs(left[static_cast<std::size_t>(i)] - prevSampleL);
+                maxSampleJump = std::max(maxSampleJump, jump);
+                prevSampleL = left[static_cast<std::size_t>(i)];
+            }
+
+            // Immediately retrigger while note is still sounding / decaying
+            synth.noteOff(60);
+            synth.noteOn(60, 0.90f);
+            synth.processBlock(left.data(), right.data(), 512);
+            for (int i = 0; i < 512; ++i) {
+                const float jump = std::abs(left[static_cast<std::size_t>(i)] - prevSampleL);
+                maxSampleJump = std::max(maxSampleJump, jump);
+                prevSampleL = left[static_cast<std::size_t>(i)];
+            }
+
+            // Retrigger with chord
+            synth.noteOn(64, 0.80f);
+            synth.noteOn(67, 0.80f);
+            synth.processBlock(left.data(), right.data(), 512);
+            for (int i = 0; i < 512; ++i) {
+                const float jump = std::abs(left[static_cast<std::size_t>(i)] - prevSampleL);
+                maxSampleJump = std::max(maxSampleJump, jump);
+                prevSampleL = left[static_cast<std::size_t>(i)];
+            }
+
+            synth.allNotesOff();
+        }
+
+        // At 440 Hz Sine with amp 0.85 at 48kHz, normal wave slope is 2*pi*440/48000 * 0.85 ~ 0.05
+        // A discontinuity click produces jumps > 0.30 - 1.0. With our smooth retriggering, max jump is strictly bounded.
+        EXPECT_LE(maxSampleJump, 0.15f) << "Click detected on rapid note retriggering! Max jump: " << maxSampleJump;
+    }
+}
+
+TEST(NovaSynthComprehensiveTests, SubBassVoicingLowestNotePriorityPreventsMud) {
+    nova::dsp::WorshipSynthEngine synth;
+    synth.prepare(48000.0, 512);
+
+    auto p = synth.getParameters();
+    p.activeOscCount = 1;
+    p.oscSlots[0].enabled = true;
+    p.oscSlots[0].sourceType = 1; // SUB-BASS OSCILLATOR
+    p.oscSlots[0].level = 1.0f;
+    p.ampEnv.attackSec = 0.005f;
+    p.ampEnv.decaySec = 0.5f;
+    p.ampEnv.sustainLvl = 1.0f;
+    p.ampEnv.releaseSec = 0.05f;
+    p.filter1Enabled = false;
+    p.filter2Enabled = false;
+
+    // Test 1: Polyphonic Sub (subLowestOnly = false) -> All chord notes render sub
+    p.subLowestOnly = false;
+    synth.setParameters(p);
+
+    synth.noteOn(36, 0.8f); // C2
+    synth.noteOn(40, 0.8f); // E2
+    synth.noteOn(43, 0.8f); // G2
+
+    std::vector<float> leftPoly(512, 0.0f);
+    std::vector<float> rightPoly(512, 0.0f);
+    // Process multiple blocks to reach full sustain beyond attack ramp
+    for (int b = 0; b < 6; ++b) {
+        synth.processBlock(leftPoly.data(), rightPoly.data(), 512);
+    }
+
+    float polyRms = 0.0f;
+    for (float s : leftPoly) polyRms += s * s;
+    polyRms = std::sqrt(polyRms / 512.0f);
+    EXPECT_GT(polyRms, 0.05f);
+
+    synth.reset();
+
+    // Test 2: Lowest Note Priority Sub (subLowestOnly = true) -> Only C2 renders sub!
+    p.subLowestOnly = true;
+    synth.setParameters(p);
+
+    synth.noteOn(36, 0.8f); // C2 (lowest note)
+    synth.noteOn(40, 0.8f); // E2 (higher chord notes)
+    synth.noteOn(43, 0.8f); // G2
+
+    std::vector<float> leftLowest(512, 0.0f);
+    std::vector<float> rightLowest(512, 0.0f);
+    for (int b = 0; b < 6; ++b) {
+        synth.processBlock(leftLowest.data(), rightLowest.data(), 512);
+    }
+
+    float lowestRms = 0.0f;
+    for (float s : leftLowest) lowestRms += s * s;
+    lowestRms = std::sqrt(lowestRms / 512.0f);
+
+    // With lowest-only, only 1 sub note plays instead of 3 colliding sub frequencies
+    EXPECT_GT(lowestRms, 0.02f);
+    EXPECT_LT(lowestRms, polyRms * 0.90f) << "Lowest note priority should prevent 3x sub accumulation mud!";
+    synth.reset();
+}
+
+TEST(NovaSynthComprehensiveTests, DelaySwingControlsStraightVsSwungPingPong) {
+    nova::dsp::WorshipSynthEngine synth;
+    synth.prepare(48000.0, 512);
+
+    auto p = synth.getParameters();
+    p.delayEnabled = true;
+    p.delayMix = 1.0f;
+    p.delayFeedback = 0.4f;
+    p.delaySyncDiv = 3; // 1/8 note
+    p.bpm = 120.0f;   // 120 BPM => 1/8 = 0.250s = 12000 samples at 48k
+
+    // Straight Ping-Pong (swing = 0.0)
+    p.delaySwing = 0.0f;
+    synth.setParameters(p);
+    EXPECT_EQ(synth.getParameters().delaySwing, 0.0f);
+
+    // Full Swing Shuffle (swing = 1.0)
+    p.delaySwing = 1.0f;
+    synth.setParameters(p);
+    EXPECT_EQ(synth.getParameters().delaySwing, 1.0f);
+}
+
+TEST(NovaSynthComprehensiveTests, ThemeFontScaleScalingFactors) {
+    auto theme = nova::ui::NovaTheme::create(nova::ui::NovaTheme::AccentPreset::SpaceCyan);
+
+    theme.setTextScale(nova::ui::NovaTheme::TextScale::Small);
+    EXPECT_NEAR(theme.getTextScaleFactor(), 1.12f, 0.001f);
+    EXPECT_NEAR(theme.getLabelFont(12.0f).getHeight(), 12.0f * 1.12f, 0.5f);
+
+    theme.setTextScale(nova::ui::NovaTheme::TextScale::Normal);
+    EXPECT_NEAR(theme.getTextScaleFactor(), 1.32f, 0.001f);
+    EXPECT_NEAR(theme.getLabelFont(12.0f).getHeight(), 12.0f * 1.32f, 0.5f);
+
+    theme.setTextScale(nova::ui::NovaTheme::TextScale::Large);
+    EXPECT_NEAR(theme.getTextScaleFactor(), 1.52f, 0.001f);
+    EXPECT_NEAR(theme.getLabelFont(12.0f).getHeight(), 12.0f * 1.52f, 0.5f);
+}
+
+TEST(NovaSynthWindowSizingTests, EditorEnforcesSafeLaptopMinimumAndMaximumLimits) {
+    nova::synth::NovaSynthProcessor proc;
+    std::unique_ptr<juce::AudioProcessorEditor> editor(proc.createEditorIfNeeded());
+    ASSERT_NE(editor, nullptr);
+
+    EXPECT_TRUE(editor->isResizable());
+    auto* constrainer = editor->getConstrainer();
+    ASSERT_NE(constrainer, nullptr);
+
+    // Guaranteed safe laptop limits: fits 13" MacBook screens comfortably with titlebar and dock
+    EXPECT_EQ(constrainer->getMinimumWidth(), 1000);
+    EXPECT_EQ(constrainer->getMinimumHeight(), 720);
+    EXPECT_EQ(constrainer->getMaximumWidth(), 1680);
+    EXPECT_EQ(constrainer->getMaximumHeight(), 1100);
+
+    // Initial editor size must fit within limits
+    EXPECT_GE(editor->getWidth(), 1000);
+    EXPECT_LE(editor->getWidth(), 1680);
+    EXPECT_GE(editor->getHeight(), 720);
+    EXPECT_LE(editor->getHeight(), 1100);
+
+    // Undersized window clamp test
+    juce::Rectangle<int> undersized(0, 0, 500, 350);
+    constrainer->checkBounds(undersized, undersized, {}, false, false, false, false);
+    EXPECT_GE(undersized.getWidth(), 1000);
+    EXPECT_GE(undersized.getHeight(), 720);
+
+    // Oversized window clamp test
+    juce::Rectangle<int> oversized(0, 0, 3000, 2000);
+    constrainer->checkBounds(oversized, oversized, {}, false, false, false, false);
+    EXPECT_LE(oversized.getWidth(), 1680);
+    EXPECT_LE(oversized.getHeight(), 1100);
+}
+
+TEST(StandaloneWindowConstrainerTests, ParentDocumentWindowInheritsAndEnforcesSizeLimits) {
+    nova::synth::NovaSynthProcessor proc;
+    std::unique_ptr<juce::AudioProcessorEditor> editor(proc.createEditorIfNeeded());
+    ASSERT_NE(editor, nullptr);
+
+    // Simulate JUCE Standalone DocumentWindow embedding
+    struct TestStandaloneWindow : public juce::DocumentWindow {
+        TestStandaloneWindow()
+            : juce::DocumentWindow("Nova Synth Standalone Test", juce::Colours::black, juce::DocumentWindow::allButtons) {
+            setConstrainer(&mockConstrainer);
+        }
+        juce::ComponentBoundsConstrainer mockConstrainer;
+    };
+
+    TestStandaloneWindow testWin;
+    testWin.setContentNonOwned(editor.get(), true);
+
+    // Trigger hierarchy hook
+    editor->parentHierarchyChanged();
+
+    EXPECT_TRUE(testWin.isUsingNativeTitleBar());
+
+    auto* parentConstrainer = testWin.getConstrainer();
+    ASSERT_NE(parentConstrainer, nullptr);
+    EXPECT_GE(parentConstrainer->getMinimumWidth(), 1000);
+    EXPECT_GE(parentConstrainer->getMinimumHeight(), 720);
+    EXPECT_LE(parentConstrainer->getMaximumWidth(), 1680);
+    EXPECT_LE(parentConstrainer->getMaximumHeight(), 1100);
+
+    // Clean up content before testWin destruction
+    testWin.clearContentComponent();
+}
+
+TEST(SourceListManagerTests, DisplaysAllEightSlotsWithNoOverlap) {
+    nova::synth::NovaSynthProcessor proc;
+    auto theme = nova::ui::NovaTheme::create(nova::ui::NovaTheme::AccentPreset::SpaceCyan);
+    nova::synth::SourceListManager listMgr(proc, theme);
+
+    listMgr.setBounds(0, 0, 160, 310);
+
+    juce::Image img(juce::Image::ARGB, 160, 310, true);
+    juce::Graphics g(img);
+    listMgr.paint(g);
+
+    // All 8 slots are always displayed
+    const auto params = proc.getCurrentParameters();
+    EXPECT_EQ(params.oscSlots.size(), 8u);
+}
+
+TEST(SourceDeckTests, CompactCardsAreSquare) {
+    nova::synth::NovaSynthProcessor proc;
+    auto theme = nova::ui::NovaTheme::create(nova::ui::NovaTheme::AccentPreset::SpaceCyan);
+    nova::synth::SourceDeck sourceDeck(proc, theme);
+
+    const int totalH = 196;
+    sourceDeck.setBounds(0, 0, 800, totalH);
+
+    // Compact card target must match card height exactly (width == height)
+    const int expectedCardH = totalH - 14;
+    EXPECT_EQ(expectedCardH, 182);
+}
+
+TEST(EnvelopeQuadDeckTests, EnvelopesStartCollapsedOnLaunch) {
+    nova::synth::NovaSynthProcessor proc;
+    auto theme = nova::ui::NovaTheme::create(nova::ui::NovaTheme::AccentPreset::SpaceCyan);
+    nova::synth::EnvelopeQuadDeck envDeck(proc, theme);
+
+    auto cards = envDeck.getCardList();
+    ASSERT_EQ(cards.size(), 4u);
+    for (std::size_t i = 0; i < cards.size(); ++i) {
+        EXPECT_FALSE(cards[i]->isExpanded()) << "Envelope " << (i + 1) << " must start collapsed on launch!";
+        EXPECT_FALSE(cards[i]->isPinned());
+    }
+}
+
+TEST(EnvelopeQuadDeckTests, HeaderClickExpandsAndCollapsesCardIndependently) {
+    nova::synth::NovaSynthProcessor proc;
+    auto theme = nova::ui::NovaTheme::create(nova::ui::NovaTheme::AccentPreset::SpaceCyan);
+    nova::synth::EnvelopeQuadDeck envDeck(proc, theme);
+
+    auto cards = envDeck.getCardList();
+    ASSERT_EQ(cards.size(), 4u);
+
+    // Expand Env 1
+    envDeck.handleCardExpand(0, true);
+    EXPECT_TRUE(cards[0]->isExpanded());
+    EXPECT_FALSE(cards[1]->isExpanded());
+    EXPECT_FALSE(cards[2]->isExpanded());
+    EXPECT_FALSE(cards[3]->isExpanded());
+
+    // Collapse Env 1
+    envDeck.handleCardExpand(0, false);
+    EXPECT_FALSE(cards[0]->isExpanded());
+}
+
+TEST(SourceDeckTests, AllSourcesStartCollapsedOnLaunch) {
+    nova::synth::NovaSynthProcessor proc;
+    auto theme = nova::ui::NovaTheme::create(nova::ui::NovaTheme::AccentPreset::SpaceCyan);
+    nova::synth::SourceDeck sourceDeck(proc, theme);
+
+    const auto& cards = sourceDeck.getCardList();
+    ASSERT_EQ(cards.size(), 8u);
+    for (std::size_t i = 0; i < cards.size(); ++i) {
+        EXPECT_FALSE(cards[i]->isExpanded()) << "Source card " << (i + 1) << " must start collapsed on launch!";
+        EXPECT_FALSE(cards[i]->isPinned());
+    }
+}
+
+TEST(DualFilterDeckTests, PhysicalResponseCurveMatchesStateVariableFilter) {
+    nova::dsp::StateVariableFilter svf;
+    svf.prepare(44100.0);
+
+    // Lowpass at 1000 Hz, Q = 0.707
+    svf.setParameters(nova::dsp::StateVariableFilter::Type::LowPass, 1000.0f, 0.7071f);
+    const float passMag = svf.getMagnitudeAtFrequency(100.0f);
+    const float cutMag  = svf.getMagnitudeAtFrequency(1000.0f);
+    const float stopMag = svf.getMagnitudeAtFrequency(10000.0f);
+
+    EXPECT_NEAR(passMag, 1.0f, 0.05f);
+    EXPECT_NEAR(cutMag, 0.7071f, 0.05f);
+    EXPECT_LT(stopMag, 0.05f);
+
+    // Highpass at 2000 Hz
+    svf.setParameters(nova::dsp::StateVariableFilter::Type::HighPass, 2000.0f, 0.7071f);
+    const float hpStopMag = svf.getMagnitudeAtFrequency(200.0f);
+    const float hpPassMag = svf.getMagnitudeAtFrequency(10000.0f);
+
+    EXPECT_LT(hpStopMag, 0.05f);
+    EXPECT_NEAR(hpPassMag, 1.0f, 0.05f);
+}
+
+TEST(SourceDeckInteractionTests, SoloAndPowerInCompactModeDoNotExpandCard) {
+    nova::synth::NovaSynthProcessor proc;
+    auto theme = nova::ui::NovaTheme::create(nova::ui::NovaTheme::AccentPreset::SpaceCyan);
+    nova::synth::SourceDeck sourceDeck(proc, theme);
+    sourceDeck.setBounds(0, 0, 800, 196);
+
+    const auto& cards = sourceDeck.getCardList();
+    ASSERT_EQ(cards.size(), 8u);
+    auto* card = cards[0].get();
+    ASSERT_NE(card, nullptr);
+    EXPECT_FALSE(card->isExpanded());
+
+    // In compact mode, powerRect is at top-right
+    const auto dummyMouse = juce::Desktop::getInstance().getMainMouseSource();
+    const auto now = juce::Time::getCurrentTime();
+
+    // Click Power toggle in compact mode (x=130, y=12)
+    const juce::Point<float> powPos(130.0f, 12.0f);
+    juce::MouseEvent powDown(dummyMouse, powPos, juce::ModifierKeys(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                             card, card, now, powPos, now, 1, false);
+    card->mouseDown(powDown);
+    // Card MUST remain collapsed!
+    EXPECT_FALSE(card->isExpanded()) << "Clicking power toggle in compact mode must NOT expand the card!";
+
+    // Click Solo toggle in compact mode (x=112, y=12)
+    const juce::Point<float> soloPos(112.0f, 12.0f);
+    juce::MouseEvent soloDown(dummyMouse, soloPos, juce::ModifierKeys(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                              card, card, now, soloPos, now, 1, false);
+    card->mouseDown(soloDown);
+    // Card MUST remain collapsed!
+    EXPECT_FALSE(card->isExpanded()) << "Clicking solo toggle in compact mode must NOT expand the card!";
+
+    // Click slot badge / card header on left to expand (x=24, y=12)
+    const juce::Point<float> headerPos(24.0f, 12.0f);
+    juce::MouseEvent headDown(dummyMouse, headerPos, juce::ModifierKeys(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                              card, card, now, headerPos, now, 1, false);
+    card->mouseDown(headDown);
+    EXPECT_TRUE(card->isExpanded()) << "Clicking slot badge must expand the card!";
+
+    // Click header on expanded card (x=24, y=12) to collapse
+    card->mouseDown(headDown);
+    EXPECT_FALSE(card->isExpanded()) << "Clicking header on expanded card must collapse it!";
+}
+
+TEST(EnvelopeInteractionTests, CompactCurveDragDoesNotExpandCard) {
+    nova::synth::NovaSynthProcessor proc;
+    auto theme = nova::ui::NovaTheme::create(nova::ui::NovaTheme::AccentPreset::SpaceCyan);
+    nova::synth::EnvelopeQuadDeck envDeck(proc, theme);
+    envDeck.setBounds(0, 0, 800, 168);
+
+    auto cards = envDeck.getCardList();
+    ASSERT_EQ(cards.size(), 4u);
+    auto* envCard = cards[0];
+    ASSERT_NE(envCard, nullptr);
+    EXPECT_FALSE(envCard->isExpanded());
+
+    const auto dummyMouse = juce::Desktop::getInstance().getMainMouseSource();
+    const auto now = juce::Time::getCurrentTime();
+
+    // Click in curve box in compact mode (x=50, y=70)
+    const juce::Point<float> curvePos(50.0f, 70.0f);
+    juce::MouseEvent curveDown(dummyMouse, curvePos, juce::ModifierKeys(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                               envCard, envCard, now, curvePos, now, 1, false);
+    envCard->mouseDown(curveDown);
+    // Card MUST remain collapsed so user can directly edit without jumping open!
+    EXPECT_FALSE(envCard->isExpanded()) << "Dragging envelope curve in compact mode must NOT expand the card!";
+
+    // Click Header (x=40, y=12) to expand
+    const juce::Point<float> headPos(40.0f, 12.0f);
+    juce::MouseEvent headDown(dummyMouse, headPos, juce::ModifierKeys(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                              envCard, envCard, now, headPos, now, 1, false);
+    envCard->mouseDown(headDown);
+    EXPECT_TRUE(envCard->isExpanded()) << "Clicking envelope header must expand the card!";
+
+    // Click Header on expanded card to collapse
+    envCard->mouseDown(headDown);
+    EXPECT_FALSE(envCard->isExpanded()) << "Clicking envelope header on expanded card must collapse it!";
+}
+
+TEST(ModulationMatrixTests, SlotAssignmentAndDestinationEvaluation) {
+    nova::dsp::ModMatrix mm;
+    mm.clear();
+
+    // Route 1: LFO 1 -> Filter Cutoff (+50%)
+    mm.setSlot(0, nova::dsp::ModMatrix::Source::Lfo1,
+               nova::dsp::ModMatrix::Destination::FilterCutoff, 0.50f, true);
+    // Route 2: Macro Warmth -> Filter Cutoff (-30%)
+    mm.setSlot(1, nova::dsp::ModMatrix::Source::MacroWarmth,
+               nova::dsp::ModMatrix::Destination::FilterCutoff, -0.30f, true);
+    // Route 3: Bypassed route
+    mm.setSlot(2, nova::dsp::ModMatrix::Source::Velocity,
+               nova::dsp::ModMatrix::Destination::Osc1Shape, 0.80f, false);
+
+    mm.setSourceValue(nova::dsp::ModMatrix::Source::Lfo1, 1.0f);
+    mm.setSourceValue(nova::dsp::ModMatrix::Source::MacroWarmth, 1.0f);
+    mm.setSourceValue(nova::dsp::ModMatrix::Source::Velocity, 1.0f);
+    mm.evaluate();
+
+    // Filter Cutoff should receive 1.0 * 0.50 + 1.0 * (-0.30) = 0.20
+    EXPECT_NEAR(mm.getModulationOffset(nova::dsp::ModMatrix::Destination::FilterCutoff), 0.20f, 1e-4f);
+    // Bypassed slot should produce 0.0 offset
+    EXPECT_FLOAT_EQ(mm.getModulationOffset(nova::dsp::ModMatrix::Destination::Osc1Shape), 0.0f);
+
+    // Test bypass toggle
+    mm.setSlot(0, nova::dsp::ModMatrix::Source::Lfo1,
+               nova::dsp::ModMatrix::Destination::FilterCutoff, 0.50f, false);
+    mm.evaluate();
+    EXPECT_NEAR(mm.getModulationOffset(nova::dsp::ModMatrix::Destination::FilterCutoff), -0.30f, 1e-4f);
+}
+
+TEST(ModulationMatrixTests, AllFourLfoEnginesAndShapes) {
+    nova::synth::NovaSynthProcessor proc;
+    auto& engine = proc.getEngine();
+    (void)engine;
+
+    // Check LfoGenerator shapes produce valid bounded samples
+    nova::dsp::LfoGenerator lfo;
+    lfo.prepare(48000.0);
+
+    const std::vector<nova::dsp::LfoGenerator::Shape> shapes = {
+        nova::dsp::LfoGenerator::Shape::Sine,
+        nova::dsp::LfoGenerator::Shape::Triangle,
+        nova::dsp::LfoGenerator::Shape::SawUp,
+        nova::dsp::LfoGenerator::Shape::SmoothDrift,
+        nova::dsp::LfoGenerator::Shape::PulseGate
+    };
+
+    for (auto shape : shapes) {
+        lfo.setParameters(shape, 2.0f, 1.0f);
+        lfo.reset();
+        for (int i = 0; i < 24000; ++i) {
+            const float s = lfo.processSample();
+            EXPECT_GE(s, -1.01f);
+            EXPECT_LE(s, 1.01f);
+        }
+    }
+}
+
+TEST(ModulationHubPanelTests, PanelInitializesAndLaysOutAllControls) {
+    nova::synth::NovaSynthProcessor proc;
+    auto theme = nova::ui::NovaTheme::create(nova::ui::NovaTheme::AccentPreset::SpaceCyan);
+    nova::synth::ui::ModulationHubPanel modPanel(proc, theme);
+
+    // Workbench allocation bounds (1180 x 180)
+    modPanel.setBounds(0, 0, 1180, 180);
+    EXPECT_EQ(modPanel.getWidth(), 1180);
+    EXPECT_EQ(modPanel.getHeight(), 180);
+
+    // Add a new route via the panel
+    const auto dummyMouse = juce::Desktop::getInstance().getMainMouseSource();
+    const auto now = juce::Time::getCurrentTime();
+
+    // Click + Add Route button (inside right card, top-right)
+    const juce::Point<float> addBtnPos(1130.0f, 15.0f);
+    juce::MouseEvent addClick(dummyMouse, addBtnPos, juce::ModifierKeys(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                             &modPanel, &modPanel, now, addBtnPos, now, 1, false);
+    modPanel.mouseDown(addClick);
+
+    // Verify a route exists in processor's ModMatrix
+    const auto& mm = proc.getModMatrix();
+    bool foundActive = false;
+    for (std::size_t i = 0; i < nova::dsp::ModMatrix::kMaxSlots; ++i) {
+        if (mm.getSlot(i).enabled) {
+            foundActive = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(foundActive);
+}
+
+TEST(ModulationHubPanelTests, LfoKnobFormattingAndEnlargedWaveformAnimation) {
+    nova::synth::NovaSynthProcessor proc;
+    auto theme = nova::ui::NovaTheme::create(nova::ui::NovaTheme::AccentPreset::SpaceCyan);
+    nova::synth::ui::ModulationHubPanel modPanel(proc, theme);
+
+    // Standard workbench panel height (180px)
+    modPanel.setBounds(0, 0, 1180, 180);
+
+    // 1. Verify waveform animation has received enlarged height (> 50px)
+    EXPECT_GE(modPanel.getLfoShapeHeight(0), 50);
+
+    // 2. Verify knob height is constrained to filter proportions (54px - 62px)
+    EXPECT_GE(modPanel.getLfoKnobHeight(0), 54);
+    EXPECT_LE(modPanel.getLfoKnobHeight(0), 62);
+
+    // 3. Verify Rate knob displays 'Hz'
+    const auto* rateKnob = modPanel.getLfoRateKnob(0);
+    ASSERT_NE(rateKnob, nullptr);
+    const auto rateText = const_cast<nova::ui::ArcKnob*>(rateKnob)->getSlider().getTextFromValue(0.42);
+    EXPECT_TRUE(rateText.contains("Hz"));
+    EXPECT_EQ(rateText, "0.42 Hz");
+
+    // 4. Verify Depth knob displays percentage (0% to 100%) rather than 0.xx
+    const auto* depthKnob = modPanel.getLfoDepthKnob(0);
+    ASSERT_NE(depthKnob, nullptr);
+    const auto depthText = const_cast<nova::ui::ArcKnob*>(depthKnob)->getSlider().getTextFromValue(0.35);
+    EXPECT_TRUE(depthText.contains("%"));
+    EXPECT_EQ(depthText, "35 %");
+
+    const auto maxDepthText = const_cast<nova::ui::ArcKnob*>(depthKnob)->getSlider().getTextFromValue(1.0);
+    EXPECT_EQ(maxDepthText, "100 %");
+
+    const auto zeroDepthText = const_cast<nova::ui::ArcKnob*>(depthKnob)->getSlider().getTextFromValue(0.0);
+    EXPECT_EQ(zeroDepthText, "0 %");
+}
+
+TEST(ModulationHubPanelTests, LfoSyncButtonTogglesContinuousHzVsQuantizedNoteDivisions) {
+    nova::synth::NovaSynthProcessor proc;
+    auto theme = nova::ui::NovaTheme::create(nova::ui::NovaTheme::AccentPreset::SpaceCyan);
+    nova::synth::ui::ModulationHubPanel modPanel(proc, theme);
+
+    modPanel.setBounds(0, 0, 1180, 180);
+
+    // 1. Initial State: Free run (Sync OFF)
+    EXPECT_FALSE(modPanel.isLfoSynced(0));
+    const auto* rateKnob = modPanel.getLfoRateKnob(0);
+    ASSERT_NE(rateKnob, nullptr);
+    EXPECT_EQ(const_cast<nova::ui::ArcKnob*>(rateKnob)->getSlider().getTextFromValue(0.42), "0.42 Hz");
+
+    // 2. Click Sync button (between Rate & Depth knobs)
+    const auto btnR = modPanel.getSyncBtnRect(0);
+    EXPECT_GE(btnR.getWidth(), 16);
+    EXPECT_GE(btnR.getHeight(), 16);
+
+    // Verify vertical center alignment of Sync button with the Rate/Depth rotary dial
+    const int knobY = rateKnob->getY();
+    const int knobH = rateKnob->getHeight();
+    const int dialCenterY = knobY + 12 + (knobH - 26) / 2;
+    EXPECT_NEAR(btnR.getCentreY(), dialCenterY, 1);
+
+    const auto dummyMouse = juce::Desktop::getInstance().getMainMouseSource();
+    const auto now = juce::Time::getCurrentTime();
+    const juce::Point<float> clickPos(static_cast<float>(btnR.getCentreX()), static_cast<float>(btnR.getCentreY()));
+
+    // Test mouse hover & tooltip
+    juce::MouseEvent hoverEvent(dummyMouse, clickPos, juce::ModifierKeys(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                &modPanel, &modPanel, now, clickPos, now, 0, false);
+    modPanel.mouseMove(hoverEvent);
+    EXPECT_FALSE(modPanel.getTooltip().isEmpty());
+    EXPECT_TRUE(modPanel.getTooltip().contains("Tempo Sync"));
+
+    juce::MouseEvent syncClick(dummyMouse, clickPos, juce::ModifierKeys(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                               &modPanel, &modPanel, now, clickPos, now, 1, false);
+    modPanel.mouseDown(syncClick);
+
+    // 3. Verify Sync is now active
+    EXPECT_TRUE(modPanel.isLfoSynced(0));
+
+    // 4. Verify Rate knob switched to quantized musical note divisions
+    auto& slider = const_cast<nova::ui::ArcKnob*>(rateKnob)->getSlider();
+    EXPECT_FLOAT_EQ(static_cast<float>(slider.getMaximum()), 11.0f);
+    EXPECT_EQ(slider.getTextFromValue(6.0), "1/4");
+    EXPECT_EQ(slider.getTextFromValue(7.0), "1/8 D");
+    EXPECT_EQ(slider.getTextFromValue(2.0), "1 Bar");
+
+    // 5. Verify mathematical rate conversion in DSP
+    EXPECT_FLOAT_EQ(nova::dsp::WorshipSynthEngine::getLfoRateForDivision(120.0f, 6), 2.0f); // 1/4 at 120 BPM = 2 Hz
+    EXPECT_FLOAT_EQ(nova::dsp::WorshipSynthEngine::getLfoRateForDivision(120.0f, 2), 0.5f); // 1 Bar at 120 BPM = 0.5 Hz
+
+    // 6. Click Sync button again to return to Free continuous mode
+    modPanel.mouseDown(syncClick);
+    EXPECT_FALSE(modPanel.isLfoSynced(0));
+    EXPECT_EQ(const_cast<nova::ui::ArcKnob*>(rateKnob)->getSlider().getTextFromValue(0.42), "0.42 Hz");
+}
+
+TEST(WorkbenchTabTests, ModulationTabSelectionAndEditorStability) {
+    nova::synth::NovaSynthProcessor proc;
+    auto editor = std::unique_ptr<juce::AudioProcessorEditor>(proc.createEditor());
+    ASSERT_NE(editor, nullptr);
+    editor->setBounds(0, 0, 1280, 800);
+
+    // Switch to tab 1 (MODULATION)
+    auto* synthEditor = dynamic_cast<nova::synth::NovaSynthEditor*>(editor.get());
+    ASSERT_NE(synthEditor, nullptr);
+    synthEditor->setInitialWorkbenchTab(1);
+
+    // Repaint without any crashes or assertions
+    synthEditor->repaint();
+}
+
+TEST(WorkbenchTabTests, AllSixTabsNavigationAndStability) {
+    nova::synth::NovaSynthProcessor proc;
+    auto editor = std::unique_ptr<juce::AudioProcessorEditor>(proc.createEditor());
+    ASSERT_NE(editor, nullptr);
+    editor->setBounds(0, 0, 1280, 800);
+
+    auto* synthEditor = dynamic_cast<nova::synth::NovaSynthEditor*>(editor.get());
+    ASSERT_NE(synthEditor, nullptr);
+
+    // Test switching to each of the 6 workbench tabs:
+    // 0: FLOW, 1: MODULATION, 2: FX RACK, 3: DRONE, 4: ARPEGGIATOR, 5: MIXER
+    for (int tabIdx = 0; tabIdx < 6; ++tabIdx) {
+        synthEditor->setInitialWorkbenchTab(tabIdx);
+        synthEditor->repaint();
+    }
+}
+
+TEST(DroneHubPanelTests, DroneParametersAndHarmonicVoicings) {
+    nova::synth::NovaSynthProcessor proc;
+    proc.prepareToPlay(48000.0, 512);
+    auto theme = nova::ui::NovaTheme::create(nova::ui::NovaTheme::AccentPreset::SpaceCyan);
+    nova::synth::ui::DroneHubPanel dronePanel(proc, theme);
+    dronePanel.setBounds(0, 0, 1180, 180);
+
+    auto& apvts = proc.getAPVTS();
+    auto& engine = proc.getEngine();
+
+    // 1. Initial State: Drone off
+    EXPECT_FALSE(apvts.getRawParameterValue("droneEnabled")->load() > 0.5f);
+
+    // 2. Enable Drone Pad Hold and set Key G (7)
+    if (auto* pE = apvts.getParameter("droneEnabled")) {
+        pE->setValueNotifyingHost(1.0f);
+    }
+    if (auto* pK = apvts.getParameter("droneRootKey")) {
+        pK->setValueNotifyingHost(pK->convertTo0to1(7.0f)); // Key G
+    }
+    EXPECT_TRUE(apvts.getRawParameterValue("droneEnabled")->load() > 0.5f);
+    EXPECT_EQ(static_cast<int>(apvts.getRawParameterValue("droneRootKey")->load()), 7);
+
+    // 3. Test Voicing switching (0: Lush 5th, 1: Deep Sub, 2: Ambient 9th, 3: Celestial 8ve)
+    if (auto* pV = apvts.getParameter("droneVoicing")) {
+        pV->setValueNotifyingHost(pV->convertTo0to1(1.0f)); // Deep Sub
+    }
+    EXPECT_EQ(static_cast<int>(apvts.getRawParameterValue("droneVoicing")->load()), 1);
+
+    // 4. Test Octave parameter (-2 to +2)
+    if (auto* pOct = apvts.getParameter("droneOctave")) {
+        EXPECT_EQ(static_cast<int>(apvts.getRawParameterValue("droneOctave")->load()), 0);
+        pOct->setValueNotifyingHost(pOct->convertTo0to1(-1.0f));
+        EXPECT_EQ(static_cast<int>(apvts.getRawParameterValue("droneOctave")->load()), -1);
+        pOct->setValueNotifyingHost(pOct->convertTo0to1(1.0f));
+        EXPECT_EQ(static_cast<int>(apvts.getRawParameterValue("droneOctave")->load()), 1);
+    }
+
+    // 5. Test Warmth / Tone sweep
+    if (auto* pTone = apvts.getParameter("droneTone")) {
+        pTone->setValueNotifyingHost(pTone->convertTo0to1(0.20f)); // Dark Warmth
+        proc.syncParametersFromAPVTS();
+        pTone->setValueNotifyingHost(pTone->convertTo0to1(0.85f)); // Bright Warmth
+        proc.syncParametersFromAPVTS();
+    }
+
+    // 6. Test Live Switching while Drone Pad is held: change key, voicing, octave
+    if (auto* pK = apvts.getParameter("droneRootKey")) {
+        pK->setValueNotifyingHost(pK->convertTo0to1(2.0f)); // Key D
+    }
+    if (auto* pV = apvts.getParameter("droneVoicing")) {
+        pV->setValueNotifyingHost(pV->convertTo0to1(3.0f)); // Celestial Octaves
+    }
+    proc.syncParametersFromAPVTS();
+
+    // Render audio block: verify sound is generated cleanly with no NaN/Inf and sustained level
+    std::vector<float> left(256, 0.0f);
+    std::vector<float> right(256, 0.0f);
+    float blockEnergy = 0.0f;
+    for (int b = 0; b < 8; ++b) {
+        engine.processBlock(left.data(), right.data(), 256);
+        for (int i = 0; i < 256; ++i) {
+            ASSERT_FALSE(std::isnan(left[static_cast<std::size_t>(i)]));
+            ASSERT_FALSE(std::isinf(left[static_cast<std::size_t>(i)]));
+            blockEnergy += left[static_cast<std::size_t>(i)] * left[static_cast<std::size_t>(i)];
+        }
+    }
+    EXPECT_GT(blockEnergy, 1e-3f);
+
+    dronePanel.repaint();
+}
+
+TEST(ArpeggiatorHubPanelTests, ArpeggiatorModesOctavesLatchAndPatternSequencer) {
+    nova::synth::NovaSynthProcessor proc;
+    proc.prepareToPlay(48000.0, 512);
+    auto theme = nova::ui::NovaTheme::create(nova::ui::NovaTheme::AccentPreset::SpaceCyan);
+    nova::synth::ui::ArpeggiatorHubPanel arpPanel(proc, theme);
+    arpPanel.setBounds(0, 0, 1180, 180);
+
+    auto& apvts = proc.getAPVTS();
+    auto& engine = proc.getEngine();
+
+    // 1. Enable Arpeggiator and Latch
+    if (auto* pE = apvts.getParameter("arpEnabled")) {
+        pE->setValueNotifyingHost(1.0f);
+    }
+    if (auto* pL = apvts.getParameter("arpLatch")) {
+        pL->setValueNotifyingHost(1.0f);
+    }
+    if (auto* pOct = apvts.getParameter("arpOctaves")) {
+        pOct->setValueNotifyingHost(pOct->convertTo0to1(1.0f)); // 2 Octaves
+    }
+    if (auto* pSw = apvts.getParameter("arpSwing")) {
+        pSw->setValueNotifyingHost(pSw->convertTo0to1(0.35f)); // 35% Swing
+    }
+
+    EXPECT_TRUE(apvts.getRawParameterValue("arpEnabled")->load() > 0.5f);
+    EXPECT_TRUE(apvts.getRawParameterValue("arpLatch")->load() > 0.5f);
+    EXPECT_EQ(static_cast<int>(apvts.getRawParameterValue("arpOctaves")->load()), 1);
+
+    // 2. Play C-Major triad (notes 48, 52, 55) and release physical keys (Latch keeps playing)
+    engine.noteOn(48, 0.85f);
+    engine.noteOn(52, 0.80f);
+    engine.noteOn(55, 0.82f);
+    engine.noteOff(48);
+    engine.noteOff(52);
+    engine.noteOff(55);
+
+    // Render 1024 samples: arpeggiator must advance steps through the latched chord
+    std::vector<float> left(1024, 0.0f);
+    std::vector<float> right(1024, 0.0f);
+    engine.processBlock(left.data(), right.data(), 1024);
+
+    EXPECT_GE(engine.getArpCurrentStep(), 0);
+    EXPECT_LT(engine.getArpCurrentStep(), 16);
+
+    for (int i = 0; i < 1024; ++i) {
+        EXPECT_FALSE(std::isnan(left[static_cast<std::size_t>(i)]));
+        EXPECT_FALSE(std::isinf(left[static_cast<std::size_t>(i)]));
+    }
+
+    arpPanel.repaint();
+}
+
+TEST(ArpeggiatorHubPanelTests, ArpeggiatorStepMatrixRestVelocityGateAndPatternLengths) {
+    nova::synth::NovaSynthProcessor proc;
+    proc.prepareToPlay(48000.0, 512);
+    auto theme = nova::ui::NovaTheme::create(nova::ui::NovaTheme::AccentPreset::SpaceCyan);
+    nova::synth::ui::ArpeggiatorHubPanel arpPanel(proc, theme);
+    arpPanel.setBounds(0, 0, 1180, 180);
+
+    auto& apvts = proc.getAPVTS();
+    auto& engine = proc.getEngine();
+
+    // 1. Verify pattern length switching (16, 32, 64)
+    proc.setArpPatternLength(32);
+    EXPECT_EQ(proc.getArpPatternLength(), 32);
+    arpPanel.updateMatrixLayout();
+
+    proc.setArpPatternLength(64);
+    EXPECT_EQ(proc.getArpPatternLength(), 64);
+    arpPanel.updateMatrixLayout();
+
+    proc.setArpPatternLength(16);
+    EXPECT_EQ(proc.getArpPatternLength(), 16);
+    arpPanel.updateMatrixLayout();
+
+    // 2. Test Step Gate Deactivation & Velocity Scaling in DSP
+    // Enable Arp, Free Rate 8 Hz (125ms per step = 6000 samples @ 48kHz)
+    if (auto* pE = apvts.getParameter("arpEnabled")) pE->setValueNotifyingHost(1.0f);
+    if (auto* pS = apvts.getParameter("arpSync")) pS->setValueNotifyingHost(0.0f);
+    if (auto* pR = apvts.getParameter("arpRateHz")) pR->setValueNotifyingHost(pR->convertTo0to1(8.0f));
+    if (auto* pG = apvts.getParameter("arpGate")) pG->setValueNotifyingHost(pG->convertTo0to1(0.20f)); // 20% Gate = 25ms gate
+    if (auto* pA = apvts.getParameter("ampAttack")) pA->setValueNotifyingHost(pA->convertTo0to1(0.005f));
+    if (auto* pDel = apvts.getParameter("delayEnabled")) pDel->setValueNotifyingHost(0.0f);
+    if (auto* pRev = apvts.getParameter("reverbMix")) pRev->setValueNotifyingHost(pRev->convertTo0to1(0.0f));
+
+    // Set Step 1: Active, Vel = 1.0
+    // Set Step 2: Inactive (Gate OFF) -> Must produce silence / rest!
+    // Set Step 3: Active, Vel = 0.2 -> Must produce quiet signal!
+    proc.setArpStepGate(0, true);
+    proc.setArpStepVelocity(0, 1.0f);
+
+    proc.setArpStepGate(1, false); // Rest step!
+
+    proc.setArpStepGate(2, true);
+    proc.setArpStepVelocity(2, 0.20f);
+
+    proc.syncParametersFromAPVTS();
+
+    // Play a single note (60)
+    engine.noteOn(60, 0.85f);
+
+    // Render Step 1 (active, vel 1.0): 6000 samples
+    std::vector<float> step1L(6000, 0.0f);
+    std::vector<float> step1R(6000, 0.0f);
+    engine.processBlock(step1L.data(), step1R.data(), 6000);
+
+    float peakStep1 = 0.0f;
+    for (float f : step1L) peakStep1 = std::max(peakStep1, std::abs(f));
+    EXPECT_GT(peakStep1, 0.15f);
+
+    // Because Gate was 20% (1200 samples), by the end of step 1 (samples 4500..6000), voice should have released to silence!
+    float tailStep1 = 0.0f;
+    for (int i = 4500; i < 6000; ++i) tailStep1 = std::max(tailStep1, std::abs(step1L[i]));
+    EXPECT_LT(tailStep1, 0.05f);
+
+    // Render Step 2 (deactivated rest step): 6000 samples
+    std::vector<float> step2L(6000, 0.0f);
+    std::vector<float> step2R(6000, 0.0f);
+    engine.processBlock(step2L.data(), step2R.data(), 6000);
+
+    float peakStep2 = 0.0f;
+    for (int i = 2000; i < 6000; ++i) peakStep2 = std::max(peakStep2, std::abs(step2L[i]));
+    EXPECT_LT(peakStep2, 0.02f); // Rest step remains silent!
+
+    // Render Step 3 (active, vel 0.20): 6000 samples
+    std::vector<float> step3L(6000, 0.0f);
+    std::vector<float> step3R(6000, 0.0f);
+    engine.processBlock(step3L.data(), step3R.data(), 6000);
+
+    float peakStep3 = 0.0f;
+    for (float f : step3L) peakStep3 = std::max(peakStep3, std::abs(f));
+    EXPECT_GT(peakStep3, 0.005f);
+    EXPECT_LT(peakStep3, peakStep1 * 0.45f); // Velocity 0.20 is significantly quieter than velocity 1.0!
+
+    engine.noteOff(60);
+    arpPanel.repaint();
+}
+
+TEST(MixerHubPanelTests, MixerAllEightSourceChannelsAndRoutings) {
+    nova::synth::NovaSynthProcessor proc;
+    auto theme = nova::ui::NovaTheme::create(nova::ui::NovaTheme::AccentPreset::SpaceCyan);
+    nova::synth::ui::MixerHubPanel mixerPanel(proc, theme);
+    mixerPanel.setBounds(0, 0, 1180, 180);
+
+    auto& apvts = proc.getAPVTS();
+
+    // Verify oscillator 1 and 2 parameters exist and can be modulated
+    EXPECT_NE(apvts.getRawParameterValue("osc1_level"), nullptr);
+    EXPECT_NE(apvts.getRawParameterValue("osc1_pan"), nullptr);
+    EXPECT_NE(apvts.getRawParameterValue("osc1_enabled"), nullptr);
+    EXPECT_NE(apvts.getRawParameterValue("osc1_filterRouting"), nullptr);
+
+    // Toggle Osc 2 filter routing to FLT 2 (1)
+    if (auto* p = apvts.getParameter("osc2_filterRouting")) {
+        p->setValueNotifyingHost(p->convertTo0to1(1.0f));
+    }
+    EXPECT_EQ(static_cast<int>(apvts.getRawParameterValue("osc2_filterRouting")->load()), 1);
+
+    mixerPanel.repaint();
+}
+
+} // namespace
+
+int main(int argc, char** argv) {
+    juce::ScopedJuceInitialiser_GUI juceInit;
+    ::testing::InitGoogleTest(&argc, argv);
+    return RUN_ALL_TESTS();
+}

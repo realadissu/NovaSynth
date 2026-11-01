@@ -1,0 +1,21 @@
+# Build directories
+build/
+cmake-build-*/
+out/
+
+# External linked/fetched dependencies
+external/
+
+# IDE & OS files
+.DS_Store
+.vscode/
+.idea/
+.cache/
+compile_commands.json
+
+# Coverage & Test artifacts
+*.gcda
+*.gcno
+*.info
+coverage_report/
+Testing/
