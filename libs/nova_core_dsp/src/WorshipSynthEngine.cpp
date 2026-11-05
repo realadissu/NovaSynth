@@ -430,6 +430,11 @@ void WorshipSynthEngine::startVoice(int midiNote, float velocity, bool isDrone, 
     chosen->ageCounter = ++voiceCounter_;
 
     chosen->activeOscCountSnapshot = params_.activeOscCount;
+    chosen->oscNormSnapshot = (chosen->activeOscCountSnapshot > 1)
+        ? (1.0f / std::sqrt(static_cast<float>(chosen->activeOscCountSnapshot) * 0.85f))
+        : 1.0f;
+    chosen->flt1ResComp = 1.0f / std::sqrt(1.0f + 0.35f * std::max(0.0f, chosen->filterResSnapshot - 0.707f));
+    chosen->flt2ResComp = 1.0f / std::sqrt(1.0f + 0.30f * std::max(0.0f, chosen->filter2ResSnapshot - 0.707f));
     chosen->filterTypeSnapshot     = params_.filterType;
     chosen->filterCutoffSnapshot   = cutoffSmoother_.getTargetValue();
     chosen->filterResSnapshot      = params_.filterResonance;
@@ -874,9 +879,14 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
         }
     } else {
         int activeNonDroneVoices = 0;
-        for (const auto& v : voices_) {
-            if (v.active && !v.isDroneVoice) {
-                ++activeNonDroneVoices;
+        std::array<int, kMaxVoices> activeVoiceIndices{};
+        int activeVoiceCount = 0;
+        for (int i = 0; i < kMaxVoices; ++i) {
+            if (voices_[static_cast<std::size_t>(i)].active) {
+                activeVoiceIndices[static_cast<std::size_t>(activeVoiceCount++)] = i;
+                if (!voices_[static_cast<std::size_t>(i)].isDroneVoice) {
+                    ++activeNonDroneVoices;
+                }
             }
         }
         const float targetPolyScale = 1.0f / std::sqrt(1.0f + 0.45f * static_cast<float>(std::max(0, activeNonDroneVoices - 1)));
@@ -942,7 +952,8 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
         float droneL = 0.0f;
         float droneR = 0.0f;
 
-        for (auto& v : voices_) {
+        for (int vi = 0; vi < activeVoiceCount; ++vi) {
+            auto& v = voices_[static_cast<std::size_t>(activeVoiceIndices[static_cast<std::size_t>(vi)])];
             if (!v.active) continue;
 
             const float ampEnvVal = v.ampEnv.processSample();
@@ -979,9 +990,7 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
             float voiceBothL = 0.0f, voiceBothR = 0.0f;
             float voiceDirL  = 0.0f, voiceDirR  = 0.0f;
 
-            const float oscNorm = (v.activeOscCountSnapshot > 1)
-                ? (1.0f / std::sqrt(static_cast<float>(v.activeOscCountSnapshot) * 0.85f))
-                : 1.0f;
+            const float oscNorm = v.oscNormSnapshot;
             for (int i = 0; i < v.activeOscCountSnapshot; ++i) {
                 const auto& slotParam = params_.oscSlots[static_cast<std::size_t>(i)];
                 const bool isSubSlot = (slotParam.sourceType == 1 ||
@@ -1072,6 +1081,7 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
                         v.filterL.setParameters(svfType, voiceCutoff, effReso);
                         v.filterR.setParameters(svfType, voiceCutoff, effReso);
                     }
+                    v.flt1ResComp = 1.0f / std::sqrt(1.0f + 0.35f * std::max(0.0f, effReso - 0.707f));
                 }
 
                 // Zero-DC warm tube/ladder drive saturation (prevents DC bias build-up across chord voices!)
@@ -1091,10 +1101,8 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
                     flt1InR = v.filterStage2R.processSample(flt1InR);
                 }
 
-                // Resonance peak headroom compensation prevents high-Q sweeps from clipping
-                const float resComp = 1.0f / std::sqrt(1.0f + 0.35f * std::max(0.0f, effReso - 0.707f));
-                flt1InL *= resComp;
-                flt1InR *= resComp;
+                flt1InL *= v.flt1ResComp;
+                flt1InR *= v.flt1ResComp;
             }
 
             const bool hasBoth = (voiceBothL != 0.0f || voiceBothR != 0.0f);
@@ -1128,6 +1136,7 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
 
                     v.filter2L.setParameters(svf2Type, voiceCutoff2, effReso2, bellGainDb);
                     v.filter2R.setParameters(svf2Type, voiceCutoff2, effReso2, bellGainDb);
+                    v.flt2ResComp = 1.0f / std::sqrt(1.0f + 0.30f * std::max(0.0f, effReso2 - 0.707f));
                 }
 
                 if (flt2DriveActive) {
@@ -1141,9 +1150,8 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
 
                 flt2InL = v.filter2L.processSample(flt2InL);
                 flt2InR = v.filter2R.processSample(flt2InR);
-                const float resComp2 = 1.0f / std::sqrt(1.0f + 0.30f * std::max(0.0f, effReso2 - 0.707f));
-                flt2InL *= resComp2;
-                flt2InR *= resComp2;
+                flt2InL *= v.flt2ResComp;
+                flt2InR *= v.flt2ResComp;
             }
 
             const float velGain = v.isArpVoice ? (v.velocity * (0.15f + 0.85f * v.velocity)) : (0.40f + 0.60f * v.velocity);

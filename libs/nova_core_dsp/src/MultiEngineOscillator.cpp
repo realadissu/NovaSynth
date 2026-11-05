@@ -358,6 +358,8 @@ void MultiEngineOscillator::reset() noexcept {
     modalDecays_.fill(0.999f);
     samplePlayhead_ = 0.0;
     sampleFinished_ = false;
+    lastPitchModSemitones_ = -999.0f;
+    cachedPitchModRatio_ = 1.0f;
 }
 
 void MultiEngineOscillator::triggerNote(float baseFrequencyHz, float velocity, uint32_t seedOffset) noexcept {
@@ -496,7 +498,16 @@ void MultiEngineOscillator::processSample(float baseFrequencyHz,
 
     const float sr = static_cast<float>(sampleRate_);
     const float invSr = 1.0f / sr;
-    const float pitchModRatio = (pitchModSemitones == 0.0f) ? 1.0f : std::exp2(pitchModSemitones * (1.0f / 12.0f));
+    float pitchModRatio = 1.0f;
+    if (pitchModSemitones != 0.0f) {
+        if (std::abs(pitchModSemitones - lastPitchModSemitones_) < 1e-4f) {
+            pitchModRatio = cachedPitchModRatio_;
+        } else {
+            lastPitchModSemitones_ = pitchModSemitones;
+            cachedPitchModRatio_ = std::exp2(pitchModSemitones * (1.0f / 12.0f));
+            pitchModRatio = cachedPitchModRatio_;
+        }
+    }
     const float slotFreq = std::clamp(baseFrequencyHz * basePitchRatio_ * pitchModRatio,
                                       20.0f, sr * 0.46f);
     shapeSmoother_.setTargetValue(params_.shapeMorph);
@@ -511,7 +522,8 @@ void MultiEngineOscillator::processSample(float baseFrequencyHz,
         case EngineType::WarmAnalog: {
             const int activeUnison = (detuneAmt > 0.02f) ? kMaxUnison : 1;
             // Power-conserving RMS normalization avoids master clipping when unison is cranked
-            const float normGain = (activeUnison > 1) ? (0.85f / std::sqrt(static_cast<float>(activeUnison))) : 1.0f;
+            constexpr float kUnisonNormGain = 0.85f / 2.2360679775f; // 0.85 / sqrt(5)
+            const float normGain = (activeUnison > 1) ? kUnisonNormGain : 1.0f;
 
             for (int u = 0; u < activeUnison; ++u) {
                 const auto idx = static_cast<std::size_t>(u);

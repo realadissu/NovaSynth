@@ -85,7 +85,15 @@ public:
 private:
     void updateCoefficients() noexcept {
         const float pi = std::numbers::pi_v<float>;
-        const float gNorm = std::tan(pi * cutoffHz_ / static_cast<float>(sampleRate_));
+        const float w = pi * cutoffHz_ / static_cast<float>(sampleRate_);
+        // Cytomic SVF Padé [3/2] fast-tan approximation for audio frequencies
+        float gNorm = 0.0f;
+        if (w < 1.15f) {
+            const float w2 = w * w;
+            gNorm = w * (1.0f - 0.13328356f * w2) / (1.0f - 0.46696774f * w2);
+        } else {
+            gNorm = std::tan(w);
+        }
 
         switch (type_) {
             case Type::LowPass: {

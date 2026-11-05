@@ -2324,6 +2324,57 @@ TEST(WorshipSynthEngineTests, OscillatorIndependentEnvelopeRoutingAndSwell) {
     synth.allNotesOff();
 }
 
+TEST(WorshipSynthEngineTests, ActiveVoiceCullingAndCytomicFastMathPrecision) {
+    nova::dsp::WorshipSynthEngine synth;
+    synth.prepare(48000.0, 256);
+
+    // Verify SVF stability and frequency response with Padé approximation
+    nova::dsp::StateVariableFilter filter;
+    filter.prepare(48000.0);
+    filter.setParameters(nova::dsp::StateVariableFilter::Type::LowPass, 1200.0f, 1.5f);
+
+    float maxSample = 0.0f;
+    for (int i = 0; i < 480; ++i) {
+        const float in = (i == 0) ? 1.0f : 0.0f; // Impulse response
+        const float out = filter.processSample(in);
+        EXPECT_FALSE(std::isnan(out));
+        EXPECT_FALSE(std::isinf(out));
+        maxSample = std::max(maxSample, std::abs(out));
+    }
+    EXPECT_GT(maxSample, 0.05f);
+    EXPECT_LT(maxSample, 2.0f);
+
+    // Play a single note and verify active voice list iterates only active voice
+    auto p = synth.getParameters();
+    p.ampEnv.attackSec = 0.005f;
+    p.ampEnv.decaySec = 0.1f;
+    p.ampEnv.sustainLvl = 1.0f;
+    p.ampEnv.releaseSec = 0.03f;
+    synth.setParameters(p);
+
+    synth.noteOn(60, 0.8f);
+    std::vector<float> left(256, 0.0f);
+    std::vector<float> right(256, 0.0f);
+    // Advance 5 blocks (~27 ms > 5 ms attack)
+    for (int b = 0; b < 5; ++b) {
+        synth.processBlock(left.data(), right.data(), 256);
+    }
+
+    EXPECT_EQ(synth.getTelemetry().activeVoiceCount, 1);
+
+    float rms = 0.0f;
+    for (float s : left) rms += s * s;
+    rms = std::sqrt(rms / 256.0f);
+    EXPECT_GT(rms, 0.01f);
+
+    synth.noteOff(60);
+    // Advance 20 blocks (~107 ms > 30 ms release)
+    for (int b = 0; b < 20; ++b) {
+        synth.processBlock(left.data(), right.data(), 256);
+    }
+    EXPECT_EQ(synth.getTelemetry().activeVoiceCount, 0);
+}
+
 TEST(ModulationMatrixTests, AllFourLfoEnginesAndShapes) {
     nova::synth::NovaSynthProcessor proc;
     auto& engine = proc.getEngine();

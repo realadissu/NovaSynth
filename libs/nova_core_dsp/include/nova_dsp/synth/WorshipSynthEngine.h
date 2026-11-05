@@ -281,6 +281,9 @@ private:
 
         // Snapshot of voice parameters for Seamless Patch-Remain
         int activeOscCountSnapshot = 3;
+        float oscNormSnapshot = 1.0f;
+        float flt1ResComp = 1.0f;
+        float flt2ResComp = 1.0f;
         int filterTypeSnapshot = 0;
         float filterCutoffSnapshot = 2800.0f;
         float filterResSnapshot = 0.75f;

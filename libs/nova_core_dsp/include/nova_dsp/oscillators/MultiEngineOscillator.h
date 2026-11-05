@@ -101,6 +101,8 @@ private:
     std::array<float, kMaxUnison> unisonPanR_{ 0.7071f, 0.7071f, 0.7071f, 0.7071f, 0.7071f };
     float basePitchRatio_ = 1.0f;
     float pluckDelayRatioR_ = 1.0f;
+    float lastPitchModSemitones_ = -999.0f;
+    float cachedPitchModRatio_ = 1.0f;
 
     // Unison phases & slow analog drift states
     std::array<float, kMaxUnison> phases_{};
