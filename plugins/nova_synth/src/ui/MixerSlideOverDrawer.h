@@ -28,6 +28,15 @@ class MixerSlideOverDrawer : public juce::Component, private juce::Timer {
 public:
     // Sleek Custom DAW Console Fader LookAndFeel
     struct ConsoleFaderLookAndFeel : public juce::LookAndFeel_V4 {
+        static float calculateTrackCenterX(float x, float width) noexcept {
+            const float xOffset = (width < 90.0f) ? 5.0f : 0.0f;
+            return x + width * 0.5f + xOffset;
+        }
+
+        static float calculateThumbLeft(float x, float width) noexcept {
+            return calculateTrackCenterX(x, width) - 15.0f; // 30px thumb width
+        }
+
         void drawLinearSlider(juce::Graphics& g, int x, int y, int width, int height,
                               float sliderPos, float /*minSliderPos*/, float /*maxSliderPos*/,
                               juce::Slider::SliderStyle style, juce::Slider& slider) override {
@@ -36,8 +45,9 @@ public:
                 return;
             }
 
+            const float trackCenterX = calculateTrackCenterX(static_cast<float>(x), static_cast<float>(width));
             const float trackW = 4.0f;
-            const float trackX = static_cast<float>(x) + (static_cast<float>(width) - trackW) * 0.5f;
+            const float trackX = trackCenterX - trackW * 0.5f;
             const float trackY = static_cast<float>(y) + 4.0f;
             const float trackH = static_cast<float>(height) - 8.0f;
 
@@ -51,10 +61,10 @@ public:
             g.setColour(juce::Colour(0xff020408));
             g.fillRect(trackX + 1.0f, trackY + 2.0f, 2.0f, trackH - 4.0f);
 
-            // Slender Fader Cap / Thumb (Console style, 30px wide, centered)
+            // Slender Fader Cap / Thumb (Console style, 30px wide, centered on track)
             constexpr float thumbW = 30.0f;
             constexpr float thumbH = 20.0f;
-            const float thumbX = static_cast<float>(x) + (static_cast<float>(width) - thumbW) * 0.5f;
+            const float thumbX = trackCenterX - thumbW * 0.5f;
             const float thumbY = sliderPos - thumbH * 0.5f;
             const juce::Rectangle<float> thumbRect(thumbX, thumbY, thumbW, thumbH);
 
@@ -632,7 +642,9 @@ public:
 
             // 6. Fader & Meter Area (remaining height: balanced throw ~155px)
             const int meterW = 7;
+            cCol.removeFromRight(1);
             stripMeterRects_[static_cast<std::size_t>(i)] = cCol.removeFromRight(meterW).withTrimmedBottom(20);
+            cCol.removeFromRight(2);
             strip.fader.setBounds(cCol);
         }
 
@@ -651,7 +663,9 @@ public:
 
         // Master Fader & Dual Meter
         constexpr int mMeterW = 12;
+        mCol.removeFromRight(6);
         masterMeterRect_ = mCol.removeFromRight(mMeterW).withTrimmedBottom(20);
+        mCol.removeFromRight(6);
         masterFader_.setBounds(mCol);
     }
 
@@ -1099,8 +1113,7 @@ private:
             g.drawText(eng, headerR.withTrimmedTop(20.0f).withHeight(13.0f), juce::Justification::centred);
 
             // 2. Draw dB scale ticks beside fader
-            const auto fR = strip.fader.getBounds().toFloat();
-            drawFaderTicks(g, fR);
+            drawChannelFaderTicks(g, strip.fader, col);
 
             // 4. Draw Live Peak Meter LED Bar
             const auto mRect = stripMeterRects_[static_cast<std::size_t>(i)].toFloat();
@@ -1129,8 +1142,7 @@ private:
         g.drawText("OUT BUS", hR.withTrimmedTop(20.0f).withHeight(13.0f), juce::Justification::centred);
 
         // Draw Master Ticks
-        const auto fR = masterFader_.getBounds().toFloat();
-        drawFaderTicks(g, fR);
+        drawMasterFaderTicks(g, masterFader_);
 
         // Draw Dual Master Peak Meter (L & R)
         const auto mRect = masterMeterRect_.toFloat();
@@ -1142,25 +1154,122 @@ private:
         drawMeterBar(g, mRect.withTrimmedLeft(halfW + 2.0f), pkR);
     }
 
-    static void drawFaderTicks(juce::Graphics& g, juce::Rectangle<float> faderArea) {
-        const float top = faderArea.getY() + 10.0f;
-        const float h = faderArea.getHeight() - 32.0f;
-        const float x = faderArea.getX() - 2.0f;
+    static float getFaderThumbLeft(const juce::Slider& slider) noexcept {
+        return ConsoleFaderLookAndFeel::calculateThumbLeft(
+            static_cast<float>(slider.getX()),
+            static_cast<float>(slider.getWidth()));
+    }
 
-        g.setFont(juce::Font(juce::FontOptions(7.5f)));
-        g.setColour(juce::Colour(0xff64748b));
+    void drawChannelFaderTicks(juce::Graphics& g, const juce::Slider& slider, juce::Colour /*accentCol*/) {
+        const float thumbL = getFaderThumbLeft(slider);
+        const float sliderY = static_cast<float>(slider.getY());
 
-        const std::array<std::pair<float, const char*>, 4> ticks = {{
-            { 0.0f, "0" },
-            { 0.50f, "-6" },
-            { 0.75f, "-12" },
-            { 1.0f, "inf" }
+        struct TickDef {
+            float val;
+            const char* label;
+            bool isMajor;
+            bool isUnity;
+        };
+
+        // Standard console fader calibration (Unity 0 dB at max throw, musical logarithmic graduations)
+        static constexpr std::array<TickDef, 7> kTicks = {{
+            { 1.0000f, "0",    true,  true  }, // Unity gain (0 dB)
+            { 0.7079f, "-3",   true,  false }, // -3 dB
+            { 0.5012f, "-6",   true,  false }, // -6 dB
+            { 0.2512f, "-12",  true,  false }, // -12 dB
+            { 0.1259f, "",     false, false }, // -18 dB (minor tick)
+            { 0.0631f, "",     false, false }, // -24 dB (minor tick)
+            { 0.0000f, "-inf", true,  false }  // -inf
         }};
 
-        for (const auto& [relPos, label] : ticks) {
-            const float y = top + h * relPos;
-            g.drawHorizontalLine(static_cast<int>(y), x - 4.0f, x);
-            g.drawText(label, juce::Rectangle<float>(x - 16.0f, y - 5.0f, 12.0f, 10.0f), juce::Justification::centredRight, false);
+        for (const auto& t : kTicks) {
+            const float y = sliderY + slider.getPositionOfValue(t.val);
+            const float tickLen = t.isUnity ? 6.0f : (t.isMajor ? 4.5f : 3.0f);
+            const float strokeW = t.isUnity ? 1.6f : 1.0f;
+
+            if (t.isUnity) {
+                g.setColour(juce::Colours::white);
+            } else if (t.isMajor) {
+                g.setColour(juce::Colour(0xff64748b));
+            } else {
+                g.setColour(juce::Colour(0xff334155));
+            }
+
+            g.drawLine(thumbL - 1.5f - tickLen, y, thumbL - 1.5f, y, strokeW);
+
+            if (t.label != nullptr && t.label[0] != '\0') {
+                if (t.isUnity) {
+                    g.setFont(theme_.getValueFont(9.5f));
+                    g.setColour(juce::Colours::white);
+                } else {
+                    g.setFont(theme_.getValueFont(9.0f));
+                    g.setColour(juce::Colour(0xff94a3b8));
+                }
+                const auto textRect = juce::Rectangle<float>(thumbL - 25.0f, y - 6.0f, 16.0f, 12.0f);
+                g.drawText(t.label, textRect, juce::Justification::centredRight, false);
+            }
+        }
+    }
+
+    void drawMasterFaderTicks(juce::Graphics& g, const juce::Slider& slider) {
+        const float thumbL = getFaderThumbLeft(slider);
+        const float sliderY = static_cast<float>(slider.getY());
+
+        struct TickDef {
+            float val;
+            const char* label;
+            bool isMajor;
+            bool isUnity;
+        };
+
+        // Master Gain range is -24.0 dB to +12.0 dB with Unity (0 dB) at ~33% from top
+        static constexpr std::array<TickDef, 13> kTicks = {{
+            {  12.0f, "+12", true,  false },
+            {   9.0f, "",    false, false },
+            {   6.0f, "+6",  true,  false },
+            {   3.0f, "",    false, false },
+            {   0.0f, "0",   true,  true  }, // Unity Gain (0 dB) reference
+            {  -3.0f, "",    false, false },
+            {  -6.0f, "-6",  true,  false },
+            {  -9.0f, "",    false, false },
+            { -12.0f, "-12", true,  false },
+            { -15.0f, "",    false, false },
+            { -18.0f, "-18", true,  false },
+            { -21.0f, "",    false, false },
+            { -24.0f, "-24", true,  false }  // Minimum (-24 dB / -inf)
+        }};
+
+        for (const auto& t : kTicks) {
+            const float y = sliderY + slider.getPositionOfValue(t.val);
+            const float tickLen = t.isUnity ? 7.0f : (t.isMajor ? 4.5f : 3.0f);
+            const float strokeW = t.isUnity ? 1.8f : 1.0f;
+
+            if (t.isUnity) {
+                g.setColour(juce::Colour(0xfff59e0b)); // Master amber highlight for 0 dB
+            } else if (t.val > 0.0f) {
+                g.setColour(juce::Colour(0xfff59e0b).withAlpha(0.65f));
+            } else if (t.isMajor) {
+                g.setColour(juce::Colour(0xff64748b));
+            } else {
+                g.setColour(juce::Colour(0xff334155));
+            }
+
+            g.drawLine(thumbL - 1.5f - tickLen, y, thumbL - 1.5f, y, strokeW);
+
+            if (t.label != nullptr && t.label[0] != '\0') {
+                if (t.isUnity) {
+                    g.setFont(theme_.getValueFont(10.0f));
+                    g.setColour(juce::Colour(0xfffbbf24)); // Warm golden amber 0 dB
+                } else if (t.val > 0.0f) {
+                    g.setFont(theme_.getValueFont(9.0f));
+                    g.setColour(juce::Colour(0xfff59e0b)); // Amber for boost
+                } else {
+                    g.setFont(theme_.getValueFont(9.0f));
+                    g.setColour(juce::Colour(0xffcbd5e1)); // Clean crisp silver-gray
+                }
+                const auto textRect = juce::Rectangle<float>(thumbL - 27.0f, y - 6.0f, 18.0f, 12.0f);
+                g.drawText(t.label, textRect, juce::Justification::centredRight, false);
+            }
         }
     }
 
