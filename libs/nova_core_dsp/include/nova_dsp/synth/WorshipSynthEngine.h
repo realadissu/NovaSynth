@@ -208,6 +208,7 @@ public:
         int activeVoiceCount = 0;
         float outputPeakL = 0.0f;
         float outputPeakR = 0.0f;
+        float preClipPeak = 0.0f;
         float lfo1Value = 0.0f;
         float lfo2Value = 0.0f;
         float lastPlayedVelocity = 0.8f;
@@ -269,6 +270,8 @@ private:
         AdsrEnvelope auxEnv{};
         StateVariableFilter filterL{};
         StateVariableFilter filterR{};
+        StateVariableFilter filterStage2L{};
+        StateVariableFilter filterStage2R{};
         StateVariableFilter filter2L{};
         StateVariableFilter filter2R{};
 
@@ -343,12 +346,14 @@ private:
     OnePoleSmoother cutoffSmoother_{};
     OnePoleSmoother cutoff2Smoother_{};
     OnePoleSmoother masterGainSmoother_{};
+    OnePoleSmoother polyHeadroomSmoother_{};
 
     LockFreeRingBuffer<float, 2048> visualizerRingBuffer_{};
 
     std::atomic<int> telemetryActiveVoices_{0};
     std::atomic<float> telemetryPeakL_{0.0f};
     std::atomic<float> telemetryPeakR_{0.0f};
+    std::atomic<float> telemetryPreClipPeak_{0.0f};
     std::atomic<float> telemetryLfo1_{0.0f};
     std::atomic<float> telemetryLfo2_{0.0f};
 };

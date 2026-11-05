@@ -27,10 +27,34 @@ void PresetManager::loadPresetByIndex(int index) {
     currentIndex_ = index;
     const auto& preset = presets_[static_cast<std::size_t>(index)];
 
+    // First reset all APVTS parameters to their clean defaults so omitted parameters
+    // from a previously loaded preset never bleed into the newly loaded patch!
+    for (auto* param : apvts_.processor.getParameters()) {
+        if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*>(param)) {
+            ranged->setValueNotifyingHost(ranged->getDefaultValue());
+        }
+    }
+
     for (const auto& [paramId, rawVal] : preset.parameterValues) {
         if (auto* param = apvts_.getParameter(paramId)) {
             const float normVal = param->convertTo0to1(rawVal);
             param->setValueNotifyingHost(normVal);
+        }
+    }
+
+    // If a preset specifies activeOscCount, ensure any oscillator slots above activeOscCount
+    // that were not explicitly enabled in preset.parameterValues are turned off (so default
+    // osc1..3 enabled flags do not force extra oscillators on 1- or 2-oscillator patches).
+    auto activeIt = preset.parameterValues.find("activeOscCount");
+    if (activeIt != preset.parameterValues.end()) {
+        const int activeCount = std::clamp(static_cast<int>(std::round(activeIt->second)), 1, 8);
+        for (int oscIdx = activeCount + 1; oscIdx <= 8; ++oscIdx) {
+            const juce::String enableId = "osc" + juce::String(oscIdx) + "_enabled";
+            if (preset.parameterValues.find(enableId) == preset.parameterValues.end()) {
+                if (auto* param = apvts_.getParameter(enableId)) {
+                    param->setValueNotifyingHost(0.0f);
+                }
+            }
         }
     }
 }

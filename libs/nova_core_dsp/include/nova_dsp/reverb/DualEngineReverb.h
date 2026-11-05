@@ -169,23 +169,33 @@ private:
         }
     };
 
-    // Dual-grain overlap-add pitch shifter for Shimmer (+12st, +24st, -12st)
+    // Valhalla-style Dual-Grain Half-Sine Pitch Shifter with Zero-Weight Latch Jitter
     struct GranularPitchShifter {
         DelayLine buffer;
         float phaseA = 0.0f;
-        float phaseB = 0.5f;
-        float grainSizeSamples = 4000.0f;
+        float grainSizeSamples = 8800.0f;
+        float prevPhaseA = 0.0f;
+        float prevPhaseB = 0.5f;
+        float offsetA = 0.0f;
+        float offsetB = 0.0f;
+        float maxJitterSamples = 720.0f;
+        uint32_t rng = 0x9E3779B9u;
 
-        void prepare(double sampleRate, float phaseOffset = 0.0f) {
+        void prepare(double sampleRate, float phaseOffset = 0.0f, float grainMs = 190.0f, uint32_t seed = 0x9E3779B9u) {
             buffer.allocate(static_cast<int>(sampleRate * 0.50));
-            grainSizeSamples = static_cast<float>(sampleRate * 0.045); // 45ms grains: smooth, transient-clean, zero tremolo beating
+            grainSizeSamples = static_cast<float>(sampleRate * (grainMs * 0.001));
+            maxJitterSamples = static_cast<float>(sampleRate * 0.016); // 16ms decorrelation jitter latched at zero-crossing
+            rng = seed;
             clear(phaseOffset);
         }
 
         void clear(float phaseOffset = 0.0f) noexcept {
             buffer.clear();
             phaseA = phaseOffset;
-            phaseB = std::fmod(phaseOffset + 0.5f, 1.0f);
+            prevPhaseA = phaseOffset;
+            prevPhaseB = std::fmod(phaseOffset + 0.5f, 1.0f);
+            offsetA = 0.0f;
+            offsetB = 0.0f;
         }
 
         [[nodiscard]] float process(float input, float pitchRatio) noexcept;
@@ -193,6 +203,8 @@ private:
 
     double sampleRate_ = 48000.0;
     Parameters params_{};
+    bool isTankSilent_ = true;
+    int silenceHoldSamples_ = 0;
 
     // Pre-delay
     DelayLine preDelayL_;
@@ -214,21 +226,28 @@ private:
     std::array<int, kNumEarlyTaps> erTapSamplesR_{};
     std::array<float, kNumEarlyTaps> erTapGains_{};
 
-    // 16-Channel FDN Tank
+    // 16-Channel Unitary Hadamard FDN Tank + In-Loop Allpass Diffusers
     std::array<DelayLine, kNumFdnChannels> fdnDelays_;
+    std::array<AllpassDiffuser, kNumFdnChannels> fdnInLoopDiffusers_{};
     std::array<float, kNumFdnChannels> fdnBaseDelaySamples_{};
     std::array<float, kNumFdnChannels> fdnCurrentDelayLen_{};
     std::array<float, kNumFdnChannels> fdnDelayStep_{};
     std::array<float, kNumFdnChannels> fdnLpState_{};
     std::array<float, kNumFdnChannels> fdnLowShelfState_{};
-    std::array<float, kNumFdnChannels> fdnLfoPhase_{};
+    std::array<float, kNumFdnChannels> fdnDcInPrev_{};
+    std::array<float, kNumFdnChannels> fdnDcOutPrev_{};
+    std::array<float, 4> fdnQuadLfoPhase_{};
 
-    // Shimmer Pitch Shifters, Diffusers, Lowpass & Highpass Filters
+    // Shimmer Pitch Shifters, 16-Tap Cloud Distribution Delay Lines, Diffusers & Filters
     GranularPitchShifter octaveShifterL_, octaveShifterR_;
     GranularPitchShifter octave2ShifterL_, octave2ShifterR_;
+    GranularPitchShifter fifthShifterL_, fifthShifterR_;
+    DelayLine shimmerCloudDelayL_, shimmerCloudDelayR_;
+    std::array<int, kNumFdnChannels> shimmerCloudTapSamples_{};
     std::array<AllpassDiffuser, 2> shimmerDiffusersL_{};
     std::array<AllpassDiffuser, 2> shimmerDiffusersR_{};
     StateVariableFilter shimmerSilkL_, shimmerSilkR_;
+    StateVariableFilter shimmerInterStageL_, shimmerInterStageR_;
     StateVariableFilter shimmerHighPassL_, shimmerHighPassR_;
 
     // Ducking envelope state

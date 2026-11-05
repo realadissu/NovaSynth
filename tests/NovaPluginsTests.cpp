@@ -220,6 +220,61 @@ TEST(DualEngineReverbTests, ShimmerAndTankNeverRunawayOrBlowUpAtMaxDecayAndShimm
     EXPECT_GT(maxTailPeak, 0.01f);
 }
 
+TEST(DualEngineReverbTests, ShimmerNeverShortensDecayAndProducesMultiOctaveValhallaBloom) {
+    constexpr double kSr = 48000.0;
+
+    auto measureLateTailRms = [&](float shimmerOct) {
+        nova::dsp::DualEngineReverb reverb;
+        reverb.prepare(kSr, 512);
+
+        nova::dsp::DualEngineReverb::Parameters params;
+        params.engineMode = nova::dsp::DualEngineReverb::EngineMode::LushCloud;
+        params.spaceType = nova::dsp::DualEngineReverb::SpaceType::CathedralCloud;
+        params.decaySeconds = 10.0f;
+        params.shimmerOctave = shimmerOct;
+        params.shimmerPitchMode = 0;
+        params.dry = 0.0f;
+        params.mix = 1.0f;
+        reverb.setParameters(params);
+
+        const int totalSamples = static_cast<int>(kSr * 4.5);
+        std::vector<float> left(static_cast<std::size_t>(totalSamples), 0.0f);
+        std::vector<float> right(static_cast<std::size_t>(totalSamples), 0.0f);
+
+        // 0.4s 220 Hz sine burst with smooth Hann envelope
+        const int burstSamples = static_cast<int>(kSr * 0.4);
+        for (int i = 0; i < burstSamples; ++i) {
+            const float env = 0.5f * (1.0f - std::cos(2.0f * 3.14159265f * static_cast<float>(i) / static_cast<float>(burstSamples - 1)));
+            const float val = 0.5f * env * std::sin(2.0f * 3.14159265f * 220.0f * static_cast<float>(i) / static_cast<float>(kSr));
+            left[static_cast<std::size_t>(i)] = val;
+            right[static_cast<std::size_t>(i)] = val;
+        }
+
+        for (int i = 0; i + 512 <= totalSamples; i += 512) {
+            reverb.processBlock(&left[static_cast<std::size_t>(i)], &right[static_cast<std::size_t>(i)], 512);
+        }
+
+        // Measure late reverb tail RMS between t = 3.0s and t = 4.0s
+        const int startIdx = static_cast<int>(kSr * 3.0);
+        const int endIdx = static_cast<int>(kSr * 4.0);
+        double sumSq = 0.0;
+        for (int i = startIdx; i < endIdx; ++i) {
+            const double l = left[static_cast<std::size_t>(i)];
+            const double r = right[static_cast<std::size_t>(i)];
+            sumSq += 0.5 * (l * l + r * r);
+        }
+        return std::sqrt(sumSq / static_cast<double>(endIdx - startIdx));
+    };
+
+    const double rmsNoShimmer   = measureLateTailRms(0.0f);
+    const double rmsHalfShimmer = measureLateTailRms(0.5f);
+    const double rmsFullShimmer = measureLateTailRms(1.0f);
+
+    // Turning up shimmer must NEVER shorten or choke the late reverb decay tail!
+    EXPECT_GT(rmsHalfShimmer, rmsNoShimmer * 0.90);
+    EXPECT_GT(rmsFullShimmer, rmsNoShimmer * 0.95);
+}
+
 TEST(PresetManagerTests, InitPatchLoadsCleanOscillatorAndBypassedFx) {
     nova::synth::NovaSynthProcessor processor;
     processor.prepareToPlay(48000.0, 512);
@@ -868,6 +923,71 @@ inline float measureStereoCorrelation(const float* left, const float* right, int
     const double denom = std::sqrt(sumL2 * sumR2);
     if (denom < 1e-9) return 1.0f;
     return static_cast<float>(sumLR / denom);
+}
+
+TEST(DualEngineReverbTests, ShimmerProducesAudibleHarmonicsAndStaysPitchLocked) {
+    constexpr double kSr = 48000.0;
+    constexpr int kBlock = 512;
+
+    auto measureBandPeak = [&](const float* buf, int n, float centerHz) {
+        float best = 0.0f;
+        for (float df = -5.0f; df <= 5.0f; df += 0.5f) {
+            best = std::max(best, measureMagnitudeAtFreq(buf, n, kSr, centerHz + df));
+        }
+        return best;
+    };
+
+    auto runMode = [&](float shimOct, int pitchMode) {
+        nova::dsp::DualEngineReverb reverb;
+        reverb.prepare(kSr, kBlock);
+        nova::dsp::DualEngineReverb::Parameters params;
+        params.engineMode = nova::dsp::DualEngineReverb::EngineMode::LushCloud;
+        params.spaceType = nova::dsp::DualEngineReverb::SpaceType::CathedralCloud;
+        params.decaySeconds = 10.0f;
+        params.dry = 0.0f;
+        params.mix = 1.0f;
+        params.shimmerOctave = shimOct;
+        params.shimmerPitchMode = pitchMode;
+        reverb.setParameters(params);
+
+        std::vector<float> left(kBlock, 0.0f), right(kBlock, 0.0f);
+        for (int b = 0; b < 38; ++b) {
+            for (int i = 0; i < kBlock; ++i) {
+                const float t = static_cast<float>(b * kBlock + i) / static_cast<float>(kSr);
+                const float s = 0.5f * std::sin(2.0f * std::numbers::pi_v<float> * 220.0f * t);
+                left[static_cast<std::size_t>(i)] = s;
+                right[static_cast<std::size_t>(i)] = s;
+            }
+            reverb.processBlock(left.data(), right.data(), kBlock);
+        }
+
+        std::vector<float> tailL(16384, 0.0f);
+        for (int b = 0; b < 32; ++b) {
+            std::fill(left.begin(), left.end(), 0.0f);
+            std::fill(right.begin(), right.end(), 0.0f);
+            reverb.processBlock(left.data(), right.data(), kBlock);
+            for (int i = 0; i < kBlock; ++i) {
+                tailL[static_cast<std::size_t>(b * kBlock + i)] = left[static_cast<std::size_t>(i)];
+            }
+        }
+        return tailL;
+    };
+
+    const auto tailBase  = runMode(0.0f, 0);
+    const auto tailMode0 = runMode(0.80f, 0); // +1 Oct (440 Hz)
+    const auto tailMode1 = runMode(0.80f, 1); // +2 Oct (880 Hz)
+    const auto tailMode2 = runMode(0.80f, 2); // +1 & +2 Oct (440 Hz & 880 Hz)
+    const auto tailMode3 = runMode(0.80f, 3); // -1 Oct Sub (110 Hz)
+
+    const float base440 = measureBandPeak(tailBase.data(), 16384, 440.0f);
+    const float base880 = measureBandPeak(tailBase.data(), 16384, 880.0f);
+    const float base110 = measureBandPeak(tailBase.data(), 16384, 110.0f);
+
+    EXPECT_GT(measureBandPeak(tailMode0.data(), 16384, 440.0f), base440 * 20.0f);
+    EXPECT_GT(measureBandPeak(tailMode1.data(), 16384, 880.0f), base880 * 20.0f);
+    EXPECT_GT(measureBandPeak(tailMode2.data(), 16384, 440.0f), base440 * 15.0f);
+    EXPECT_GT(measureBandPeak(tailMode2.data(), 16384, 880.0f), base880 * 15.0f);
+    EXPECT_GT(measureBandPeak(tailMode3.data(), 16384, 110.0f), base110 * 20.0f);
 }
 
 // -------------------------------------------------------------------------------------------------

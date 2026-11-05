@@ -52,6 +52,8 @@ void WorshipSynthEngine::prepare(double sampleRate, int maxBlockSize) {
         v.auxEnv.prepare(sampleRate_);
         v.filterL.prepare(sampleRate_);
         v.filterR.prepare(sampleRate_);
+        v.filterStage2L.prepare(sampleRate_);
+        v.filterStage2R.prepare(sampleRate_);
         v.filter2L.prepare(sampleRate_);
         v.filter2R.prepare(sampleRate_);
     }
@@ -69,11 +71,12 @@ void WorshipSynthEngine::prepare(double sampleRate, int maxBlockSize) {
     delayBufferR_.assign(static_cast<std::size_t>(maxDelaySamples), 0.0f);
     delayWritePos_ = 0;
     delayEnergy_ = 0.0f;
-    delayEnergy_ = 0.0f;
 
     cutoffSmoother_.prepare(sampleRate_, 12.0f);
     cutoff2Smoother_.prepare(sampleRate_, 12.0f);
     masterGainSmoother_.prepare(sampleRate_, 12.0f);
+    polyHeadroomSmoother_.prepare(sampleRate_, 25.0f);
+    polyHeadroomSmoother_.reset(1.0f);
     droneToneSmoother_.prepare(sampleRate_, 15.0f);
     droneFilterL_.prepare(sampleRate_);
     droneFilterR_.prepare(sampleRate_);
@@ -103,9 +106,12 @@ void WorshipSynthEngine::reset() noexcept {
         v.auxEnv.reset();
         v.filterL.reset();
         v.filterR.reset();
+        v.filterStage2L.reset();
+        v.filterStage2R.reset();
         v.filter2L.reset();
         v.filter2R.reset();
     }
+    polyHeadroomSmoother_.reset(1.0f);
     physicalHeldNotes_.fill(false);
     currentDroneActive_ = false;
     currentDroneKey_ = -1;
@@ -150,9 +156,10 @@ void WorshipSynthEngine::setParameters(const Parameters& params) noexcept {
     lfo3_.setParameters(params_.lfo3Shape, rate3, params_.lfo3Depth);
     lfo4_.setParameters(params_.lfo4Shape, rate4, params_.lfo4Depth);
 
-    const float warmthFactor = std::pow(2.0f, (0.5f - params_.macroWarmth) * 1.4f)
-                             * std::pow(2.0f, params_.macroAir * 0.9f)
-                             * std::pow(2.0f, params_.macroShimmer * 0.5f);
+    // Warmth macro darkens/warms the low-pass filter when turned up above 0.50;
+    // Air macro gently opens top-end sheen; Shimmer macro belongs strictly to the reverb shimmer bloom!
+    const float warmthFactor = std::pow(2.0f, (0.50f - params_.macroWarmth) * 1.35f)
+                             * std::pow(2.0f, (params_.macroAir - 0.30f) * 0.70f);
     const float targetCutoff = std::clamp(params_.filterCutoffHz * warmthFactor, 60.0f, 19000.0f);
     cutoffSmoother_.setTargetValue(targetCutoff);
 
@@ -385,6 +392,8 @@ void WorshipSynthEngine::startVoice(int midiNote, float velocity, bool isDrone, 
     if (!chosen->active) {
         chosen->filterL.reset();
         chosen->filterR.reset();
+        chosen->filterStage2L.reset();
+        chosen->filterStage2R.reset();
         chosen->filter2L.reset();
         chosen->filter2R.reset();
     }
@@ -834,15 +843,24 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
             (void)lfo4_.processSample();
         }
     } else {
+        int activeNonDroneVoices = 0;
+        for (const auto& v : voices_) {
+            if (v.active && !v.isDroneVoice) {
+                ++activeNonDroneVoices;
+            }
+        }
+        const float targetPolyScale = 1.0f / std::sqrt(1.0f + 0.45f * static_cast<float>(std::max(0, activeNonDroneVoices - 1)));
+        polyHeadroomSmoother_.setTargetValue(targetPolyScale);
+
         const float flt1Drive = params_.filterDrive;
         const bool flt1DriveActive = (flt1Drive > 0.01f);
-        const float flt1DriveGain = 1.0f + flt1Drive * 3.6f;
-        const float flt1DriveComp = flt1DriveActive ? (1.0f / std::sqrt(1.0f + flt1Drive * 1.8f)) : 1.0f;
+        const float flt1DriveGain = 1.0f + flt1Drive * 2.2f;
+        const float flt1DriveComp = flt1DriveActive ? (1.0f / std::sqrt(1.0f + flt1Drive * 1.4f)) : 1.0f;
 
         const float flt2Drive = params_.filter2Drive;
         const bool flt2DriveActive = (flt2Drive > 0.01f);
-        const float flt2DriveGain = 1.0f + flt2Drive * 3.6f;
-        const float flt2DriveComp = flt2DriveActive ? (1.0f / std::sqrt(1.0f + flt2Drive * 1.8f)) : 1.0f;
+        const float flt2DriveGain = 1.0f + flt2Drive * 2.2f;
+        const float flt2DriveComp = flt2DriveActive ? (1.0f / std::sqrt(1.0f + flt2Drive * 1.4f)) : 1.0f;
 
         for (int s = 0; s < numSamples; ++s) {
             const float lfo1Val = lfo1_.processSample();
@@ -855,6 +873,7 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
             const float baseCutoff = cutoffSmoother_.getNextValue();
             const float baseCutoff2 = cutoff2Smoother_.getNextValue();
             const float masterGain = masterGainSmoother_.getNextValue();
+            const float polyHeadroom = polyHeadroomSmoother_.getNextValue();
 
         if ((s & 7) == 0) {
             modMatrix_.setSourceValue(ModMatrix::Source::Lfo1, lfo1Val);
@@ -870,7 +889,7 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
         const float oscShapeMod2 = modMatrix_.getModulationOffset(ModMatrix::Destination::Osc2Shape);
         const float oscShapeMod3 = modMatrix_.getModulationOffset(ModMatrix::Destination::Osc3Shape);
         const float oscShapeMod4 = modMatrix_.getModulationOffset(ModMatrix::Destination::Osc4Shape);
-        const float cutoffModOctaves = modMatrix_.getModulationOffset(ModMatrix::Destination::FilterCutoff) * 2.5f;
+        const float cutoffModOctaves = modMatrix_.getModulationOffset(ModMatrix::Destination::FilterCutoff) * 1.8f;
         const float filterResoMod = modMatrix_.getModulationOffset(ModMatrix::Destination::FilterResonance) * 0.5f;
         const float vocalCarveMod = modMatrix_.getModulationOffset(ModMatrix::Destination::VocalCarve);
 
@@ -951,9 +970,12 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
             float flt1InR = voiceFlt1R + voiceBothR;
 
             if (params_.filter1Enabled) {
+                const float effReso = std::clamp(params_.filterResonance + filterResoMod, 0.35f, 6.0f);
+                const bool isFourPoleLadder = (params_.filterType == 0 || params_.filterType == 2);
+
                 if ((s & 15) == 0) {
                     const float baseCut = baseCutoff;
-                    const float envOctaves = fltEnvVal * params_.filterEnvAmount * 3.5f;
+                    const float envOctaves = fltEnvVal * params_.filterEnvAmount * 2.1f;
                     const float voiceCutoff = std::clamp(
                         baseCut * std::exp2(envOctaves + cutoffModOctaves),
                         40.0f, static_cast<float>(sampleRate_ * 0.46));
@@ -962,16 +984,25 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
                     if (params_.filterType == 1) svfType = StateVariableFilter::Type::BandPass;
                     else if (params_.filterType == 2) svfType = StateVariableFilter::Type::HighPass;
 
-                    const float effReso = std::clamp(params_.filterResonance + filterResoMod, 0.0f, 0.98f);
-                    v.filterL.setParameters(svfType, voiceCutoff, effReso);
-                    v.filterR.setParameters(svfType, voiceCutoff, effReso);
+                    if (isFourPoleLadder) {
+                        // True 24 dB/oct 4-pole ladder cascade: split Q across two 2-pole stages with slight pole stagger
+                        const float stageQ = std::clamp(std::sqrt(effReso), 0.50f, 2.45f);
+                        const float cutStage2 = std::clamp(voiceCutoff * 1.03f, 40.0f, static_cast<float>(sampleRate_ * 0.46));
+                        v.filterL.setParameters(svfType, voiceCutoff, stageQ);
+                        v.filterR.setParameters(svfType, voiceCutoff, stageQ);
+                        v.filterStage2L.setParameters(svfType, cutStage2, stageQ);
+                        v.filterStage2R.setParameters(svfType, cutStage2, stageQ);
+                    } else {
+                        v.filterL.setParameters(svfType, voiceCutoff, effReso);
+                        v.filterR.setParameters(svfType, voiceCutoff, effReso);
+                    }
                 }
 
-                // Asymmetric warm tube/ladder drive saturation with power compensation
+                // Zero-DC warm tube/ladder drive saturation (prevents DC bias build-up across chord voices!)
                 if (flt1DriveActive) {
                     auto tubeSat = [](float x) noexcept {
-                        const float xBias = x + 0.12f * x * x;
-                        return (xBias * (27.0f + xBias * xBias) / (27.0f + 9.0f * xBias * xBias));
+                        const float x2 = x * x;
+                        return (x * (27.0f + x2) / (27.0f + 9.0f * x2));
                     };
                     flt1InL = tubeSat(flt1InL * flt1DriveGain) * flt1DriveComp;
                     flt1InR = tubeSat(flt1InR * flt1DriveGain) * flt1DriveComp;
@@ -979,33 +1010,52 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
 
                 flt1InL = v.filterL.processSample(flt1InL);
                 flt1InR = v.filterR.processSample(flt1InR);
+                if (isFourPoleLadder) {
+                    flt1InL = v.filterStage2L.processSample(flt1InL);
+                    flt1InR = v.filterStage2R.processSample(flt1InR);
+                }
+
+                // Resonance peak headroom compensation prevents high-Q sweeps from clipping
+                const float resComp = 1.0f / std::sqrt(1.0f + 0.35f * std::max(0.0f, effReso - 0.707f));
+                flt1InL *= resComp;
+                flt1InR *= resComp;
             }
 
             const bool hasBoth = (voiceBothL != 0.0f || voiceBothR != 0.0f);
-            float flt2InL = voiceFlt2L + (hasBoth ? (flt1InL * 0.5f) : 0.0f);
-            float flt2InR = voiceFlt2R + (hasBoth ? (flt1InR * 0.5f) : 0.0f);
+            const bool hasDedicatedFlt2 = (voiceFlt2L != 0.0f || voiceFlt2R != 0.0f);
+            // When Filter 2 is enabled and no oscillators are routed exclusively to FLT 2,
+            // route Filter 1 in series into Filter 2 so Filter 2 always shapes the voice!
+            const bool seriesFlt1IntoFlt2 = params_.filter2Enabled && !hasDedicatedFlt2 && !hasBoth;
+
+            float flt2InL = seriesFlt1IntoFlt2 ? flt1InL : (voiceFlt2L + (hasBoth ? (flt1InL * 0.5f) : 0.0f));
+            float flt2InR = seriesFlt1IntoFlt2 ? flt1InR : (voiceFlt2R + (hasBoth ? (flt1InR * 0.5f) : 0.0f));
 
             if (params_.filter2Enabled) {
+                const float effReso2 = std::clamp(params_.filter2Resonance, 0.35f, 6.0f);
                 if ((s & 15) == 0) {
                     const float baseCut2 = baseCutoff2;
-                    const float envOctaves2 = fltEnvVal * params_.filter2EnvAmount * 3.5f;
+                    const float envOctaves2 = fltEnvVal * params_.filter2EnvAmount * 2.1f;
                     const float voiceCutoff2 = std::clamp(
                         baseCut2 * std::exp2(envOctaves2),
                         40.0f, static_cast<float>(sampleRate_ * 0.46));
 
                     auto svf2Type = StateVariableFilter::Type::LowPass;
+                    float bellGainDb = 0.0f;
                     if (params_.filter2Type == 1) svf2Type = StateVariableFilter::Type::BandPass;
                     else if (params_.filter2Type == 2) svf2Type = StateVariableFilter::Type::HighPass;
-                    else if (params_.filter2Type == 3) svf2Type = StateVariableFilter::Type::Bell;
+                    else if (params_.filter2Type == 3) {
+                        svf2Type = StateVariableFilter::Type::Bell;
+                        bellGainDb = -12.0f * std::clamp(params_.vocalCarve, 0.25f, 1.0f);
+                    }
 
-                    v.filter2L.setParameters(svf2Type, voiceCutoff2, params_.filter2Resonance);
-                    v.filter2R.setParameters(svf2Type, voiceCutoff2, params_.filter2Resonance);
+                    v.filter2L.setParameters(svf2Type, voiceCutoff2, effReso2, bellGainDb);
+                    v.filter2R.setParameters(svf2Type, voiceCutoff2, effReso2, bellGainDb);
                 }
 
                 if (flt2DriveActive) {
                     auto tubeSat2 = [](float x) noexcept {
-                        const float xBias = x + 0.12f * x * x;
-                        return (xBias * (27.0f + xBias * xBias) / (27.0f + 9.0f * xBias * xBias));
+                        const float x2 = x * x;
+                        return (x * (27.0f + x2) / (27.0f + 9.0f * x2));
                     };
                     flt2InL = tubeSat2(flt2InL * flt2DriveGain) * flt2DriveComp;
                     flt2InR = tubeSat2(flt2InR * flt2DriveGain) * flt2DriveComp;
@@ -1013,15 +1063,21 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
 
                 flt2InL = v.filter2L.processSample(flt2InL);
                 flt2InR = v.filter2R.processSample(flt2InR);
+                const float resComp2 = 1.0f / std::sqrt(1.0f + 0.30f * std::max(0.0f, effReso2 - 0.707f));
+                flt2InL *= resComp2;
+                flt2InR *= resComp2;
             }
 
             const float velGain = v.isArpVoice ? (v.velocity * (0.15f + 0.85f * v.velocity)) : (0.40f + 0.60f * v.velocity);
-            const float droneScale = v.isDroneVoice ? (params_.droneLevel * 0.70f) : 1.0f;
-            const float gain = ampEnvVal * velGain * droneScale * 0.80f;
+            const float droneScale = v.isDroneVoice ? (params_.droneLevel * 0.70f) : polyHeadroom;
+            const float gain = ampEnvVal * velGain * droneScale * 0.82f;
 
             float vOutL = 0.0f;
             float vOutR = 0.0f;
-            if (hasBoth) {
+            if (seriesFlt1IntoFlt2) {
+                vOutL = (flt2InL + voiceDirL) * gain;
+                vOutR = (flt2InR + voiceDirR) * gain;
+            } else if (hasBoth) {
                 vOutL = (flt1InL * 0.5f + flt2InL + voiceDirL) * gain;
                 vOutR = (flt1InR * 0.5f + flt2InR + voiceDirR) * gain;
             } else {
@@ -1181,6 +1237,7 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
     telemetryActiveVoices_.store(activeCount, std::memory_order_relaxed);
     telemetryPeakL_.store(peakL, std::memory_order_relaxed);
     telemetryPeakR_.store(peakR, std::memory_order_relaxed);
+    telemetryPreClipPeak_.store(preClipPeak, std::memory_order_relaxed);
     telemetryLfo1_.store(lastLfo1, std::memory_order_relaxed);
     telemetryLfo2_.store(lastLfo2, std::memory_order_relaxed);
 }
@@ -1190,6 +1247,7 @@ WorshipSynthEngine::Telemetry WorshipSynthEngine::getTelemetry() const noexcept 
     t.activeVoiceCount = telemetryActiveVoices_.load(std::memory_order_relaxed);
     t.outputPeakL = telemetryPeakL_.load(std::memory_order_relaxed);
     t.outputPeakR = telemetryPeakR_.load(std::memory_order_relaxed);
+    t.preClipPeak = telemetryPreClipPeak_.load(std::memory_order_relaxed);
     t.lfo1Value = telemetryLfo1_.load(std::memory_order_relaxed);
     t.lfo2Value = telemetryLfo2_.load(std::memory_order_relaxed);
     t.lastPlayedVelocity = lastVelocity_;

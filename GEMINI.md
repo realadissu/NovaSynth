@@ -23,3 +23,12 @@ All code inside `libs/nova_core_dsp/` and any `processBlock()` path **MUST** be 
 1. Every DSP algorithm in `libs/nova_core_dsp/` and plugin processor state in `libs/nova_core_plugin/` must be verified by unit tests in `tests/`.
 2. When modifying public headers in `libs/`, update all dependent plugin targets (`plugins/nova_*`) and unit tests (`tests/*Tests.cpp`) before completing a task.
 3. Quality and musicality take priority over shortcuts: all parameters must be smoothed (`OnePoleSmoother`) to prevent zipper noise.
+
+---
+
+## 3. Git Workflow & Regular Commits Mandate
+
+1. **Regular & Incremental Commits:** Commit often at each logical milestone, bug fix, or DSP/feature improvement rather than accumulating large monolithic diffs.
+2. **Pre-Commit Verification:** Every commit must compile cleanly with zero errors/warnings and pass all unit tests (`ctest --test-dir build --output-on-failure`).
+3. **Meaningful Commit Messages:** Use descriptive Conventional Commit style messages (`feat:`, `fix:`, `refactor:`, `perf:`, `test:`, `docs:`) clearly detailing the changes and musical/DSP rationale.
+4. **Synchronized Remote State:** Push verified commits regularly to the remote tracking branch so the working state remains safe, reproducible, and transparent.
