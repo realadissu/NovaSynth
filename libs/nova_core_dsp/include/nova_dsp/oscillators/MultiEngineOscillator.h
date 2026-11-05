@@ -80,7 +80,8 @@ public:
 
 private:
     static constexpr int kMaxUnison = 5;
-    static constexpr int kWtFrames = 8;
+    static constexpr int kWtTables = 8;
+    static constexpr int kWtFrames = 4;
     static constexpr int kWtSize = 1024;
     static constexpr int kMaxStringDelay = 4096;
 

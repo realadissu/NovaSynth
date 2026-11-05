@@ -672,6 +672,7 @@ public:
                 const juce::String prefix = "osc" + juce::String(slotIndex_ + 1) + "_";
                 if (auto* p = proc_.getAPVTS().getParameter(prefix + "model")) {
                     p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(i)));
+                    proc_.syncParametersFromAPVTS();
                 }
                 repaint();
                 return;
@@ -702,6 +703,7 @@ public:
         const juce::String prefix = "osc" + juce::String(slotIndex_ + 1) + "_";
         if (auto* p = proc_.getAPVTS().getParameter(prefix + "model")) {
             p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(nextIdx)));
+            proc_.syncParametersFromAPVTS();
         }
         repaint();
     }
@@ -1543,6 +1545,7 @@ private:
                 if (res >= 1 && res <= count) {
                     if (auto* p = proc_.getAPVTS().getParameter(prefix + "model")) {
                         p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(res - 1)));
+                        proc_.syncParametersFromAPVTS();
                     }
                     repaint();
                 }

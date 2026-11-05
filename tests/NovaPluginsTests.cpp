@@ -423,6 +423,113 @@ TEST(MultiEngineOscillatorTests, AllGranularAndPluckModelsProduceDistinctSignatu
     }
 }
 
+TEST(MultiEngineOscillatorTests, AllEightWavetablesProduceDistinctSignatures) {
+    using nova::dsp::MultiEngineOscillator;
+    std::vector<std::vector<float>> wtBuffers;
+    for (int m = 0; m < 8; ++m) {
+        MultiEngineOscillator osc;
+        osc.prepare(48000.0);
+        MultiEngineOscillator::Parameters p;
+        p.enabled = true;
+        p.sourceType = 0;
+        p.engine = MultiEngineOscillator::EngineType::EvolvingWavetable;
+        p.modelIndex = m;
+        p.shapeMorph = 0.5f;
+        p.level = 0.8f;
+        osc.setParameters(p);
+        osc.triggerNote(261.63f, 0.85f, 42);
+
+        std::vector<float> buf(1024, 0.0f);
+        for (int i = 0; i < 1024; ++i) {
+            float l = 0.0f, r = 0.0f;
+            osc.processSample(261.63f, 0.0f, 0.0f, l, r);
+            buf[static_cast<std::size_t>(i)] = 0.5f * (l + r);
+        }
+        wtBuffers.push_back(std::move(buf));
+    }
+
+    // Check every pair (i, j) of wavetables has distinct audio
+    for (int i = 0; i < 8; ++i) {
+        for (int j = i + 1; j < 8; ++j) {
+            float diffEnergy = 0.0f;
+            for (int s = 0; s < 1024; ++s) {
+                const float d = wtBuffers[static_cast<std::size_t>(i)][static_cast<std::size_t>(s)] -
+                                wtBuffers[static_cast<std::size_t>(j)][static_cast<std::size_t>(s)];
+                diffEnergy += d * d;
+            }
+            EXPECT_GT(diffEnergy, 0.02f) << "Wavetable models " << i << " and " << j << " sound identical!";
+        }
+    }
+}
+
+TEST(MultiEngineOscillatorTests, AnalogAllSixWaveformsRenderAccurately) {
+    using nova::dsp::MultiEngineOscillator;
+    MultiEngineOscillator osc;
+    osc.prepare(48000.0);
+
+    std::vector<std::vector<float>> analogBuffers;
+    for (int m = 0; m < 6; ++m) {
+        MultiEngineOscillator::Parameters p;
+        p.enabled = true;
+        p.sourceType = 0;
+        p.engine = MultiEngineOscillator::EngineType::WarmAnalog;
+        p.modelIndex = m;
+        p.shapeMorph = 0.3f;
+        p.level = 0.8f;
+        osc.setParameters(p);
+        osc.triggerNote(220.0f, 0.85f, 42);
+
+        std::vector<float> buf(512, 0.0f);
+        for (int i = 0; i < 512; ++i) {
+            float l = 0.0f, r = 0.0f;
+            osc.processSample(220.0f, 0.0f, 0.0f, l, r);
+            buf[static_cast<std::size_t>(i)] = l;
+        }
+        analogBuffers.push_back(std::move(buf));
+    }
+
+    for (int i = 0; i < 6; ++i) {
+        for (int j = i + 1; j < 6; ++j) {
+            float diff = 0.0f;
+            for (int s = 0; s < 512; ++s) {
+                const float d = analogBuffers[static_cast<std::size_t>(i)][static_cast<std::size_t>(s)] -
+                                analogBuffers[static_cast<std::size_t>(j)][static_cast<std::size_t>(s)];
+                diff += d * d;
+            }
+            EXPECT_GT(diff, 0.05f) << "Analog waveforms " << i << " and " << j << " are not distinct!";
+        }
+    }
+}
+
+TEST(MultiEngineOscillatorTests, NoiseAttackKeyClickGeneratesAudibleTransientPunch) {
+    using nova::dsp::MultiEngineOscillator;
+    MultiEngineOscillator osc;
+    osc.prepare(48000.0);
+
+    MultiEngineOscillator::Parameters p;
+    p.enabled = true;
+    p.sourceType = 3; // NOISE
+    p.engine = MultiEngineOscillator::EngineType::NoiseTransient;
+    p.modelIndex = 3; // Attack Key Click
+    p.level = 0.85f;
+    p.shapeMorph = 0.4f;
+    osc.setParameters(p);
+    osc.triggerNote(261.63f, 0.9f, 42);
+
+    float peak = 0.0f;
+    float clickEnergy = 0.0f;
+    for (int i = 0; i < 512; ++i) {
+        float l = 0.0f, r = 0.0f;
+        osc.processSample(261.63f, 0.0f, 0.0f, l, r);
+        peak = std::max(peak, std::max(std::abs(l), std::abs(r)));
+        clickEnergy += l * l + r * r;
+    }
+
+    // Must be clearly audible and punchy upon note trigger
+    EXPECT_GT(peak, 0.15f);
+    EXPECT_GT(clickEnergy, 0.02f);
+}
+
 TEST(SampleBankTests, AllEightSamplesArePopulatedAndNonZero) {
     using nova::dsp::SampleBank;
     EXPECT_EQ(SampleBank::getSampleCount(), 8);

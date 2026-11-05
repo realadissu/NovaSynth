@@ -569,6 +569,7 @@ private:
             if (prevModel < 0) prevModel = totalModels - 1;
             if (param != nullptr) {
                 param->setValueNotifyingHost(param->convertTo0to1(static_cast<float>(prevModel)));
+                proc_.syncParametersFromAPVTS();
             }
             repaint();
             return;
@@ -579,6 +580,7 @@ private:
             int nextModel = (curModel + 1) % totalModels;
             if (param != nullptr) {
                 param->setValueNotifyingHost(param->convertTo0to1(static_cast<float>(nextModel)));
+                proc_.syncParametersFromAPVTS();
             }
             repaint();
             return;
@@ -595,6 +597,7 @@ private:
                             if (res >= 1 && res <= totalModels) {
                                 if (auto* p = proc_.getAPVTS().getParameter(prefix + "model")) {
                                     p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(res - 1)));
+                                    proc_.syncParametersFromAPVTS();
                                 }
                                 repaint();
                             }

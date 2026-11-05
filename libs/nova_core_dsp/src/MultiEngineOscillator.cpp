@@ -8,112 +8,271 @@ namespace nova::dsp {
 
 namespace {
 
-// Shared static 8-frame bandlimited wavetable (initialized once on first prepare)
+// Shared static 8-model x 4-frame bandlimited wavetable bank (initialized once on first prepare)
 struct SharedWavetableBank {
-    std::array<std::array<float, 1024>, 8> frames{};
+    static constexpr int kWtTables = 8;
+    static constexpr int kWtFrames = 4;
+    static constexpr int kWtSize = 1024;
+    std::array<std::array<std::array<float, kWtSize>, kWtFrames>, kWtTables> tables{};
 
     SharedWavetableBank() {
         constexpr float twoPi = 2.0f * std::numbers::pi_v<float>;
-        // Golden-angle harmonic phase dispersion prevents stiff "church organ" drawbar phase-peaking
-        // while preserving the exact harmonic amplitude spectrum of each frame.
+        // Golden-angle harmonic phase dispersion preserves exact amplitude spectra without phase peaking
         auto dispPhase = [](int h) constexpr noexcept -> float {
             return (h <= 1) ? 0.0f : static_cast<float>((h - 1) * 2.39996323f);
         };
 
-        for (int i = 0; i < 1024; ++i) {
-            const float ph = static_cast<float>(i) / 1024.0f;
+        for (int i = 0; i < kWtSize; ++i) {
+            const float ph = static_cast<float>(i) / static_cast<float>(kWtSize);
             const float w = twoPi * ph;
 
-            // Frame 0: Warm Analog Pad Fundamental (Prophet/Juno style warm low-harmonic body)
-            frames[0][static_cast<std::size_t>(i)] =
-                0.70f * std::sin(w) +
-                0.34f * std::sin(2.0f * w + dispPhase(2)) +
-                0.18f * std::sin(3.0f * w + dispPhase(3)) +
-                0.09f * std::sin(4.0f * w + dispPhase(4)) +
-                0.04f * std::sin(5.0f * w + dispPhase(5));
+            // ========================================================
+            // Table 0: Worship Harmonics (Rich, warm worship pad overtone series)
+            // ========================================================
+            tables[0][0][static_cast<std::size_t>(i)] =
+                0.85f * std::sin(w) + 0.35f * std::sin(2.0f * w) + 0.18f * std::sin(3.0f * w);
 
-            // Frame 1: Warm Vintage Ensemble (rich low-mid harmonic foundation, 1..10)
-            float s1 = 0.0f;
-            for (int h = 1; h <= 10; ++h) {
-                const float fh = static_cast<float>(h);
-                const float amp = (1.0f / std::pow(fh, 0.92f)) * (1.0f + 0.25f * std::cos(fh * 1.1f));
-                s1 += amp * std::sin(fh * w + dispPhase(h));
+            tables[0][1][static_cast<std::size_t>(i)] =
+                0.75f * std::sin(w) + 0.40f * std::sin(2.0f * w) + 0.32f * std::sin(3.0f * w + dispPhase(3))
+                + 0.22f * std::sin(4.0f * w + dispPhase(4)) + 0.14f * std::sin(5.0f * w + dispPhase(5)) + 0.10f * std::sin(6.0f * w);
+
+            {
+                float s = 0.0f;
+                for (int h = 1; h <= 12; ++h) {
+                    const float fh = static_cast<float>(h);
+                    const float amp = (1.0f / std::pow(fh, 0.95f)) * (1.0f + 0.30f * std::cos(fh * 1.2f));
+                    s += amp * std::sin(fh * w + dispPhase(h));
+                }
+                tables[0][2][static_cast<std::size_t>(i)] = s;
             }
-            frames[1][static_cast<std::size_t>(i)] = s1;
-
-            // Frame 2: Silky Worship String (lush bowed harmonic taper 1..20 with gentle string sheen)
-            float s2 = 0.0f;
-            for (int h = 1; h <= 20; ++h) {
-                const float fh = static_cast<float>(h);
-                const float body = (1.0f / fh) * std::exp(-0.055f * fh);
-                const float sheen = 0.14f * std::exp(-0.18f * (fh - 7.0f) * (fh - 7.0f));
-                s2 += (body + sheen) * std::sin(fh * w + dispPhase(h));
+            {
+                float s = 0.0f;
+                for (int h = 1; h <= 20; ++h) {
+                    const float fh = static_cast<float>(h);
+                    const float amp = (1.0f / std::pow(fh, 0.88f)) * (1.0f + 0.20f * std::sin(fh * 1.5f));
+                    s += amp * std::sin(fh * w + dispPhase(h));
+                }
+                tables[0][3][static_cast<std::size_t>(i)] = s;
             }
-            frames[2][static_cast<std::size_t>(i)] = s2;
 
-            // Frame 3: Vocal Formant Choir (dual vowel formant peaks around harmonics 2..4 and 6..9)
-            float s3 = 0.0f;
-            for (int h = 1; h <= 16; ++h) {
-                const float fh = static_cast<float>(h);
-                const float f1Peak = 0.65f * std::exp(-0.45f * (fh - 2.6f) * (fh - 2.6f));
-                const float f2Peak = 0.42f * std::exp(-0.30f * (fh - 7.2f) * (fh - 7.2f));
-                const float base = (h == 1) ? 0.55f : (0.12f / fh);
-                s3 += (base + f1Peak + f2Peak) * std::sin(fh * w + dispPhase(h));
+            // ========================================================
+            // Table 1: Cathedral Drawbars (Hammond B3 Tonewheel Organ)
+            // Harmonics: 16' (h=1), 8' (h=2, root), 5 1/3' (h=3), 4' (h=4),
+            //            2 2/3' (h=6), 2' (h=8), 1 3/5' (h=10), 1 1/3' (h=12), 1' (h=16)
+            // ========================================================
+            // Frame 0: 888000000 (Mellow Jazz Tonewheel: 16', 8', 5 1/3')
+            tables[1][0][static_cast<std::size_t>(i)] =
+                0.85f * std::sin(2.0f * w) + 0.75f * std::sin(w) + 0.65f * std::sin(3.0f * w);
+
+            // Frame 1: 888800000 (Gospel Foundation: adds 4')
+            tables[1][1][static_cast<std::size_t>(i)] =
+                0.85f * std::sin(2.0f * w) + 0.75f * std::sin(w) + 0.65f * std::sin(3.0f * w)
+                + 0.55f * std::sin(4.0f * w);
+
+            // Frame 2: 888888000 (Classic Church Rock / Shout: adds 2 2/3' & 2')
+            tables[1][2][static_cast<std::size_t>(i)] =
+                0.85f * std::sin(2.0f * w) + 0.75f * std::sin(w) + 0.65f * std::sin(3.0f * w)
+                + 0.55f * std::sin(4.0f * w) + 0.50f * std::sin(6.0f * w) + 0.45f * std::sin(8.0f * w);
+
+            // Frame 3: 888888888 (Full Cathedral Organ: all drawbars out with biting upper brilliance)
+            tables[1][3][static_cast<std::size_t>(i)] =
+                0.90f * std::sin(2.0f * w) + 0.80f * std::sin(w) + 0.70f * std::sin(3.0f * w)
+                + 0.65f * std::sin(4.0f * w) + 0.60f * std::sin(6.0f * w) + 0.55f * std::sin(8.0f * w)
+                + 0.45f * std::sin(10.0f * w) + 0.40f * std::sin(12.0f * w) + 0.35f * std::sin(16.0f * w);
+
+            // ========================================================
+            // Table 2: Silky Velvet Strings (Orchestral Bowed String Ensemble)
+            // Cello/Violin cavity resonances at 450 Hz, 1200 Hz, 2800 Hz
+            // ========================================================
+            {
+                float s0 = 0.0f;
+                for (int h = 1; h <= 8; ++h) {
+                    const float fh = static_cast<float>(h);
+                    const float amp = (1.0f / fh) * (1.0f + 0.40f * std::exp(-0.80f * (fh - 3.0f) * (fh - 3.0f)));
+                    s0 += amp * std::sin(fh * w + dispPhase(h));
+                }
+                tables[2][0][static_cast<std::size_t>(i)] = s0;
+
+                float s1 = 0.0f;
+                for (int h = 1; h <= 16; ++h) {
+                    const float fh = static_cast<float>(h);
+                    const float f1 = 0.45f * std::exp(-0.40f * (fh - 3.5f) * (fh - 3.5f));
+                    const float f2 = 0.25f * std::exp(-0.30f * (fh - 8.5f) * (fh - 8.5f));
+                    s1 += ((1.0f / fh) + f1 + f2) * std::sin(fh * w + dispPhase(h));
+                }
+                tables[2][1][static_cast<std::size_t>(i)] = s1;
+
+                float s2 = 0.0f;
+                for (int h = 1; h <= 24; ++h) {
+                    const float fh = static_cast<float>(h);
+                    const float body = (1.0f / std::pow(fh, 0.92f));
+                    const float sheen = 0.22f * std::exp(-0.15f * (fh - 16.0f) * (fh - 16.0f));
+                    s2 += (body + sheen) * std::sin(fh * w + dispPhase(h));
+                }
+                tables[2][2][static_cast<std::size_t>(i)] = s2;
+
+                float s3 = 0.0f;
+                for (int h = 1; h <= 32; ++h) {
+                    const float fh = static_cast<float>(h);
+                    const float body = (1.0f / std::pow(fh, 0.88f));
+                    const float sheen = 0.35f * std::exp(-0.12f * (fh - 18.0f) * (fh - 18.0f));
+                    s3 += (body + sheen) * std::sin(fh * w + dispPhase(h));
+                }
+                tables[2][3][static_cast<std::size_t>(i)] = s3;
             }
-            frames[3][static_cast<std::size_t>(i)] = s3;
 
-            // Frame 4: Fifth & Octave Harmonic Pad (warm fundamental + resonant 2x, 3x, 4x, 6x, 8x, 9x, 12x)
-            frames[4][static_cast<std::size_t>(i)] =
-                0.56f * std::sin(w) +
-                0.36f * std::sin(2.0f * w + dispPhase(2)) +
-                0.32f * std::sin(3.0f * w + dispPhase(3)) +
-                0.20f * std::sin(4.0f * w + dispPhase(4)) +
-                0.22f * std::sin(6.0f * w + dispPhase(6)) +
-                0.14f * std::sin(8.0f * w + dispPhase(8)) +
-                0.12f * std::sin(9.0f * w + dispPhase(9)) +
-                0.09f * std::sin(12.0f * w + dispPhase(12));
+            // ========================================================
+            // Table 3: Vocal Choir Formants (Human Acoustic Vowel Choir)
+            // Distinct vowels: /u/ ("Ooo") -> /o/ ("Ohh") -> /a/ ("Aah") -> /i/ ("Eee")
+            // ========================================================
+            {
+                float s0 = 0.0f;
+                for (int h = 1; h <= 16; ++h) {
+                    const float fh = static_cast<float>(h);
+                    const float f1 = 0.90f * std::exp(-1.20f * (fh - 2.0f) * (fh - 2.0f));
+                    const float f2 = 0.50f * std::exp(-0.80f * (fh - 5.0f) * (fh - 5.0f));
+                    s0 += ((h == 1 ? 0.60f : 0.05f) + f1 + f2) * std::sin(fh * w + dispPhase(h));
+                }
+                tables[3][0][static_cast<std::size_t>(i)] = s0;
 
-            // Frame 5: Glass Bell Harmonics (crystalline D-50 / Prophet-VS style bell pad partials)
-            frames[5][static_cast<std::size_t>(i)] =
-                0.52f * std::sin(w) +
-                0.24f * std::sin(2.0f * w + dispPhase(2)) +
-                0.34f * std::sin(3.0f * w + dispPhase(3)) +
-                0.28f * std::sin(5.0f * w + dispPhase(5)) +
-                0.22f * std::sin(7.0f * w + dispPhase(7)) +
-                0.18f * std::sin(10.0f * w + dispPhase(10)) +
-                0.14f * std::sin(14.0f * w + dispPhase(14));
+                float s1 = 0.0f;
+                for (int h = 1; h <= 18; ++h) {
+                    const float fh = static_cast<float>(h);
+                    const float f1 = 0.85f * std::exp(-0.90f * (fh - 3.2f) * (fh - 3.2f));
+                    const float f2 = 0.60f * std::exp(-0.60f * (fh - 7.0f) * (fh - 7.0f));
+                    s1 += ((h == 1 ? 0.50f : 0.05f) + f1 + f2) * std::sin(fh * w + dispPhase(h));
+                }
+                tables[3][1][static_cast<std::size_t>(i)] = s1;
 
-            // Frame 6: Warm OB/CS Brass Swell (rich analog brass harmonic slope 1..18)
-            float s6 = 0.0f;
-            for (int h = 1; h <= 18; ++h) {
-                const float fh = static_cast<float>(h);
-                const float brassEnv = (1.0f / std::pow(fh, 0.78f)) * std::exp(-0.04f * fh);
-                s6 += brassEnv * std::sin(fh * w + dispPhase(h));
+                float s2 = 0.0f;
+                for (int h = 1; h <= 22; ++h) {
+                    const float fh = static_cast<float>(h);
+                    const float f1 = 0.80f * std::exp(-0.60f * (fh - 5.2f) * (fh - 5.2f));
+                    const float f2 = 0.70f * std::exp(-0.40f * (fh - 9.0f) * (fh - 9.0f));
+                    const float f3 = 0.35f * std::exp(-0.30f * (fh - 16.0f) * (fh - 16.0f));
+                    s2 += ((h == 1 ? 0.40f : 0.05f) + f1 + f2 + f3) * std::sin(fh * w + dispPhase(h));
+                }
+                tables[3][2][static_cast<std::size_t>(i)] = s2;
+
+                float s3 = 0.0f;
+                for (int h = 1; h <= 24; ++h) {
+                    const float fh = static_cast<float>(h);
+                    const float f1 = 0.75f * std::exp(-1.00f * (fh - 2.2f) * (fh - 2.2f));
+                    const float f2 = 0.85f * std::exp(-0.25f * (fh - 15.0f) * (fh - 15.0f));
+                    const float f3 = 0.55f * std::exp(-0.20f * (fh - 20.0f) * (fh - 20.0f));
+                    s3 += ((h == 1 ? 0.35f : 0.04f) + f1 + f2 + f3) * std::sin(fh * w + dispPhase(h));
+                }
+                tables[3][3][static_cast<std::size_t>(i)] = s3;
             }
-            frames[6][static_cast<std::size_t>(i)] = s6;
 
-            // Frame 7: Celestial Shimmer Air (silky octave/fifth halo with airy upper partials)
-            frames[7][static_cast<std::size_t>(i)] =
-                0.46f * std::sin(w) +
-                0.36f * std::sin(2.0f * w + dispPhase(2)) +
-                0.24f * std::sin(3.0f * w + dispPhase(3)) +
-                0.28f * std::sin(4.0f * w + dispPhase(4)) +
-                0.22f * std::sin(6.0f * w + dispPhase(6)) +
-                0.18f * std::sin(8.0f * w + dispPhase(8)) +
-                0.15f * std::sin(12.0f * w + dispPhase(12)) +
-                0.11f * std::sin(16.0f * w + dispPhase(16));
+            // ========================================================
+            // Table 4: Harmonic Octave Pad (Pristine Octave Stacks)
+            // ========================================================
+            tables[4][0][static_cast<std::size_t>(i)] =
+                0.85f * std::sin(w) + 0.55f * std::sin(2.0f * w);
+
+            tables[4][1][static_cast<std::size_t>(i)] =
+                0.75f * std::sin(w) + 0.65f * std::sin(2.0f * w) + 0.45f * std::sin(4.0f * w);
+
+            tables[4][2][static_cast<std::size_t>(i)] =
+                0.65f * std::sin(w) + 0.55f * std::sin(2.0f * w) + 0.30f * std::sin(3.0f * w)
+                + 0.45f * std::sin(4.0f * w) + 0.25f * std::sin(6.0f * w) + 0.35f * std::sin(8.0f * w);
+
+            tables[4][3][static_cast<std::size_t>(i)] =
+                0.55f * std::sin(w) + 0.50f * std::sin(2.0f * w) + 0.25f * std::sin(3.0f * w)
+                + 0.40f * std::sin(4.0f * w) + 0.22f * std::sin(6.0f * w) + 0.32f * std::sin(8.0f * w)
+                + 0.18f * std::sin(12.0f * w) + 0.24f * std::sin(16.0f * w) + 0.14f * std::sin(24.0f * w);
+
+            // ========================================================
+            // Table 5: Glass Bell Chimes (Metallic Inharmonic Bell / D-50 / DX7 Tine)
+            // ========================================================
+            tables[5][0][static_cast<std::size_t>(i)] =
+                0.85f * std::sin(w) + 0.35f * std::sin(2.0f * w) + 0.25f * std::sin(3.0f * w)
+                + 0.12f * std::sin(5.0f * w);
+
+            tables[5][1][static_cast<std::size_t>(i)] =
+                0.60f * std::sin(w) + 0.45f * std::sin(3.0f * w) + 0.38f * std::sin(5.0f * w)
+                + 0.32f * std::sin(7.0f * w) + 0.25f * std::sin(11.0f * w);
+
+            tables[5][2][static_cast<std::size_t>(i)] =
+                0.50f * std::sin(w) + 0.30f * std::sin(2.0f * w) + 0.40f * std::sin(3.0f * w)
+                + 0.35f * std::sin(5.0f * w) + 0.30f * std::sin(7.0f * w) + 0.28f * std::sin(11.0f * w)
+                + 0.22f * std::sin(14.0f * w) + 0.18f * std::sin(19.0f * w);
+
+            tables[5][3][static_cast<std::size_t>(i)] =
+                0.40f * std::sin(w) + 0.35f * std::sin(3.0f * w) + 0.32f * std::sin(5.0f * w)
+                + 0.30f * std::sin(7.0f * w) + 0.28f * std::sin(11.0f * w) + 0.24f * std::sin(14.0f * w)
+                + 0.22f * std::sin(19.0f * w) + 0.18f * std::sin(23.0f * w) + 0.15f * std::sin(27.0f * w);
+
+            // ========================================================
+            // Table 6: Warm Brass Swell (Oberheim OB-Xa / CS-80 Analog Brass)
+            // ========================================================
+            {
+                float s0 = 0.0f;
+                for (int h = 1; h <= 6; ++h) {
+                    const float fh = static_cast<float>(h);
+                    s0 += (1.0f / fh) * std::sin(fh * w);
+                }
+                tables[6][0][static_cast<std::size_t>(i)] = s0;
+
+                float s1 = 0.0f;
+                for (int h = 1; h <= 12; ++h) {
+                    const float fh = static_cast<float>(h);
+                    const float hornPeak = 0.45f * std::exp(-0.60f * (fh - 3.5f) * (fh - 3.5f));
+                    s1 += ((1.0f / std::pow(fh, 0.85f)) + hornPeak) * std::sin(fh * w);
+                }
+                tables[6][1][static_cast<std::size_t>(i)] = s1;
+
+                float s2 = 0.0f;
+                for (int h = 1; h <= 18; ++h) {
+                    const float fh = static_cast<float>(h);
+                    const float hornPeak = 0.65f * std::exp(-0.35f * (fh - 4.2f) * (fh - 4.2f));
+                    s2 += ((1.0f / std::pow(fh, 0.75f)) + hornPeak) * std::sin(fh * w);
+                }
+                tables[6][2][static_cast<std::size_t>(i)] = s2;
+
+                float s3 = 0.0f;
+                for (int h = 1; h <= 26; ++h) {
+                    const float fh = static_cast<float>(h);
+                    const float hornPeak = 0.85f * std::exp(-0.25f * (fh - 5.0f) * (fh - 5.0f));
+                    s3 += ((1.0f / std::pow(fh, 0.70f)) + hornPeak) * std::sin(fh * w);
+                }
+                tables[6][3][static_cast<std::size_t>(i)] = s3;
+            }
+
+            // ========================================================
+            // Table 7: Celestial Shimmer Air (High Air Halo / Angelic Sizzle)
+            // ========================================================
+            tables[7][0][static_cast<std::size_t>(i)] =
+                0.75f * std::sin(w) + 0.35f * std::sin(4.0f * w) + 0.25f * std::sin(8.0f * w);
+
+            tables[7][1][static_cast<std::size_t>(i)] =
+                0.55f * std::sin(w) + 0.40f * std::sin(4.0f * w) + 0.35f * std::sin(6.0f * w)
+                + 0.30f * std::sin(8.0f * w) + 0.22f * std::sin(12.0f * w);
+
+            tables[7][2][static_cast<std::size_t>(i)] =
+                0.45f * std::sin(w) + 0.35f * std::sin(4.0f * w) + 0.32f * std::sin(8.0f * w)
+                + 0.28f * std::sin(12.0f * w) + 0.24f * std::sin(16.0f * w) + 0.20f * std::sin(20.0f * w)
+                + 0.16f * std::sin(24.0f * w);
+
+            tables[7][3][static_cast<std::size_t>(i)] =
+                0.35f * std::sin(w) + 0.30f * std::sin(4.0f * w) + 0.28f * std::sin(8.0f * w)
+                + 0.26f * std::sin(12.0f * w) + 0.24f * std::sin(16.0f * w) + 0.22f * std::sin(20.0f * w)
+                + 0.20f * std::sin(24.0f * w) + 0.18f * std::sin(28.0f * w) + 0.15f * std::sin(32.0f * w);
         }
 
-        // Normalize all 8 frames to consistent RMS (~0.62) so morphing across frames is volume-matched and never clips
-        for (std::size_t f = 0; f < 8; ++f) {
-            float sumSq = 0.0f;
-            for (std::size_t i = 0; i < 1024; ++i) {
-                sumSq += frames[f][i] * frames[f][i];
-            }
-            const float rms = std::sqrt(sumSq / 1024.0f);
-            const float gain = (rms > 1e-5f) ? (0.62f / rms) : 1.0f;
-            for (std::size_t i = 0; i < 1024; ++i) {
-                frames[f][i] *= gain;
+        // Normalize all tables & frames to consistent RMS (~0.62)
+        for (std::size_t t = 0; t < static_cast<std::size_t>(kWtTables); ++t) {
+            for (std::size_t f = 0; f < static_cast<std::size_t>(kWtFrames); ++f) {
+                float sumSq = 0.0f;
+                for (std::size_t i = 0; i < static_cast<std::size_t>(kWtSize); ++i) {
+                    sumSq += tables[t][f][i] * tables[t][f][i];
+                }
+                const float rms = std::sqrt(sumSq / static_cast<float>(kWtSize));
+                const float gain = (rms > 1e-5f) ? (0.62f / rms) : 1.0f;
+                for (std::size_t i = 0; i < static_cast<std::size_t>(kWtSize); ++i) {
+                    tables[t][f][i] *= gain;
+                }
             }
         }
     }
@@ -432,10 +591,10 @@ void MultiEngineOscillator::processSample(float baseFrequencyHz,
         case EngineType::EvolvingWavetable: {
             const auto& bank = getWavetableBank();
             const float twoPi = 2.0f * std::numbers::pi_v<float>;
-            const int baseFrame = std::clamp(params_.modelIndex, 0, kWtFrames - 1);
+            const int tableIdx = std::clamp(params_.modelIndex, 0, kWtTables - 1);
 
             // Organic internal wavetable scanning so held chords breathe and evolve even without external LFO
-            const float scanRate = (0.14f + 0.55f * params_.rate) * (0.7f + 0.6f * detuneAmt);
+            const float scanRate = (0.12f + 0.45f * params_.rate) * (0.7f + 0.6f * detuneAmt);
             texGrainPhase_ += scanRate * invSr;
             if (texGrainPhase_ >= 1.0f) texGrainPhase_ -= 1.0f;
 
@@ -451,30 +610,36 @@ void MultiEngineOscillator::processSample(float baseFrequencyHz,
                 if (ph >= 1.0f) ph -= 1.0f;
                 phases_[idx] = ph;
 
-                // Per-unison organic wavetable frame drift creates lush stereo spectral movement
+                // Subtle per-unison organic wavetable frame drift creates lush stereo spectral movement
                 const float uScan = std::sin(twoPi * (texGrainPhase_ + static_cast<float>(u) * 0.21f)) *
-                                    (0.32f * (0.25f + 0.75f * detuneAmt));
-                const float fPos = std::clamp(static_cast<float>(baseFrame) + shape * 1.65f + uScan,
-                                              0.0f, static_cast<float>(kWtFrames - 1));
+                                    (0.18f * (0.25f + 0.75f * detuneAmt));
+                // Morph across the 4 frames (0..3) of the selected wavetable with WT POS / shape
+                const float fPos = std::clamp(shape * 3.0f + uScan, 0.0f, 3.0f);
                 const int frame0 = std::clamp(static_cast<int>(fPos), 0, kWtFrames - 2);
                 const int frame1 = frame0 + 1;
                 const float frameFrac = fPos - static_cast<float>(frame0);
 
-                // Subtle phase-distortion warmth controlled by shape
-                const float warp = 0.06f * shape * std::sin(twoPi * ph);
-                float phWarped = ph + warp;
-                if (phWarped >= 1.0f) phWarped -= 1.0f;
-                else if (phWarped < 0.0f) phWarped += 1.0f;
+                // Asymmetric wavetable warp (controlled by params_.warp knob)
+                float phWarped = ph;
+                const float warpAmt = std::clamp(params_.warp, 0.0f, 1.0f);
+                if (warpAmt > 0.01f) {
+                    if (phWarped < 0.5f) {
+                        phWarped = 0.5f * std::pow(phWarped * 2.0f, 1.0f + warpAmt * 2.2f);
+                    } else {
+                        phWarped = 1.0f - 0.5f * std::pow((1.0f - phWarped) * 2.0f, 1.0f + warpAmt * 2.2f);
+                    }
+                }
 
                 const float tableIdxF = phWarped * static_cast<float>(kWtSize);
                 const int s0 = static_cast<int>(tableIdxF) & (kWtSize - 1);
                 const int s1 = (s0 + 1) & (kWtSize - 1);
                 const float sFrac = tableIdxF - std::floor(tableIdxF);
 
-                const float v00 = bank.frames[static_cast<std::size_t>(frame0)][static_cast<std::size_t>(s0)];
-                const float v01 = bank.frames[static_cast<std::size_t>(frame0)][static_cast<std::size_t>(s1)];
-                const float v10 = bank.frames[static_cast<std::size_t>(frame1)][static_cast<std::size_t>(s0)];
-                const float v11 = bank.frames[static_cast<std::size_t>(frame1)][static_cast<std::size_t>(s1)];
+                const auto& activeTable = bank.tables[static_cast<std::size_t>(tableIdx)];
+                const float v00 = activeTable[static_cast<std::size_t>(frame0)][static_cast<std::size_t>(s0)];
+                const float v01 = activeTable[static_cast<std::size_t>(frame0)][static_cast<std::size_t>(s1)];
+                const float v10 = activeTable[static_cast<std::size_t>(frame1)][static_cast<std::size_t>(s0)];
+                const float v11 = activeTable[static_cast<std::size_t>(frame1)][static_cast<std::size_t>(s1)];
 
                 const float w0 = v00 + sFrac * (v01 - v00);
                 const float w1 = v10 + sFrac * (v11 - v10);
@@ -787,9 +952,38 @@ void MultiEngineOscillator::processSample(float baseFrequencyHz,
                     texFilterState2_ += 0.42f * (white - texFilterState2_);
                     noiseSig = (white - texFilterState2_) * 0.52f;
                     break;
-                case 3: // Attack Key Click
-                    noiseSig = white * std::exp(-phases_[0] * (16.0f + shape * 32.0f)) * 1.25f;
-                    phases_[0] += 0.005f;
+                case 3: // Attack Key Click: Punchy mechanical keybed & hammer contact transient
+                    {
+                        constexpr float twoPi = 2.0f * std::numbers::pi_v<float>;
+                        const float clickDurSec = std::clamp(params_.duration > 0.001f ? params_.duration : (0.035f + 0.065f * shape), 0.015f, 0.150f);
+                        const float clickProgress = phases_[0];
+                        if (phases_[0] < 1.0f) {
+                            phases_[0] += invSr / clickDurSec;
+                        }
+
+                        // Sharp exponential attack envelope with tactile contact decay
+                        const float clickEnv = (clickProgress < 1.0f)
+                            ? std::exp(-clickProgress * (4.5f + shape * 3.5f))
+                            : 0.0f;
+
+                        // Dual acoustic contact resonance:
+                        // 1) High-frequency key contact snap (felt strike / hammer impact)
+                        texFilterState2_ += 0.55f * (white - texFilterState2_);
+                        const float snap = (white - texFilterState2_);
+
+                        // 2) Resonant wooden keybed thump (hollow acoustic body thud around 800 - 1200 Hz)
+                        texFilterState1_ += 0.16f * (white - texFilterState1_);
+                        const float thud = texFilterState1_;
+
+                        // 3) Acoustic mechanical contact pulse (sine click at ~1.4 kHz)
+                        const float clickSine = std::sin(twoPi * std::min(1.0f, clickProgress) * 18.0f) * (1.0f - std::min(1.0f, clickProgress));
+
+                        // Combined tactile transient burst
+                        noiseSig = (snap * 1.6f + thud * 2.2f + clickSine * 0.55f) * clickEnv * 2.2f;
+
+                        // Subtle vintage keybed noise floor while key is held
+                        noiseSig += texFilterState1_ * 0.045f * (0.25f + 0.75f * shape);
+                    }
                     break;
                 default:
                     break;
@@ -957,9 +1151,16 @@ std::vector<float> MultiEngineOscillator::buildWaveformPreview(const Parameters&
                 break;
             case EngineType::EvolvingWavetable: {
                 const auto& bank = getWavetableBank();
-                const int frame = std::clamp(p.modelIndex, 0, kWtFrames - 1);
-                const int idx = static_cast<int>(u * (kWtSize - 1));
-                val = bank.frames[static_cast<std::size_t>(frame)][static_cast<std::size_t>(idx)];
+                const int table = std::clamp(p.modelIndex, 0, kWtTables - 1);
+                const float fPos = std::clamp(p.shapeMorph * 3.0f, 0.0f, 3.0f);
+                const int frame0 = std::clamp(static_cast<int>(fPos), 0, kWtFrames - 2);
+                const int frame1 = frame0 + 1;
+                const float frameFrac = fPos - static_cast<float>(frame0);
+                const int idx = static_cast<int>(u * static_cast<float>(kWtSize - 1));
+                const auto& activeTable = bank.tables[static_cast<std::size_t>(table)];
+                const float w0 = activeTable[static_cast<std::size_t>(frame0)][static_cast<std::size_t>(idx)];
+                const float w1 = activeTable[static_cast<std::size_t>(frame1)][static_cast<std::size_t>(idx)];
+                val = w0 + frameFrac * (w1 - w0);
                 break;
             }
             case EngineType::OrganicTexture:
