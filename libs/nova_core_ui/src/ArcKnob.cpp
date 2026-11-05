@@ -79,9 +79,18 @@ void ArcKnob::attachToParameter(juce::AudioProcessorValueTreeState& apvts, const
     slider_.updateText();
 }
 
+void ArcKnob::setModulation(float rangeDelta, float liveOffset) {
+    const float prevMod = static_cast<float>(slider_.getProperties().getWithDefault("modAmount", 0.0));
+    const float prevLive = static_cast<float>(slider_.getProperties().getWithDefault("liveModOffset", 0.0));
+    if (std::abs(prevMod - rangeDelta) > 0.002f || std::abs(prevLive - liveOffset) > 0.002f) {
+        slider_.getProperties().set("modAmount", rangeDelta);
+        slider_.getProperties().set("liveModOffset", liveOffset);
+        slider_.repaint();
+    }
+}
+
 void ArcKnob::setModulationAmount(float normalizedDelta) {
-    slider_.getProperties().set("modAmount", normalizedDelta);
-    slider_.repaint();
+    setModulation(normalizedDelta, 0.0f);
 }
 
 void ArcKnob::setLabel(const juce::String& newLabel) {

@@ -50,6 +50,55 @@ public:
         flt2Carve_.attachToParameter(apvts,  "vocalCarve");
     }
 
+    void updateModulationTelemetry(const nova::dsp::WorshipSynthEngine::Telemetry& tel) {
+        lastTel_ = tel;
+        const auto& modMatrix = proc_.getModMatrix();
+
+        // 1. Filter 1 Cutoff
+        const float cut1Depth = modMatrix.getTotalDepth(nova::dsp::ModMatrix::Destination::FilterCutoff);
+        const float cut1Live = (cut1Depth != 0.0f)
+            ? std::clamp(tel.filterCutoffMod / (1.8f * std::max(0.01f, std::abs(cut1Depth))), -1.0f, 1.0f)
+            : 0.0f;
+        flt1Cutoff_.setModulation(cut1Depth, cut1Live);
+
+        // 2. Filter 1 Reso
+        const float reso1Depth = modMatrix.getTotalDepth(nova::dsp::ModMatrix::Destination::FilterResonance);
+        const float reso1Live = (reso1Depth != 0.0f)
+            ? std::clamp(tel.filterResoMod / (0.5f * std::max(0.01f, std::abs(reso1Depth))), -1.0f, 1.0f)
+            : 0.0f;
+        flt1Reso_.setModulation(reso1Depth, reso1Live);
+
+        // 3. Filter 2 Cutoff
+        const float cut2Depth = modMatrix.getTotalDepth(nova::dsp::ModMatrix::Destination::Filter2Cutoff);
+        const float cut2Live = (cut2Depth != 0.0f)
+            ? std::clamp(tel.filter2CutoffMod / (1.8f * std::max(0.01f, std::abs(cut2Depth))), -1.0f, 1.0f)
+            : 0.0f;
+        flt2Cutoff_.setModulation(cut2Depth, cut2Live);
+
+        // 4. Filter 2 Reso
+        const float reso2Depth = modMatrix.getTotalDepth(nova::dsp::ModMatrix::Destination::Filter2Resonance);
+        const float reso2Live = (reso2Depth != 0.0f)
+            ? std::clamp(tel.filter2ResoMod / (0.5f * std::max(0.01f, std::abs(reso2Depth))), -1.0f, 1.0f)
+            : 0.0f;
+        flt2Reso_.setModulation(reso2Depth, reso2Live);
+
+        // Live modulated filter curve position
+        const auto params = proc_.getCurrentParameters();
+        const float effCut1 = std::clamp(
+            params.filterCutoffHz * std::exp2(tel.filterCutoffMod + tel.lastEnvVal * params.filterEnvAmount * 2.1f),
+            20.0f, 20000.0f);
+        const float effCut2 = std::clamp(
+            params.filter2CutoffHz * std::exp2(tel.filter2CutoffMod + tel.lastEnvVal * params.filter2EnvAmount * 2.1f),
+            20.0f, 20000.0f);
+
+        if (std::abs(effCut1 - lastEffCutoff1_) / std::max(20.0f, lastEffCutoff1_) > 0.005f ||
+            std::abs(effCut2 - lastEffCutoff2_) / std::max(20.0f, lastEffCutoff2_) > 0.005f) {
+            lastEffCutoff1_ = effCut1;
+            lastEffCutoff2_ = effCut2;
+            repaint();
+        }
+    }
+
     void paint(juce::Graphics& g) override {
         const auto bounds = getLocalBounds().toFloat().reduced(1.0f);
         g.setColour(theme_.bgSurface);
@@ -339,6 +388,56 @@ private:
         g.fillEllipse(dotX - 3.5f, dotY - 3.5f, 7.0f, 7.0f);
         g.setColour(accentCol);
         g.drawEllipse(dotX - 4.5f, dotY - 4.5f, 9.0f, 9.0f, 1.4f);
+
+        // 5. Live Modulated Dynamic Response Node & Ghost Curve (dancing with LFO / Envelope)
+        const float effCutoff = (fltNum == 1) ? lastEffCutoff1_ : lastEffCutoff2_;
+        if (isEnabled && std::abs(effCutoff - cutoffHz) > 8.0f) {
+            const float normLiveCutoff = std::clamp((std::log10(std::max(effCutoff, minFreq)) - logMin) /
+                                                    (logMax - logMin), 0.0f, 1.0f);
+            nova::dsp::StateVariableFilter liveSvf;
+            liveSvf.prepare(44100.0);
+            liveSvf.setParameters(svfType, effCutoff, q, fltType == 3 ? (resonance * 10.0f - 5.0f) : 0.0f);
+
+            // Subtle animated ghost curve
+            juce::Path liveCurve;
+            for (int i = 0; i <= 32; ++i) {
+                const float nX = static_cast<float>(i) / 32.0f;
+                const float lx = curveArea.getX() + nX * w;
+                const float lFreq = std::pow(10.0f, logMin + nX * (logMax - logMin));
+                float lMag = liveSvf.getMagnitudeAtFrequency(lFreq);
+                if (fltNum == 1 && (fltType == 0 || fltType == 2)) lMag = lMag * lMag;
+                const float lDb = 20.0f * std::log10(std::max(1e-3f, lMag));
+                const float lNormH = std::clamp((lDb + 36.0f) / 48.0f, 0.0f, 1.0f);
+                const float ly = std::clamp(curveArea.getBottom() - lNormH * (h * 0.90f),
+                                            curveArea.getY() + 2.0f, curveArea.getBottom());
+                if (i == 0) liveCurve.startNewSubPath(lx, ly);
+                else liveCurve.lineTo(lx, ly);
+            }
+            g.setColour(theme_.accentSecondary.withAlpha(0.35f));
+            g.strokePath(liveCurve, juce::PathStrokeType(1.2f, juce::PathStrokeType::curved,
+                                                         juce::PathStrokeType::rounded));
+
+            // Animated connecting beam along filter curve
+            float liveCutMag = liveSvf.getMagnitudeAtFrequency(effCutoff);
+            if (fltNum == 1 && (fltType == 0 || fltType == 2)) liveCutMag = liveCutMag * liveCutMag;
+            const float liveCutDb = 20.0f * std::log10(std::max(1e-3f, liveCutMag));
+            const float liveCutNormH = std::clamp((liveCutDb + 36.0f) / 48.0f, 0.0f, 1.0f);
+            const float liveDotX = curveArea.getX() + normLiveCutoff * w;
+            const float liveDotY = std::clamp(curveArea.getBottom() - liveCutNormH * (h * 0.90f),
+                                              curveArea.getY() + 4.0f, curveArea.getBottom() - 4.0f);
+
+            // Subtle connecting line between static node and live modulated node
+            g.setColour(theme_.accentSecondary.withAlpha(0.35f));
+            g.drawLine(dotX, dotY, liveDotX, liveDotY, 1.0f);
+
+            // Glowing live modulation pip (dancing with LFO)
+            g.setColour(theme_.accentSecondary.withAlpha(0.40f));
+            g.fillEllipse(liveDotX - 5.5f, liveDotY - 5.5f, 11.0f, 11.0f);
+            g.setColour(theme_.accentSecondary);
+            g.fillEllipse(liveDotX - 3.5f, liveDotY - 3.5f, 7.0f, 7.0f);
+            g.setColour(juce::Colours::white);
+            g.fillEllipse(liveDotX - 1.5f, liveDotY - 1.5f, 3.0f, 3.0f);
+        }
     }
 
     void drawRoutingBridge(juce::Graphics& g, juce::Rectangle<int> area,
@@ -618,6 +717,10 @@ private:
     juce::Rectangle<float> flt2CurveArea_;
     bool isDraggingFlt1_ = false;
     bool isDraggingFlt2_ = false;
+
+    nova::dsp::WorshipSynthEngine::Telemetry lastTel_{};
+    float lastEffCutoff1_ = 2800.0f;
+    float lastEffCutoff2_ = 3600.0f;
 };
 
 } // namespace nova::synth

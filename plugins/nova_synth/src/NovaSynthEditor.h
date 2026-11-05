@@ -35,6 +35,7 @@ private:
     juce::TooltipWindow tooltipWindow_{this, 400};
 
     std::function<void(int)> onSetWorkbenchTab_;
+    std::function<void(const nova::dsp::WorshipSynthEngine::Telemetry&)> onUpdateTelemetry_;
 
     juce::Component::SafePointer<juce::DocumentWindow> parentDocWindow_;
     juce::Component::SafePointer<juce::Button> standaloneOptionsButton_;

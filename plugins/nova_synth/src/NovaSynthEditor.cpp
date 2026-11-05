@@ -2326,6 +2326,31 @@ private:
                 peakHoldR_ *= 0.94f;
             }
 
+            const auto& mm = proc_.getModMatrix();
+            const float dMixDepth = mm.getTotalDepth(nova::dsp::ModMatrix::Destination::DelayMix);
+            const float dMixLive = (dMixDepth != 0.0f)
+                ? std::clamp(mm.getModulationOffset(nova::dsp::ModMatrix::Destination::DelayMix) / std::max(0.01f, std::abs(dMixDepth)), -1.0f, 1.0f)
+                : 0.0f;
+            delayMix_.setModulation(dMixDepth, dMixLive);
+
+            const float dFbDepth = mm.getTotalDepth(nova::dsp::ModMatrix::Destination::DelayFeedback);
+            const float dFbLive = (dFbDepth != 0.0f)
+                ? std::clamp(mm.getModulationOffset(nova::dsp::ModMatrix::Destination::DelayFeedback) / std::max(0.01f, std::abs(dFbDepth)), -1.0f, 1.0f)
+                : 0.0f;
+            delayFdbk_.setModulation(dFbDepth, dFbLive);
+
+            const float rMixDepth = mm.getTotalDepth(nova::dsp::ModMatrix::Destination::ReverbMix);
+            const float rMixLive = (rMixDepth != 0.0f)
+                ? std::clamp(mm.getModulationOffset(nova::dsp::ModMatrix::Destination::ReverbMix) / std::max(0.01f, std::abs(rMixDepth)), -1.0f, 1.0f)
+                : 0.0f;
+            revMix_.setModulation(rMixDepth, rMixLive);
+
+            const float rShimDepth = mm.getTotalDepth(nova::dsp::ModMatrix::Destination::ShimmerAmount);
+            const float rShimLive = (rShimDepth != 0.0f)
+                ? std::clamp(mm.getModulationOffset(nova::dsp::ModMatrix::Destination::ShimmerAmount) / std::max(0.01f, std::abs(rShimDepth)), -1.0f, 1.0f)
+                : 0.0f;
+            revShimmer_.setModulation(rShimDepth, rShimLive);
+
             repaint();
         }
 
@@ -4250,6 +4275,10 @@ public:
         workbench_.selectWorkbenchTab(tabIdx);
     }
 
+    void updateModulationTelemetry(const nova::dsp::WorshipSynthEngine::Telemetry& tel) {
+        filterDeck_.updateModulationTelemetry(tel);
+    }
+
     void resized() override {
         auto area = getLocalBounds().reduced(8, 6);
 
@@ -4333,6 +4362,9 @@ NovaSynthEditor::NovaSynthEditor(NovaSynthProcessor& proc)
     onSetWorkbenchTab_ = [wsPagePtr](int tabIdx) {
         wsPagePtr->setInitialWorkbenchTab(tabIdx);
     };
+    onUpdateTelemetry_ = [wsPagePtr](const nova::dsp::WorshipSynthEngine::Telemetry& tel) {
+        wsPagePtr->updateModulationTelemetry(tel);
+    };
 
     shell_.addPage("WORKSPACE", std::move(wsPage));
 
@@ -4365,6 +4397,8 @@ NovaSynthEditor::NovaSynthEditor(NovaSynthProcessor& proc)
 
 NovaSynthEditor::~NovaSynthEditor() {
     stopTimer();
+    onUpdateTelemetry_ = nullptr;
+    onSetWorkbenchTab_ = nullptr;
     juce::LookAndFeel::setDefaultLookAndFeel(nullptr);
     if (parentDocWindow_ != nullptr) {
         parentDocWindow_->setLookAndFeel(nullptr);
@@ -4394,6 +4428,9 @@ void NovaSynthEditor::parentHierarchyChanged() {
 void NovaSynthEditor::visibilityChanged() {
     if (isVisible()) {
         configureParentWindow();
+        startTimerHz(30);
+    } else {
+        stopTimer();
     }
 }
 
@@ -4487,6 +4524,10 @@ void NovaSynthEditor::configureParentWindow() {
 
 void NovaSynthEditor::timerCallback() {
     shell_.setMixerActive(mixerDrawer_.isDrawerOpen());
+    if (onUpdateTelemetry_) {
+        const auto tel = processor_.getSynthTelemetry();
+        onUpdateTelemetry_(tel);
+    }
     repaint();
 }
 

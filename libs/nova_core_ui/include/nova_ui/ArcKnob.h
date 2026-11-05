@@ -21,6 +21,7 @@ public:
     ~ArcKnob() override = default;
 
     void attachToParameter(juce::AudioProcessorValueTreeState& apvts, const juce::String& paramId);
+    void setModulation(float rangeDelta, float liveOffset = 0.0f);
     void setModulationAmount(float normalizedDelta);
     void setLabel(const juce::String& newLabel);
     void setSuffix(const juce::String& newSuffix);

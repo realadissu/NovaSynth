@@ -70,15 +70,46 @@ void MorningLookAndFeel::drawRotarySlider(juce::Graphics& g, int x, int y, int w
     // 4. Optional outer modulation ring (if "modAmount" property is set)
     const float modAmount = static_cast<float>(slider.getProperties().getWithDefault("modAmount", 0.0));
     if (std::abs(modAmount) > 0.005f) {
+        const float arcSpan = rotaryEndAngle - rotaryStartAngle;
         const float modEndAngle = std::clamp(
-            toAngle + modAmount * (rotaryEndAngle - rotaryStartAngle),
+            toAngle + modAmount * arcSpan,
             rotaryStartAngle, rotaryEndAngle);
+
+        const float liveMod = static_cast<float>(slider.getProperties().getWithDefault("liveModOffset", 0.0));
+        const bool hasLiveMotion = std::abs(liveMod) > 0.005f;
+
+        // 4a. Modulation Range Halo (total destination depth assigned in ModMatrix)
         juce::Path modArc;
         modArc.addCentredArc(centre.x, centre.y, radius * 0.98f, radius * 0.98f,
                              0.0f, std::min(toAngle, modEndAngle), std::max(toAngle, modEndAngle), true);
-        g.setColour(theme_.accentSecondary.withAlpha(0.85f));
+        g.setColour(theme_.accentSecondary.withAlpha(hasLiveMotion ? 0.30f : 0.85f));
         g.strokePath(modArc, juce::PathStrokeType(2.0f, juce::PathStrokeType::curved,
                                                   juce::PathStrokeType::rounded));
+
+        // 4b. Live Animated Dynamic Sweep & Glowing Indicator Pip
+        if (hasLiveMotion) {
+            const float liveAngle = std::clamp(toAngle + liveMod * modAmount * arcSpan, rotaryStartAngle, rotaryEndAngle);
+            if (std::abs(liveAngle - toAngle) > 0.01f) {
+                juce::Path liveArc;
+                liveArc.addCentredArc(centre.x, centre.y, radius * 0.98f, radius * 0.98f,
+                                      0.0f, std::min(toAngle, liveAngle), std::max(toAngle, liveAngle), true);
+                g.setColour(theme_.accentSecondary.withAlpha(0.90f));
+                g.strokePath(liveArc, juce::PathStrokeType(2.4f, juce::PathStrokeType::curved,
+                                                          juce::PathStrokeType::rounded));
+            }
+
+            // 4c. Crisp Glowing Pip dancing on the rim
+            const float pipRadius = radius * 0.98f;
+            const float pipX = centre.x + pipRadius * std::sin(liveAngle);
+            const float pipY = centre.y - pipRadius * std::cos(liveAngle);
+
+            g.setColour(theme_.accentSecondary.withAlpha(0.40f));
+            g.fillEllipse(pipX - 4.5f, pipY - 4.5f, 9.0f, 9.0f);
+            g.setColour(theme_.accentSecondary);
+            g.fillEllipse(pipX - 2.5f, pipY - 2.5f, 5.0f, 5.0f);
+            g.setColour(juce::Colours::white);
+            g.fillEllipse(pipX - 1.2f, pipY - 1.2f, 2.4f, 2.4f);
+        }
     }
 
     // 5. Crisp pointer line + dot inside dial body or Center Label

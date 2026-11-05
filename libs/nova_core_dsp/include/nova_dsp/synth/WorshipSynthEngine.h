@@ -211,6 +211,13 @@ public:
         float preClipPeak = 0.0f;
         float lfo1Value = 0.0f;
         float lfo2Value = 0.0f;
+        float lfo3Value = 0.0f;
+        float lfo4Value = 0.0f;
+        float filterCutoffMod = 0.0f;
+        float filter2CutoffMod = 0.0f;
+        float filterResoMod = 0.0f;
+        float filter2ResoMod = 0.0f;
+        float lastEnvVal = 0.0f;
         float lastPlayedVelocity = 0.8f;
         float modWheelValue = 0.0f;
         float pitchBendValue = 0.0f;
@@ -364,6 +371,13 @@ private:
     std::atomic<float> telemetryPreClipPeak_{0.0f};
     std::atomic<float> telemetryLfo1_{0.0f};
     std::atomic<float> telemetryLfo2_{0.0f};
+    std::atomic<float> telemetryLfo3_{0.0f};
+    std::atomic<float> telemetryLfo4_{0.0f};
+    std::atomic<float> telemetryFilterCutoffMod_{0.0f};
+    std::atomic<float> telemetryFilter2CutoffMod_{0.0f};
+    std::atomic<float> telemetryFilterResoMod_{0.0f};
+    std::atomic<float> telemetryFilter2ResoMod_{0.0f};
+    std::atomic<float> telemetryLastEnvVal_{0.0f};
 };
 
 } // namespace nova::dsp

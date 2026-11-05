@@ -137,6 +137,16 @@ public:
         return slots_[std::min(index, kMaxSlots - 1)];
     }
 
+    [[nodiscard]] float getTotalDepth(Destination dst) const noexcept {
+        float total = 0.0f;
+        for (const auto& s : slots_) {
+            if (s.enabled && s.destination == dst) {
+                total += s.amount;
+            }
+        }
+        return std::clamp(total, -1.0f, 1.0f);
+    }
+
     void setSourceValue(Source src, float value) noexcept {
         const auto idx = static_cast<std::size_t>(src);
         if (idx < static_cast<std::size_t>(Source::Count)) {

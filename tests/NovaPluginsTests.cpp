@@ -2375,6 +2375,65 @@ TEST(WorshipSynthEngineTests, ActiveVoiceCullingAndCytomicFastMathPrecision) {
     EXPECT_EQ(synth.getTelemetry().activeVoiceCount, 0);
 }
 
+TEST(ModulationMatrixTests, TotalDepthAndLiveOffsets) {
+    nova::dsp::ModMatrix mm;
+    mm.setSlot(0, nova::dsp::ModMatrix::Source::Lfo1, nova::dsp::ModMatrix::Destination::FilterCutoff, 0.35f, true);
+    mm.setSlot(1, nova::dsp::ModMatrix::Source::ModWheel, nova::dsp::ModMatrix::Destination::FilterCutoff, 0.20f, true);
+    mm.setSlot(2, nova::dsp::ModMatrix::Source::Lfo2, nova::dsp::ModMatrix::Destination::FilterCutoff, 0.40f, false); // disabled
+
+    EXPECT_NEAR(mm.getTotalDepth(nova::dsp::ModMatrix::Destination::FilterCutoff), 0.55f, 1e-4f);
+    EXPECT_NEAR(mm.getTotalDepth(nova::dsp::ModMatrix::Destination::FilterResonance), 0.0f, 1e-4f);
+
+    mm.setSourceValue(nova::dsp::ModMatrix::Source::Lfo1, 1.0f);
+    mm.setSourceValue(nova::dsp::ModMatrix::Source::ModWheel, 0.5f);
+    mm.evaluate();
+
+    EXPECT_NEAR(mm.getModulationOffset(nova::dsp::ModMatrix::Destination::FilterCutoff), 0.35f * 1.0f + 0.20f * 0.5f, 1e-4f);
+}
+
+TEST(WorshipSynthEngineTests, LiveModulationTelemetryAtomicSafety) {
+    nova::dsp::WorshipSynthEngine synth;
+    synth.prepare(48000.0, 256);
+
+    auto p = synth.getParameters();
+    p.lfo1RateHz = 4.0f;
+    synth.setParameters(p);
+
+    synth.getModMatrix().setSlot(0, nova::dsp::ModMatrix::Source::Lfo1,
+                                 nova::dsp::ModMatrix::Destination::FilterCutoff, 0.50f, true);
+
+    std::vector<float> left(256, 0.0f);
+    std::vector<float> right(256, 0.0f);
+
+    synth.noteOn(60, 0.8f);
+
+    // Process blocks and verify live telemetry updates
+    for (int b = 0; b < 20; ++b) {
+        synth.processBlock(left.data(), right.data(), 256);
+    }
+
+    const auto tel = synth.getTelemetry();
+    EXPECT_FALSE(std::isnan(tel.lfo1Value));
+    EXPECT_FALSE(std::isnan(tel.filterCutoffMod));
+    EXPECT_NE(tel.filterCutoffMod, 0.0f);
+
+    synth.allNotesOff();
+}
+
+TEST(ArcKnobAnimationTests, ArcKnobSetModulationAndLiveHaloUpdates) {
+    auto theme = nova::ui::NovaTheme::create(nova::ui::NovaTheme::AccentPreset::SpaceCyan);
+    nova::ui::ArcKnob knob("CUTOFF", "Hz", theme, false);
+    knob.setSize(60, 60);
+
+    knob.setModulation(0.45f, 0.75f);
+    auto& slider = knob.getSlider();
+    const float modAmt = static_cast<float>(slider.getProperties().getWithDefault("modAmount", 0.0));
+    const float liveOffset = static_cast<float>(slider.getProperties().getWithDefault("liveModOffset", 0.0));
+
+    EXPECT_NEAR(modAmt, 0.45f, 1e-4f);
+    EXPECT_NEAR(liveOffset, 0.75f, 1e-4f);
+}
+
 TEST(ModulationMatrixTests, AllFourLfoEnginesAndShapes) {
     nova::synth::NovaSynthProcessor proc;
     auto& engine = proc.getEngine();

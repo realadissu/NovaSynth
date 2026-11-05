@@ -832,6 +832,13 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
     float peakR = 0.0f;
     float lastLfo1 = 0.0f;
     float lastLfo2 = 0.0f;
+    float lastLfo3 = 0.0f;
+    float lastLfo4 = 0.0f;
+    float lastEnvVal = 0.0f;
+    float lastCutoffModOct = 0.0f;
+    float lastCutoff2ModOct = 0.0f;
+    float lastResoMod = 0.0f;
+    float lastReso2Mod = 0.0f;
 
     modMatrix_.setSourceValue(ModMatrix::Source::ModWheel,     modWheel_);
     modMatrix_.setSourceValue(ModMatrix::Source::MacroWarmth,  params_.macroWarmth);
@@ -923,6 +930,8 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
             const float lfo4Val = lfo4_.processSample();
             lastLfo1 = lfo1Val;
             lastLfo2 = lfo2Val;
+            lastLfo3 = lfo3Val;
+            lastLfo4 = lfo4Val;
 
             const float baseCutoff = cutoffSmoother_.getNextValue();
             const float baseCutoff2 = cutoff2Smoother_.getNextValue();
@@ -946,6 +955,10 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
         const float cutoffModOctaves = modMatrix_.getModulationOffset(ModMatrix::Destination::FilterCutoff) * 1.8f;
         const float filterResoMod = modMatrix_.getModulationOffset(ModMatrix::Destination::FilterResonance) * 0.5f;
         const float vocalCarveMod = modMatrix_.getModulationOffset(ModMatrix::Destination::VocalCarve);
+        lastCutoffModOct = cutoffModOctaves;
+        lastCutoff2ModOct = modMatrix_.getModulationOffset(ModMatrix::Destination::Filter2Cutoff) * 1.8f;
+        lastResoMod = filterResoMod;
+        lastReso2Mod = modMatrix_.getModulationOffset(ModMatrix::Destination::Filter2Resonance) * 0.5f;
 
         float synthL = 0.0f;
         float synthR = 0.0f;
@@ -960,6 +973,7 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
             const float fltEnvVal = v.filterEnv.processSample();
             const float modEnvVal = v.modEnv.processSample();
             const float auxEnvVal = v.auxEnv.processSample();
+            lastEnvVal = std::max(lastEnvVal, fltEnvVal);
 
             // Voice Activity Culling: Instant termination when release has faded to silence
             bool anyEnvActive = v.ampEnv.isActive();
@@ -1328,6 +1342,13 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
     telemetryPreClipPeak_.store(preClipPeak, std::memory_order_relaxed);
     telemetryLfo1_.store(lastLfo1, std::memory_order_relaxed);
     telemetryLfo2_.store(lastLfo2, std::memory_order_relaxed);
+    telemetryLfo3_.store(lastLfo3, std::memory_order_relaxed);
+    telemetryLfo4_.store(lastLfo4, std::memory_order_relaxed);
+    telemetryFilterCutoffMod_.store(lastCutoffModOct, std::memory_order_relaxed);
+    telemetryFilter2CutoffMod_.store(lastCutoff2ModOct, std::memory_order_relaxed);
+    telemetryFilterResoMod_.store(lastResoMod, std::memory_order_relaxed);
+    telemetryFilter2ResoMod_.store(lastReso2Mod, std::memory_order_relaxed);
+    telemetryLastEnvVal_.store(lastEnvVal, std::memory_order_relaxed);
 }
 
 WorshipSynthEngine::Telemetry WorshipSynthEngine::getTelemetry() const noexcept {
@@ -1338,6 +1359,13 @@ WorshipSynthEngine::Telemetry WorshipSynthEngine::getTelemetry() const noexcept 
     t.preClipPeak = telemetryPreClipPeak_.load(std::memory_order_relaxed);
     t.lfo1Value = telemetryLfo1_.load(std::memory_order_relaxed);
     t.lfo2Value = telemetryLfo2_.load(std::memory_order_relaxed);
+    t.lfo3Value = telemetryLfo3_.load(std::memory_order_relaxed);
+    t.lfo4Value = telemetryLfo4_.load(std::memory_order_relaxed);
+    t.filterCutoffMod = telemetryFilterCutoffMod_.load(std::memory_order_relaxed);
+    t.filter2CutoffMod = telemetryFilter2CutoffMod_.load(std::memory_order_relaxed);
+    t.filterResoMod = telemetryFilterResoMod_.load(std::memory_order_relaxed);
+    t.filter2ResoMod = telemetryFilter2ResoMod_.load(std::memory_order_relaxed);
+    t.lastEnvVal = telemetryLastEnvVal_.load(std::memory_order_relaxed);
     t.lastPlayedVelocity = lastVelocity_;
     t.modWheelValue = modWheel_;
     t.pitchBendValue = pitchBendSemitones_;
