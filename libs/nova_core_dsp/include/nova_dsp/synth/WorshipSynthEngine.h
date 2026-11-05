@@ -238,6 +238,7 @@ public:
     void setModWheel(float normVal) noexcept { modWheel_ = std::clamp(normVal, 0.0f, 1.0f); }
     void allNotesOff() noexcept;
     void allSoundOff() noexcept { reset(); }
+    void snapSmoothersToTarget() noexcept;
 
     void processBlock(float* outLeft, float* outRight, int numSamples) noexcept;
 

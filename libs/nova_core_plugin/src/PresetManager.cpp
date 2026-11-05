@@ -57,6 +57,10 @@ void PresetManager::loadPresetByIndex(int index) {
             }
         }
     }
+
+    if (onPresetLoaded) {
+        onPresetLoaded();
+    }
 }
 
 bool PresetManager::loadPresetByName(const juce::String& name) {
@@ -283,6 +287,9 @@ void PresetManager::captureCurrentStateToSlot(juce::ValueTree& slot) {
 void PresetManager::applyStateFromSlot(const juce::ValueTree& slot) {
     if (slot.isValid()) {
         apvts_.replaceState(slot.createCopy());
+        if (onPresetLoaded) {
+            onPresetLoaded();
+        }
     }
 }
 

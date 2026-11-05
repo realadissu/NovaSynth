@@ -37,6 +37,10 @@ public:
         target_ = newTarget;
     }
 
+    void snapToTarget() noexcept {
+        current_ = target_;
+    }
+
     [[nodiscard]] float getNextValue() noexcept {
         current_ += coeff_ * (target_ - current_);
         return current_;

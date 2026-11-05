@@ -1591,7 +1591,16 @@ void NovaSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mi
         }
     }
 
+    const bool isPresetChange = presetChangePending_.exchange(false, std::memory_order_acq_rel);
+    if (isPresetChange) {
+        synthEngine_.reset();
+    }
+
     syncParametersFromAPVTS();
+
+    if (isPresetChange) {
+        synthEngine_.snapSmoothersToTarget();
+    }
 
     PendingNoteEvent uiEv{};
     while (uiNoteQueue_.pop(uiEv)) {

@@ -32,6 +32,8 @@ public:
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
 
+    virtual void onPresetLoaded() {}
+
     [[nodiscard]] juce::AudioProcessorValueTreeState& getAPVTS() noexcept { return apvts_; }
     [[nodiscard]] const juce::AudioProcessorValueTreeState& getAPVTS() const noexcept { return apvts_; }
     [[nodiscard]] juce::UndoManager& getUndoManager() noexcept { return undoManager_; }

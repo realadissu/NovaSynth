@@ -296,6 +296,51 @@ TEST(PresetManagerTests, InitPatchLoadsCleanOscillatorAndBypassedFx) {
     EXPECT_FLOAT_EQ(*apvts.getRawParameterValue("arpEnabled"), 0.0f);
 }
 
+TEST(PresetManagerTests, SwitchingPresetSilencesActiveVoicesAndTailsImmediately) {
+    nova::synth::NovaSynthProcessor processor;
+    processor.prepareToPlay(48000.0, 512);
+
+    auto& pm = processor.getPresetManager();
+    // 1. Load an ambient preset with huge decay and lush shimmer
+    ASSERT_TRUE(pm.loadPresetByName("Bethel Shimmer Cloud"));
+
+    juce::AudioBuffer<float> buffer(2, 512);
+    juce::MidiBuffer midi;
+    midi.addEvent(juce::MidiMessage::noteOn(1, 60, static_cast<juce::uint8>(100)), 0);
+
+    // Play note and render enough blocks for attack envelope to open
+    float soundingPeak = 0.0f;
+    for (int b = 0; b < 30; ++b) {
+        buffer.clear();
+        processor.processBlock(buffer, midi);
+        midi.clear();
+        for (int ch = 0; ch < 2; ++ch) {
+            for (int i = 0; i < 512; ++i) {
+                soundingPeak = std::max(soundingPeak, std::abs(buffer.getSample(ch, i)));
+            }
+        }
+    }
+    EXPECT_GT(soundingPeak, 0.05f);
+
+    // 2. Switch preset while sound is sounding
+    ASSERT_TRUE(pm.loadPresetByName("Init Patch"));
+
+    // 3. Process the next block WITHOUT any new notes
+    buffer.clear();
+    midi.clear();
+    processor.processBlock(buffer, midi);
+
+    // 4. Verify previous voices, drone, and tails are immediately silenced
+    float silentPeak = 0.0f;
+    for (int ch = 0; ch < 2; ++ch) {
+        for (int i = 0; i < 512; ++i) {
+            silentPeak = std::max(silentPeak, std::abs(buffer.getSample(ch, i)));
+        }
+    }
+    EXPECT_LT(silentPeak, 1e-4f);
+    EXPECT_EQ(processor.getEngine().getTelemetry().activeVoiceCount, 0);
+}
+
 TEST(MultiEngineOscillatorTests, AllGranularAndPluckModelsProduceDistinctSignatures) {
     using nova::dsp::MultiEngineOscillator;
 

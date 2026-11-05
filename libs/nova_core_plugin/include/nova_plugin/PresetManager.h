@@ -3,6 +3,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <vector>
 #include <map>
+#include <functional>
 
 namespace nova::plugin {
 
@@ -23,6 +24,8 @@ struct PresetEntry {
 class PresetManager {
 public:
     PresetManager(juce::AudioProcessorValueTreeState& apvts, const juce::String& pluginFolderName);
+
+    std::function<void()> onPresetLoaded;
 
     void registerFactoryPreset(PresetEntry preset);
     void loadPresetByIndex(int index);

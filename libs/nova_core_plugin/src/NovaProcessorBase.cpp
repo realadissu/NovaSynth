@@ -9,7 +9,11 @@ NovaProcessorBase::NovaProcessorBase(const BusesProperties& ioLayouts,
     : juce::AudioProcessor(ioLayouts),
       pluginName_(pluginName),
       apvts_(*this, &undoManager_, "NOVA_STATE", std::move(parameterLayout)),
-      presetManager_(apvts_, pluginName) {}
+      presetManager_(apvts_, pluginName) {
+    presetManager_.onPresetLoaded = [this]() {
+        onPresetLoaded();
+    };
+}
 
 int NovaProcessorBase::getNumPrograms() {
     return std::max(1, static_cast<int>(presetManager_.getAllPresets().size()));
@@ -45,6 +49,7 @@ void NovaProcessorBase::setStateInformation(const void* data, int sizeInBytes) {
     if (xmlState != nullptr && xmlState->hasTagName(apvts_.state.getType())) {
         auto tree = juce::ValueTree::fromXml(*xmlState);
         apvts_.replaceState(tree);
+        onPresetLoaded();
     }
 }
 

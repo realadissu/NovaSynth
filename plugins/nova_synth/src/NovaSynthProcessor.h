@@ -24,6 +24,9 @@ public:
 
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
+    void onPresetLoaded() override {
+        presetChangePending_.store(true, std::memory_order_release);
+    }
 
     [[nodiscard]] nova::dsp::ModMatrix& getModMatrix() noexcept {
         return synthEngine_.getModMatrix();
@@ -132,6 +135,7 @@ private:
     nova::dsp::WorshipSynthEngine::Parameters currentParams_{};
     std::atomic<uint8_t> soloMask_{0};
     std::atomic<uint8_t> muteMask_{0};
+    std::atomic<bool> presetChangePending_{false};
     double currentSampleRate_ = 48000.0;
     double currentBpm_ = 120.0;
     bool isHostBpmSynced_ = false;

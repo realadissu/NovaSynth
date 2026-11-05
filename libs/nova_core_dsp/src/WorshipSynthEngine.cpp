@@ -113,6 +113,9 @@ void WorshipSynthEngine::reset() noexcept {
     }
     polyHeadroomSmoother_.reset(1.0f);
     physicalHeldNotes_.fill(false);
+    latchedCount_ = 0;
+    latchedNotes_.fill(0);
+    sustainPedalDown_ = false;
     currentDroneActive_ = false;
     currentDroneKey_ = -1;
     currentDroneVoicing_ = -1;
@@ -130,6 +133,14 @@ void WorshipSynthEngine::reset() noexcept {
     delayWritePos_ = 0;
     delayEnergy_ = 0.0f;
     reverb_.reset();
+}
+
+void WorshipSynthEngine::snapSmoothersToTarget() noexcept {
+    cutoffSmoother_.snapToTarget();
+    cutoff2Smoother_.snapToTarget();
+    masterGainSmoother_.snapToTarget();
+    droneToneSmoother_.snapToTarget();
+    polyHeadroomSmoother_.reset(1.0f);
 }
 
 void WorshipSynthEngine::setParameters(const Parameters& params) noexcept {
