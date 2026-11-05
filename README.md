@@ -5,12 +5,14 @@
 </p>
 
 <p align="center">
-  <strong>Next-Generation Hybrid Synthesizer & Acoustic Sound Engine for Worship, Ambient, and Cinematic Music Production</strong>
+  <strong>Next-Generation Hybrid Synthesizer & Acoustic Sound Engine for Worship, Ambient, and Cinematic Music Production</strong><br/>
+  <em>✨ Proudly 100% Vibe-Coded with Google Antigravity & Advanced Agentic AI</em>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Language-C%2B%2B20-00599C?style=flat-square&logo=c%2B%2B" alt="C++20" />
   <img src="https://img.shields.io/badge/Framework-JUCE_8-black?style=flat-square" alt="JUCE 8" />
+  <img src="https://img.shields.io/badge/Vibe_Coded-100%25_AI_Pair_Programmed-8A2BE2?style=flat-square" alt="Vibe Coded" />
   <img src="https://img.shields.io/badge/Formats-VST3_%7C_AUv2_%7C_CLAP_%7C_Standalone-00C4B4?style=flat-square" alt="Formats" />
   <img src="https://img.shields.io/badge/Platform-macOS_13%2B_%28Apple_Silicon_%2F_Intel%29-gray?style=flat-square&logo=apple" alt="macOS" />
   <img src="https://img.shields.io/badge/Tests-54%2F54_Passing-brightgreen?style=flat-square" alt="Tests" />
@@ -152,6 +154,24 @@ ctest --test-dir build --output-on-failure
 auval -v aumu NvSy NovA
 ```
 *(Should output `AU VALIDATION SUCCEEDED` with zero failures).*
+
+---
+
+## 💜 100% Vibe Coded with Google Antigravity
+
+**Nova Synth is proudly and entirely vibe-coded.**
+
+The entire instrument — from its real-time C++20 DSP audio core, SIMD algorithms, and lock-free state synchronization to its dark cyber-glass UI, preset architecture, and 54 passing regression tests — was created through iterative AI pair programming between **Wolfgang Meincke** and **Google DeepMind's Antigravity** agentic AI.
+
+It serves as a real-world proof of concept that complex, professional-grade audio DSP and native audio plugins (AU, VST3, CLAP, and Standalone) with zero-compromise real-time safety can be designed, implemented, and refined through pure vibe coding and collaborative human-AI listening feedback loops.
+
+---
+
+## 💬 Community, Feedback & Issues
+
+Have feedback, found a bug, or want to request a new synthesis model or worship preset?
+* **File an Issue:** We welcome bug reports and feature suggestions directly via [GitHub Issues](https://github.com/realadissu/NovaSynth/issues).
+* **Presets & Sound Design:** Suggestions for new pad profiles, sample soundscapes, and modulation routings are always welcome!
 
 ---
 
