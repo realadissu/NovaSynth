@@ -48,12 +48,13 @@ public:
         float spread = 0.85f;       // 0.0 .. 1.0 (Stereo spread)
         float warp = 0.0f;          // 0.0 .. 1.0 (Wavetable warp mode/amount)
         bool lowestNoteOnly = false; // Sub lowest note priority
+        int ampEnvSource = 0;        // 0: Main Amp Env 1, 1: Filter Env 2, 2: Mod Env 3, 3: Aux Env 4
     };
 
     [[nodiscard]] static std::vector<const char*> getModelsForEngine(EngineType engine, int sourceType);
     [[nodiscard]] static const char* getModelName(EngineType engine, int sourceType, int modelIndex);
 
-    MultiEngineOscillator() = default;
+    MultiEngineOscillator();
 
     void prepare(double sampleRate);
     void reset() noexcept;
@@ -74,7 +75,8 @@ public:
                        float pitchModSemitones,
                        float shapeMod,
                        float& outLeft,
-                       float& outRight) noexcept;
+                       float& outRight,
+                       float levelMod = 0.0f) noexcept;
 
     [[nodiscard]] static std::vector<float> buildWaveformPreview(const Parameters& p, int numPoints = 24);
 
@@ -114,8 +116,8 @@ private:
     float rainScatterTimer_ = 0.0f;
 
     // Physical Modeling Pluck / String Waveguide buffer (pre-allocated in prepare)
-    std::array<float, kMaxStringDelay> stringDelayL_{};
-    std::array<float, kMaxStringDelay> stringDelayR_{};
+    std::vector<float> stringDelayL_{};
+    std::vector<float> stringDelayR_{};
     int stringWritePos_ = 0;
     float stringLpStateL_ = 0.0f;
     float stringLpStateR_ = 0.0f;

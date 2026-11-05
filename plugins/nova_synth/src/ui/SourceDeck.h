@@ -360,6 +360,7 @@ public:
             visualizerRect_ = juce::Rectangle<int>(6, 26, getWidth() - 12, getHeight() - 56);
             compactVolSlider_.setBounds(8, getHeight() - 25, getWidth() - 16, 18);
             routingRect_ = {};
+            ampEnvRect_ = {};
             modelRect_ = {};
             modelPrevRect_ = {};
             modelNextRect_ = {};
@@ -379,7 +380,9 @@ public:
             // Linke Hälfte: Visualizer & Routing & Model
             const int leftW = 135;
             visualizerRect_ = juce::Rectangle<int>(6, 26, leftW - 6, getHeight() - 74);
-            routingRect_    = juce::Rectangle<int>(6, getHeight() - 46, leftW - 6, 18);
+            const int pillW = (leftW - 6 - 4) / 2;
+            routingRect_    = juce::Rectangle<int>(6, getHeight() - 46, pillW, 18);
+            ampEnvRect_     = juce::Rectangle<int>(6 + pillW + 4, getHeight() - 46, pillW, 18);
             modelRect_      = juce::Rectangle<int>(6, getHeight() - 25, leftW - 6, 20);
             modelPrevRect_  = juce::Rectangle<int>(modelRect_.getX(), modelRect_.getY(), 18, modelRect_.getHeight());
             modelNextRect_  = juce::Rectangle<int>(modelRect_.getRight() - 18, modelRect_.getY(), 18, modelRect_.getHeight());
@@ -552,7 +555,7 @@ public:
 
         if (pinRect_.contains(pos) || powerRect_.contains(pos) || soloRect_.contains(pos) ||
             engineRect_.contains(pos) || modelRect_.contains(pos) || routingRect_.contains(pos) ||
-            keyTrkRect_.contains(pos) || lowestNoteRect_.contains(pos) || newHover >= 0) {
+            ampEnvRect_.contains(pos) || keyTrkRect_.contains(pos) || lowestNoteRect_.contains(pos) || newHover >= 0) {
             setMouseCursor(juce::MouseCursor::PointingHandCursor);
             return;
         }
@@ -627,6 +630,12 @@ public:
         // 7. Routing Dropdown
         if (routingRect_.contains(pos)) {
             openRoutingMenu();
+            return;
+        }
+
+        // 7b. Amp Env Dropdown
+        if (ampEnvRect_.contains(pos)) {
+            openAmpEnvMenu();
             return;
         }
 
@@ -817,8 +826,19 @@ private:
         g.drawRoundedRectangle(routingRect_.toFloat(), 3.0f, 0.8f);
         g.setFont(theme_.getValueFont(9.0f));
         g.setColour(theme_.accentPrimary);
-        g.drawFittedText("ROUTING: " + getFilterRoutingDisplayName(slot.filterRouting) + " \xe2\x96\xbe",
+        g.drawFittedText(getFilterRoutingDisplayName(slot.filterRouting) + " \xe2\x96\xbe",
                          routingRect_, juce::Justification::centred, 1, 0.85f);
+
+        // Amp Env Pill (rechts neben Routing)
+        g.setColour(theme_.bgElevated);
+        g.fillRoundedRectangle(ampEnvRect_.toFloat(), 3.0f);
+        const bool isCustomEnv = (slot.ampEnvSource != 0);
+        g.setColour(isCustomEnv ? theme_.accentWarm : theme_.borderSubtle);
+        g.drawRoundedRectangle(ampEnvRect_.toFloat(), 3.0f, 0.8f);
+        g.setFont(theme_.getValueFont(9.0f));
+        g.setColour(isCustomEnv ? theme_.accentWarm : theme_.textSecondary);
+        g.drawFittedText(getAmpEnvDisplayName(slot.ampEnvSource) + " \xe2\x96\xbe",
+                         ampEnvRect_, juce::Justification::centred, 1, 0.85f);
 
         // Model Selector Box mit < und > Steppern
         g.setColour(theme_.bgElevated.brighter(0.08f));
@@ -1573,6 +1593,28 @@ private:
             });
     }
 
+    void openAmpEnvMenu() {
+        const auto params = proc_.getCurrentParameters();
+        const auto& slot = params.oscSlots[static_cast<std::size_t>(slotIndex_)];
+        juce::PopupMenu m;
+        m.addItem(1, "Amp Env 1 (Main Voice)", true, slot.ampEnvSource == 0);
+        m.addItem(2, "Filter Env 2",           true, slot.ampEnvSource == 1);
+        m.addItem(3, "Mod Env 3 (Swell/Pad)",  true, slot.ampEnvSource == 2);
+        m.addItem(4, "Aux Env 4 (Pitch/Fast)", true, slot.ampEnvSource == 3);
+
+        const juce::String prefix = "osc" + juce::String(slotIndex_ + 1) + "_";
+        m.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(localAreaToGlobal(ampEnvRect_)).withStandardItemHeight(28),
+            [this, prefix](int res) {
+                if (res >= 1 && res <= 4) {
+                    if (auto* p = proc_.getAPVTS().getParameter(prefix + "ampEnvSource")) {
+                        p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(res - 1)));
+                    }
+                    proc_.syncParametersFromAPVTS();
+                    repaint();
+                }
+            });
+    }
+
     static juce::Colour getSlotColour(int index) noexcept {
         static constexpr std::array<uint32_t, 8> kColours = {
             0xff38bdf8, // 1: Cyan Sky (Analog A)
@@ -1625,6 +1667,15 @@ private:
         }
     }
 
+    static juce::String getAmpEnvDisplayName(int ampEnvSource) {
+        switch (ampEnvSource) {
+            case 1:  return "ENV: FLT";
+            case 2:  return "ENV: MOD 3";
+            case 3:  return "ENV: AUX 4";
+            default: return "ENV: AMP 1";
+        }
+    }
+
     NovaSynthProcessor& proc_;
     const nova::ui::NovaTheme& theme_;
     int slotIndex_ = 0;
@@ -1659,6 +1710,7 @@ private:
     juce::Rectangle<int> modelPrevRect_;
     juce::Rectangle<int> modelNextRect_;
     juce::Rectangle<int> routingRect_;
+    juce::Rectangle<int> ampEnvRect_;
     juce::Rectangle<int> keyTrkRect_;
     juce::Rectangle<int> lowestNoteRect_;
     std::array<juce::Rectangle<int>, 6> wavePillRects_;

@@ -1029,19 +1029,44 @@ private:
 
     void showDestinationMenu(std::size_t slotIdx, juce::Rectangle<int> targetRect) {
         juce::PopupMenu m;
-        m.addItem(1, "Filter 1 Cutoff");
-        m.addItem(2, "Filter Resonance");
-        m.addItem(3, "Vocal Carve (Mid Scoop)");
-        m.addSeparator();
-        m.addItem(4, "OSC 1 Shape / Morph");
-        m.addItem(5, "OSC 2 Shape / Morph");
-        m.addItem(6, "OSC 3 Shape / Morph");
-        m.addItem(7, "OSC 4 Shape / Morph");
-        m.addItem(8, "Pitch All (Vibrato)");
-        m.addSeparator();
-        m.addItem(9, "Reverb Cloud Mix");
-        m.addItem(10, "Shimmer Amount");
-        m.addItem(11, "Stereo Pan Spread");
+
+        juce::PopupMenu fltMenu;
+        fltMenu.addItem(1, "Filter 1 Cutoff");
+        fltMenu.addItem(2, "Filter 1 Resonance");
+        fltMenu.addItem(3, "Filter 2 Cutoff");
+        fltMenu.addItem(4, "Filter 2 Resonance");
+        fltMenu.addItem(5, "Vocal Carve (Mid Scoop)");
+        m.addSubMenu("Filters", fltMenu);
+
+        juce::PopupMenu levelMenu;
+        levelMenu.addItem(10, "OSC 1 Level (Swell/Vol)");
+        levelMenu.addItem(11, "OSC 2 Level (Swell/Vol)");
+        levelMenu.addItem(12, "OSC 3 Level (Swell/Pad)");
+        levelMenu.addItem(13, "OSC 4 Level (Swell/Sub)");
+        m.addSubMenu("OSC Volume / Swell", levelMenu);
+
+        juce::PopupMenu shapeMenu;
+        shapeMenu.addItem(20, "OSC 1 Shape / Morph");
+        shapeMenu.addItem(21, "OSC 2 Shape / Morph");
+        shapeMenu.addItem(22, "OSC 3 Shape / Morph");
+        shapeMenu.addItem(23, "OSC 4 Shape / Morph");
+        m.addSubMenu("OSC Shape / Morph", shapeMenu);
+
+        juce::PopupMenu pitchMenu;
+        pitchMenu.addItem(30, "OSC 1 Pitch");
+        pitchMenu.addItem(31, "OSC 2 Pitch");
+        pitchMenu.addItem(32, "OSC 3 Pitch");
+        pitchMenu.addItem(33, "OSC 4 Pitch");
+        pitchMenu.addItem(34, "Pitch All (Master Vibrato)");
+        m.addSubMenu("OSC Pitch", pitchMenu);
+
+        juce::PopupMenu fxMenu;
+        fxMenu.addItem(40, "Reverb Cloud Mix");
+        fxMenu.addItem(41, "Shimmer Amount");
+        fxMenu.addItem(42, "Delay Mix");
+        fxMenu.addItem(43, "Delay Feedback");
+        fxMenu.addItem(44, "Stereo Pan Spread");
+        m.addSubMenu("Effects & Space", fxMenu);
 
         m.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(localAreaToGlobal(targetRect)),
             [this, slotIdx](int result) {
@@ -1050,15 +1075,32 @@ private:
                 switch (result) {
                     case 1:  dst = nova::dsp::ModMatrix::Destination::FilterCutoff; break;
                     case 2:  dst = nova::dsp::ModMatrix::Destination::FilterResonance; break;
-                    case 3:  dst = nova::dsp::ModMatrix::Destination::VocalCarve; break;
-                    case 4:  dst = nova::dsp::ModMatrix::Destination::Osc1Shape; break;
-                    case 5:  dst = nova::dsp::ModMatrix::Destination::Osc2Shape; break;
-                    case 6:  dst = nova::dsp::ModMatrix::Destination::Osc3Shape; break;
-                    case 7:  dst = nova::dsp::ModMatrix::Destination::Osc4Shape; break;
-                    case 8:  dst = nova::dsp::ModMatrix::Destination::OscPitchAll; break;
-                    case 9:  dst = nova::dsp::ModMatrix::Destination::ReverbMix; break;
-                    case 10: dst = nova::dsp::ModMatrix::Destination::ShimmerAmount; break;
-                    case 11: dst = nova::dsp::ModMatrix::Destination::PanSpread; break;
+                    case 3:  dst = nova::dsp::ModMatrix::Destination::Filter2Cutoff; break;
+                    case 4:  dst = nova::dsp::ModMatrix::Destination::Filter2Resonance; break;
+                    case 5:  dst = nova::dsp::ModMatrix::Destination::VocalCarve; break;
+
+                    case 10: dst = nova::dsp::ModMatrix::Destination::Osc1Level; break;
+                    case 11: dst = nova::dsp::ModMatrix::Destination::Osc2Level; break;
+                    case 12: dst = nova::dsp::ModMatrix::Destination::Osc3Level; break;
+                    case 13: dst = nova::dsp::ModMatrix::Destination::Osc4Level; break;
+
+                    case 20: dst = nova::dsp::ModMatrix::Destination::Osc1Shape; break;
+                    case 21: dst = nova::dsp::ModMatrix::Destination::Osc2Shape; break;
+                    case 22: dst = nova::dsp::ModMatrix::Destination::Osc3Shape; break;
+                    case 23: dst = nova::dsp::ModMatrix::Destination::Osc4Shape; break;
+
+                    case 30: dst = nova::dsp::ModMatrix::Destination::Osc1Pitch; break;
+                    case 31: dst = nova::dsp::ModMatrix::Destination::Osc2Pitch; break;
+                    case 32: dst = nova::dsp::ModMatrix::Destination::Osc3Pitch; break;
+                    case 33: dst = nova::dsp::ModMatrix::Destination::Osc4Pitch; break;
+                    case 34: dst = nova::dsp::ModMatrix::Destination::OscPitchAll; break;
+
+                    case 40: dst = nova::dsp::ModMatrix::Destination::ReverbMix; break;
+                    case 41: dst = nova::dsp::ModMatrix::Destination::ShimmerAmount; break;
+                    case 42: dst = nova::dsp::ModMatrix::Destination::DelayMix; break;
+                    case 43: dst = nova::dsp::ModMatrix::Destination::DelayFeedback; break;
+                    case 44: dst = nova::dsp::ModMatrix::Destination::PanSpread; break;
+                    default: break;
                 }
                 auto& mm = proc_.getModMatrix();
                 const auto cur = mm.getSlot(slotIdx);

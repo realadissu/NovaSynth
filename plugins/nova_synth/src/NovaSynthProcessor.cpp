@@ -95,6 +95,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout NovaSynthProcessor::createPa
 
         params.push_back(std::make_unique<juce::AudioParameterBool>(
             juce::ParameterID{prefix + "lowestNoteOnly", 1}, namePrefix + "Lowest Note Only", false));
+
+        params.push_back(std::make_unique<juce::AudioParameterChoice>(
+            juce::ParameterID{prefix + "ampEnvSource", 1}, namePrefix + "Amp Env Source",
+            juce::StringArray{"Amp Env 1", "Filter Env 2", "Mod Env 3", "Aux Env 4"}, 0));
     }
 
     // Dual Filters & Vocal Carve
@@ -1417,6 +1421,7 @@ void NovaSynthProcessor::syncParametersFromAPVTS() noexcept {
         if (auto* pSp = apvts_.getRawParameterValue(prefix + "spread")) slot.spread = pSp->load();
         if (auto* pW = apvts_.getRawParameterValue(prefix + "warp")) slot.warp = pW->load();
         if (auto* pL = apvts_.getRawParameterValue(prefix + "lowestNoteOnly")) slot.lowestNoteOnly = pL->load() > 0.5f;
+        if (auto* pEnv = apvts_.getRawParameterValue(prefix + "ampEnvSource")) slot.ampEnvSource = static_cast<int>(pEnv->load());
     }
 
     p.filter1Enabled   = apvts_.getRawParameterValue("filter1Enabled")->load() > 0.5f;

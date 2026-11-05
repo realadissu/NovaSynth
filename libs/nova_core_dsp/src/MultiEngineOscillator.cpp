@@ -300,8 +300,17 @@ float MultiEngineOscillator::polyBlep(float phase, float phaseInc) noexcept {
     return 0.0f;
 }
 
+MultiEngineOscillator::MultiEngineOscillator() {
+    stringDelayL_.assign(static_cast<std::size_t>(kMaxStringDelay), 0.0f);
+    stringDelayR_.assign(static_cast<std::size_t>(kMaxStringDelay), 0.0f);
+}
+
 void MultiEngineOscillator::prepare(double sampleRate) {
     sampleRate_ = std::max(8000.0, sampleRate);
+    if (stringDelayL_.size() != static_cast<std::size_t>(kMaxStringDelay)) {
+        stringDelayL_.assign(static_cast<std::size_t>(kMaxStringDelay), 0.0f);
+        stringDelayR_.assign(static_cast<std::size_t>(kMaxStringDelay), 0.0f);
+    }
     shapeSmoother_.prepare(sampleRate_, 20.0f);
     shapeSmoother_.reset(params_.shapeMorph);
     (void)getWavetableBank();
@@ -339,8 +348,8 @@ void MultiEngineOscillator::reset() noexcept {
     texGrainPhase2_ = 0.0f;
     flutterPhase_ = 0.0f;
     rainScatterTimer_ = 0.0f;
-    stringDelayL_.fill(0.0f);
-    stringDelayR_.fill(0.0f);
+    std::fill(stringDelayL_.begin(), stringDelayL_.end(), 0.0f);
+    std::fill(stringDelayR_.begin(), stringDelayR_.end(), 0.0f);
     stringWritePos_ = 0;
     stringLpStateL_ = 0.0f;
     stringLpStateR_ = 0.0f;
@@ -478,8 +487,10 @@ void MultiEngineOscillator::processSample(float baseFrequencyHz,
                                           float pitchModSemitones,
                                           float shapeMod,
                                           float& outLeft,
-                                          float& outRight) noexcept {
-    if (!params_.enabled || params_.level <= 0.0001f) {
+                                          float& outRight,
+                                          float levelMod) noexcept {
+    const float effLevel = std::clamp(params_.level + levelMod, 0.0f, 1.0f);
+    if (!params_.enabled || effLevel <= 0.0001f) {
         return;
     }
 
@@ -849,7 +860,7 @@ void MultiEngineOscillator::processSample(float baseFrequencyHz,
                 const float delayLenL = std::clamp(sr / slotFreq, 8.0f, static_cast<float>(kMaxStringDelay - 8));
                 const float delayLenR = std::clamp(delayLenL * pluckDelayRatioR_, 8.0f, static_cast<float>(kMaxStringDelay - 8));
 
-                const auto readWaveguide = [this](const std::array<float, kMaxStringDelay>& buf, float delaySamples) noexcept {
+                const auto readWaveguide = [this](const std::vector<float>& buf, float delaySamples) noexcept {
                     const int dInt = static_cast<int>(delaySamples);
                     const float frac = delaySamples - static_cast<float>(dInt);
                     const int idx0 = (stringWritePos_ - dInt + kMaxStringDelay) & (kMaxStringDelay - 1);
@@ -1069,8 +1080,8 @@ void MultiEngineOscillator::processSample(float baseFrequencyHz,
         }
     }
 
-    outLeft  += sigL * params_.level;
-    outRight += sigR * params_.level;
+    outLeft  += sigL * effLevel;
+    outRight += sigR * effLevel;
 }
 
 std::vector<const char*> MultiEngineOscillator::getModelsForEngine(EngineType engine, int sourceType) {

@@ -60,13 +60,25 @@ public:
         Osc2Shape,
         Osc3Shape,
         Osc4Shape,
+        Osc1Level,
+        Osc2Level,
+        Osc3Level,
+        Osc4Level,
+        Osc1Pitch,
+        Osc2Pitch,
+        Osc3Pitch,
+        Osc4Pitch,
         OscPitchAll,
         FilterCutoff,
         FilterResonance,
+        Filter2Cutoff,
+        Filter2Resonance,
         VocalCarve,
         ReverbMix,
         ShimmerAmount,
         PanSpread,
+        DelayMix,
+        DelayFeedback,
         Count
     };
 
@@ -77,13 +89,25 @@ public:
             case Destination::Osc2Shape:       return "OSC 2 Shape";
             case Destination::Osc3Shape:       return "OSC 3 Shape";
             case Destination::Osc4Shape:       return "OSC 4 Shape";
+            case Destination::Osc1Level:       return "OSC 1 Level";
+            case Destination::Osc2Level:       return "OSC 2 Level";
+            case Destination::Osc3Level:       return "OSC 3 Level";
+            case Destination::Osc4Level:       return "OSC 4 Level";
+            case Destination::Osc1Pitch:       return "OSC 1 Pitch";
+            case Destination::Osc2Pitch:       return "OSC 2 Pitch";
+            case Destination::Osc3Pitch:       return "OSC 3 Pitch";
+            case Destination::Osc4Pitch:       return "OSC 4 Pitch";
             case Destination::OscPitchAll:     return "Pitch (All)";
             case Destination::FilterCutoff:    return "Cutoff 1";
-            case Destination::FilterResonance: return "Resonance";
+            case Destination::FilterResonance: return "Resonance 1";
+            case Destination::Filter2Cutoff:   return "Cutoff 2";
+            case Destination::Filter2Resonance:return "Resonance 2";
             case Destination::VocalCarve:      return "Vocal Carve";
             case Destination::ReverbMix:       return "Reverb Mix";
             case Destination::ShimmerAmount:   return "Shimmer";
             case Destination::PanSpread:       return "Pan Spread";
+            case Destination::DelayMix:        return "Delay Mix";
+            case Destination::DelayFeedback:   return "Delay Feedback";
             case Destination::Count:           return "None";
         }
     }
@@ -130,6 +154,42 @@ public:
             const auto dstIdx = static_cast<std::size_t>(s.destination);
             destOffsets_[dstIdx] += sourceValues_[srcIdx] * s.amount;
         }
+    }
+
+    struct VoiceSources {
+        float ampEnv = 0.0f;
+        float filterEnv = 0.0f;
+        float modEnv = 0.0f;
+        float auxEnv = 0.0f;
+        float velocity = 0.0f;
+    };
+
+    struct VoiceOffsets {
+        std::array<float, static_cast<std::size_t>(Destination::Count)> offsets{};
+    };
+
+    [[nodiscard]] VoiceOffsets evaluateVoice(const VoiceSources& vs) const noexcept {
+        VoiceOffsets vo;
+        vo.offsets = destOffsets_;
+        for (const auto& s : slots_) {
+            if (!s.enabled || s.source == Source::None || s.destination == Destination::None) {
+                continue;
+            }
+            float vVal = 0.0f;
+            switch (s.source) {
+                case Source::AmpEnv:    vVal = vs.ampEnv; break;
+                case Source::FilterEnv: vVal = vs.filterEnv; break;
+                case Source::ModEnv3:   vVal = vs.modEnv; break;
+                case Source::AuxEnv4:   vVal = vs.auxEnv; break;
+                case Source::Velocity:  vVal = vs.velocity; break;
+                default: break;
+            }
+            if (vVal != 0.0f) {
+                const auto dstIdx = static_cast<std::size_t>(s.destination);
+                vo.offsets[dstIdx] += vVal * s.amount;
+            }
+        }
+        return vo;
     }
 
     [[nodiscard]] float getModulationOffset(Destination dst) const noexcept {

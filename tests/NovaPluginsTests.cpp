@@ -1048,7 +1048,8 @@ TEST(NovaSynthRegressionTests, SampleRateSwitchingConsistency) {
 }
 
 TEST(NovaSynthRegressionTests, MidiSustainPedalAndAllNotesOffSafety) {
-    nova::dsp::WorshipSynthEngine synth;
+    auto synthPtr = std::make_unique<nova::dsp::WorshipSynthEngine>();
+    auto& synth = *synthPtr;
     synth.prepare(48000.0, 512);
 
     auto p = synth.getParameters();
@@ -2229,6 +2230,98 @@ TEST(ModulationMatrixTests, SlotAssignmentAndDestinationEvaluation) {
                nova::dsp::ModMatrix::Destination::FilterCutoff, 0.50f, false);
     mm.evaluate();
     EXPECT_NEAR(mm.getModulationOffset(nova::dsp::ModMatrix::Destination::FilterCutoff), -0.30f, 1e-4f);
+}
+
+TEST(ModulationMatrixTests, ExpandedDestinationsAndPolyphonicVoiceOffsets) {
+    nova::dsp::ModMatrix mm;
+    mm.clear();
+
+    // Map ModEnv3 -> Osc3Level (+0.75) and Velocity -> Filter2Cutoff (+0.60)
+    mm.setSlot(0, nova::dsp::ModMatrix::Source::ModEnv3,
+               nova::dsp::ModMatrix::Destination::Osc3Level, 0.75f, true);
+    mm.setSlot(1, nova::dsp::ModMatrix::Source::Velocity,
+               nova::dsp::ModMatrix::Destination::Filter2Cutoff, 0.60f, true);
+    mm.setSlot(2, nova::dsp::ModMatrix::Source::Lfo1,
+               nova::dsp::ModMatrix::Destination::Osc1Pitch, 0.25f, true);
+
+    // Global evaluation with Lfo1 = 0.8
+    mm.setSourceValue(nova::dsp::ModMatrix::Source::Lfo1, 0.80f);
+    mm.evaluate();
+
+    EXPECT_NEAR(mm.getModulationOffset(nova::dsp::ModMatrix::Destination::Osc1Pitch), 0.20f, 1e-4f);
+
+    // Evaluate voice with specific dynamic envelope and velocity values
+    nova::dsp::ModMatrix::VoiceSources vs;
+    vs.modEnv = 0.50f;
+    vs.velocity = 0.80f;
+
+    const auto vo = mm.evaluateVoice(vs);
+    // Osc3Level = 0.50 * 0.75 = 0.375
+    EXPECT_NEAR(vo.offsets[static_cast<std::size_t>(nova::dsp::ModMatrix::Destination::Osc3Level)], 0.375f, 1e-4f);
+    // Filter2Cutoff = 0.80 * 0.60 = 0.48
+    EXPECT_NEAR(vo.offsets[static_cast<std::size_t>(nova::dsp::ModMatrix::Destination::Filter2Cutoff)], 0.48f, 1e-4f);
+    // Osc1Pitch still receives global LFO modulation = 0.20
+    EXPECT_NEAR(vo.offsets[static_cast<std::size_t>(nova::dsp::ModMatrix::Destination::Osc1Pitch)], 0.20f, 1e-4f);
+}
+
+TEST(WorshipSynthEngineTests, OscillatorIndependentEnvelopeRoutingAndSwell) {
+    auto synthPtr = std::make_unique<nova::dsp::WorshipSynthEngine>();
+    auto& synth = *synthPtr;
+    synth.prepare(48000.0, 256);
+
+    auto p = synth.getParameters();
+    p.activeOscCount = 3;
+
+    // OSC 1: Fast attack (5ms), AmpEnv1
+    p.oscSlots[0].enabled = true;
+    p.oscSlots[0].level = 0.8f;
+    p.oscSlots[0].ampEnvSource = 0; // Main Amp Env
+    p.ampEnv.attackSec = 0.005f;
+    p.ampEnv.sustainLvl = 1.0f;
+
+    // OSC 2: Disabled
+    p.oscSlots[1].enabled = false;
+
+    // OSC 3: Slow swell attack (600ms), ModEnv3
+    p.oscSlots[2].enabled = true;
+    p.oscSlots[2].level = 0.8f;
+    p.oscSlots[2].ampEnvSource = 2; // Mod Env 3
+    p.modEnv.attackSec = 0.600f;
+    p.modEnv.sustainLvl = 1.0f;
+
+    // Bypassed filters and FX for direct level verification
+    p.filter1Enabled = false;
+    p.filter2Enabled = false;
+    p.delayMix = 0.0f;
+    p.reverbMix = 0.0f;
+
+    synth.setParameters(p);
+    synth.noteOn(60, 0.9f);
+
+    std::vector<float> left(256, 0.0f);
+    std::vector<float> right(256, 0.0f);
+
+    // Advance 5 blocks (~27 ms): OSC 1 attack (5ms) is fully complete, but OSC 3 (600ms) is at only ~4% of its swell
+    for (int b = 0; b < 5; ++b) {
+        synth.processBlock(left.data(), right.data(), 256);
+    }
+    float earlyRms = 0.0f;
+    for (float s : left) earlyRms += s * s;
+    earlyRms = std::sqrt(earlyRms / 256.0f);
+    EXPECT_GT(earlyRms, 0.01f);
+
+    // Render 120 more blocks (~640 ms > 600 ms swell time)
+    for (int b = 0; b < 120; ++b) {
+        synth.processBlock(left.data(), right.data(), 256);
+    }
+
+    // Now OSC 3 has fully swelled in; total energy must be significantly higher than with OSC 1 alone!
+    float lateRms = 0.0f;
+    for (float s : left) lateRms += s * s;
+    lateRms = std::sqrt(lateRms / 256.0f);
+    EXPECT_GT(lateRms, earlyRms * 1.15f);
+
+    synth.allNotesOff();
 }
 
 TEST(ModulationMatrixTests, AllFourLfoEnginesAndShapes) {
