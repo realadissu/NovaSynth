@@ -240,6 +240,9 @@ public:
     void allSoundOff() noexcept { reset(); }
     void snapSmoothersToTarget() noexcept;
 
+    void triggerDrone(bool triggered = true) noexcept;
+    [[nodiscard]] bool isDroneTriggered() const noexcept { return droneTriggered_; }
+
     void processBlock(float* outLeft, float* outRight, int numSamples) noexcept;
 
     [[nodiscard]] Telemetry getTelemetry() const noexcept;
@@ -306,6 +309,7 @@ private:
     float lastVelocity_ = 0.8f;
 
     // Drone tracking & dedicated Warmth filter
+    bool droneTriggered_ = false;
     bool currentDroneActive_ = false;
     int currentDroneKey_ = -1;
     int currentDroneVoicing_ = -1;

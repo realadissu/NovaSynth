@@ -190,8 +190,9 @@ public:
             keyBtns_[static_cast<std::size_t>(k)].onClick = [this, k]() {
                 if (auto* p = proc_.getAPVTS().getParameter("droneRootKey")) {
                     p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(k)));
-                    repaint();
                 }
+                proc_.triggerDrone(true);
+                repaint();
             };
             addAndMakeVisible(keyBtns_[static_cast<std::size_t>(k)]);
         }
@@ -429,10 +430,18 @@ private:
         g.drawText("HARMONIC AURA", juce::Rectangle<float>(area.getX() + 10.0f, area.getY() + 6.0f, 120.0f, 16.0f),
                    juce::Justification::left);
 
+        bool isDroneActive = false;
+        bool isDroneEnabled = false;
+        if (auto* p = proc_.getAPVTS().getRawParameterValue("droneEnabled")) {
+            isDroneEnabled = p->load() > 0.5f;
+            isDroneActive = isDroneEnabled && proc_.isDroneTriggered();
+        }
+
         // Subtitle badge
         g.setFont(theme_.getLabelFont(10.0f));
-        g.setColour(theme_.textMuted);
-        g.drawText("RESONANCE", juce::Rectangle<float>(area.getRight() - 80.0f, area.getY() + 7.0f, 70.0f, 14.0f),
+        g.setColour(isDroneActive ? juce::Colour(0xfff59e0b) : (isDroneEnabled ? juce::Colour(0xff38bdf8) : theme_.textMuted));
+        g.drawText(isDroneActive ? "ACTIVE" : (isDroneEnabled ? "ARMED (KEY)" : "OFF"),
+                   juce::Rectangle<float>(area.getRight() - 95.0f, area.getY() + 7.0f, 85.0f, 14.0f),
                    juce::Justification::right);
 
         // Real-time Glowing Harmonic Resonance Aura
@@ -445,11 +454,6 @@ private:
         const float cx = plotArea.getCentreX();
         const float cy = plotArea.getCentreY();
         const float maxR = std::min(plotArea.getWidth(), plotArea.getHeight()) * 0.45f;
-
-        bool isDroneActive = false;
-        if (auto* p = proc_.getAPVTS().getRawParameterValue("droneEnabled")) {
-            isDroneActive = p->load() > 0.5f;
-        }
         float droneLevel = 0.5f;
         if (auto* pL = proc_.getAPVTS().getRawParameterValue("droneLevel")) {
             droneLevel = pL->load();

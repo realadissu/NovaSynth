@@ -41,6 +41,13 @@ public:
         return synthEngine_;
     }
 
+    void triggerDrone(bool triggered = true) noexcept {
+        synthEngine_.triggerDrone(triggered);
+    }
+    [[nodiscard]] bool isDroneTriggered() const noexcept {
+        return synthEngine_.isDroneTriggered();
+    }
+
     [[nodiscard]] nova::dsp::WorshipSynthEngine::Telemetry getSynthTelemetry() const noexcept {
         return synthEngine_.getTelemetry();
     }

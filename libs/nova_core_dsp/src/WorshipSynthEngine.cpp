@@ -116,6 +116,7 @@ void WorshipSynthEngine::reset() noexcept {
     latchedCount_ = 0;
     latchedNotes_.fill(0);
     sustainPedalDown_ = false;
+    droneTriggered_ = false;
     currentDroneActive_ = false;
     currentDroneKey_ = -1;
     currentDroneVoicing_ = -1;
@@ -241,6 +242,10 @@ void WorshipSynthEngine::setParameters(const Parameters& params) noexcept {
         latchedCount_ = 0;
     }
 
+    if (!params_.droneEnabled) {
+        droneTriggered_ = false;
+    }
+
     updateDroneVoices();
 }
 
@@ -277,6 +282,11 @@ void WorshipSynthEngine::noteOn(int midiNote, float velocity) noexcept {
         arpStepIndex_ = 0;
         arpPhaseSamples_ = 0.0;
         arpTriggerPending_ = true;
+    }
+
+    if (params_.droneEnabled && !droneTriggered_) {
+        droneTriggered_ = true;
+        updateDroneVoices();
     }
 
     physicalHeldNotes_[static_cast<std::size_t>(midiNote)] = true;
@@ -474,23 +484,31 @@ void WorshipSynthEngine::startVoice(int midiNote, float velocity, bool isDrone, 
     chosen->auxEnv.noteOn(chosen->velocity);
 }
 
+void WorshipSynthEngine::triggerDrone(bool triggered) noexcept {
+    if (droneTriggered_ != triggered) {
+        droneTriggered_ = triggered;
+        updateDroneVoices();
+    }
+}
+
 void WorshipSynthEngine::updateDroneVoices() noexcept {
+    const bool shouldRunDrone = params_.droneEnabled && droneTriggered_;
     const int key = std::clamp(params_.droneRootKey, 0, 11);
     const int voicing = std::clamp(params_.droneVoicing, 0, 3);
     const int octave = std::clamp(params_.droneOctave, -2, 2);
 
-    if (params_.droneEnabled == currentDroneActive_ &&
-        (!params_.droneEnabled || (key == currentDroneKey_ && voicing == currentDroneVoicing_ && octave == currentDroneOctave_))) {
+    if (shouldRunDrone == currentDroneActive_ &&
+        (!shouldRunDrone || (key == currentDroneKey_ && voicing == currentDroneVoicing_ && octave == currentDroneOctave_))) {
         return;
     }
 
-    currentDroneActive_ = params_.droneEnabled;
+    currentDroneActive_ = shouldRunDrone;
     currentDroneKey_ = key;
     currentDroneVoicing_ = voicing;
     currentDroneOctave_ = octave;
 
-    if (!params_.droneEnabled) {
-        // Drone disabled: smoothly fade out all active drone voices
+    if (!shouldRunDrone) {
+        // Drone disabled or waiting for trigger: smoothly fade out all active drone voices
         for (auto& v : voices_) {
             if (v.active && v.isDroneVoice && v.heldByDrone) {
                 v.heldByDrone = false;
@@ -780,8 +798,9 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
         if (b) { anyKeyHeld = true; break; }
     }
     const bool arpActive = params_.arpEnabled && (anyKeyHeld || (params_.arpLatch && latchedCount_ > 0));
+    const bool droneActive = params_.droneEnabled && droneTriggered_;
 
-    if (!anyVoiceActive && !params_.droneEnabled && !arpActive) {
+    if (!anyVoiceActive && !droneActive && !arpActive) {
         const auto revTel = reverb_.getTelemetry();
         if (delayEnergy_ < 1e-5f && revTel.tankEnergy < 1e-5f && !params_.reverbFreeze) {
             std::fill_n(outLeft, numSamples, 0.0f);

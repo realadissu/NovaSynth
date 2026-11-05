@@ -587,6 +587,46 @@ TEST(WorshipSynthEngineTests, PolyphonicPadAndDroneGenerateSustainedOutput) {
     EXPECT_GT(totalEnergy, 1e-2f);
 }
 
+TEST(WorshipSynthEngineTests, DroneWaitsForFirstTriggerAndDoesNotAutoStartOnPreset) {
+    nova::dsp::WorshipSynthEngine synth;
+    synth.prepare(48000.0, 512);
+
+    nova::dsp::WorshipSynthEngine::Parameters p = synth.getParameters();
+    p.droneEnabled = true;
+    p.droneRootKey = 0; // C
+    p.droneLevel = 0.7f;
+    synth.setParameters(p);
+
+    // Drone must NOT be triggered initially on preset load
+    EXPECT_FALSE(synth.isDroneTriggered());
+
+    std::vector<float> left(512, 0.0f);
+    std::vector<float> right(512, 0.0f);
+    synth.processBlock(left.data(), right.data(), 512);
+
+    float silentEnergy = 0.0f;
+    for (float s : left) silentEnergy += s * s;
+    EXPECT_LT(silentEnergy, 1e-6f);
+    EXPECT_EQ(synth.getTelemetry().activeVoiceCount, 0);
+
+    // Trigger drone by striking first note (musician starts playing)
+    synth.noteOn(60, 0.8f);
+    EXPECT_TRUE(synth.isDroneTriggered());
+
+    float playingEnergy = 0.0f;
+    for (int b = 0; b < 8; ++b) {
+        synth.processBlock(left.data(), right.data(), 512);
+        for (float s : left) playingEnergy += s * s;
+    }
+    EXPECT_GT(playingEnergy, 1e-3f);
+    // At least 3 drone voices + 1 played note voice
+    EXPECT_GE(synth.getTelemetry().activeVoiceCount, 4);
+
+    // Resetting engine clears trigger state and silences drone
+    synth.reset();
+    EXPECT_FALSE(synth.isDroneTriggered());
+}
+
 class DummyTestProcessor : public juce::AudioProcessor {
 public:
     DummyTestProcessor()
@@ -2317,7 +2357,20 @@ TEST(DroneHubPanelTests, DroneParametersAndHarmonicVoicings) {
         proc.syncParametersFromAPVTS();
     }
 
-    // 6. Test Live Switching while Drone Pad is held: change key, voicing, octave
+    // 6. Test that drone is armed on enable, but remains silent until triggered
+    EXPECT_FALSE(proc.isDroneTriggered());
+    std::vector<float> preLeft(256, 0.0f);
+    std::vector<float> preRight(256, 0.0f);
+    engine.processBlock(preLeft.data(), preRight.data(), 256);
+    float preEnergy = 0.0f;
+    for (float s : preLeft) preEnergy += s * s;
+    EXPECT_LT(preEnergy, 1e-6f);
+
+    // 7. Explicitly trigger the drone and verify sound starts
+    proc.triggerDrone(true);
+    EXPECT_TRUE(proc.isDroneTriggered());
+
+    // 8. Test Live Switching while Drone Pad is held: change key, voicing, octave
     if (auto* pK = apvts.getParameter("droneRootKey")) {
         pK->setValueNotifyingHost(pK->convertTo0to1(2.0f)); // Key D
     }
