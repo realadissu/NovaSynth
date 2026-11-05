@@ -401,7 +401,8 @@ void MultiEngineOscillator::triggerNote(float baseFrequencyHz, float velocity, u
                 }
             }
             activeSampleZone_ = &smp.zones[bestIdx];
-            const double startOffset = static_cast<double>(params_.shapeMorph) * std::min(static_cast<double>(activeSampleZone_->numSamples) * 0.20, 5000.0);
+            const double maxOffset = static_cast<double>(activeSampleZone_->numSamples) * 0.60;
+            const double startOffset = static_cast<double>(params_.shapeMorph) * maxOffset;
             samplePlayhead_ = startOffset;
         } else {
             samplePlayhead_ = 0.0;

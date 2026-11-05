@@ -2434,6 +2434,45 @@ TEST(ArcKnobAnimationTests, ArcKnobSetModulationAndLiveHaloUpdates) {
     EXPECT_NEAR(liveOffset, 0.75f, 1e-4f);
 }
 
+TEST(MultiEngineOscillatorTests, SamplePlaybackStartOffsetAndWaveformRendering) {
+    nova::dsp::MultiEngineOscillator osc;
+    osc.prepare(48000.0);
+
+    nova::dsp::MultiEngineOscillator::Parameters p{};
+    p.engine = nova::dsp::MultiEngineOscillator::EngineType::SamplePlayback;
+    p.sourceType = 4;
+    p.modelIndex = 0; // Grand Piano Hammer
+    p.shapeMorph = 0.25f; // 25% start offset
+    p.level = 0.8f;
+    osc.setParameters(p);
+
+    osc.triggerNote(440.0f, 0.9f);
+
+    float l = 0.0f, r = 0.0f;
+    float rms = 0.0f;
+    for (int i = 0; i < 512; ++i) {
+        osc.processSample(440.0f, 0.0f, 0.0f, l, r);
+        rms += l * l + r * r;
+    }
+    rms = std::sqrt(rms / 512.0f);
+    EXPECT_GT(rms, 0.01f);
+
+    // Verify all 8 samples generate valid waveform preview points
+    for (int s = 0; s < 8; ++s) {
+        p.modelIndex = s;
+        const auto pts = nova::dsp::MultiEngineOscillator::buildWaveformPreview(p, 48);
+        EXPECT_EQ(pts.size(), 48u);
+        bool hasNonZero = false;
+        for (float pt : pts) {
+            if (std::abs(pt - 0.5f) > 0.02f) {
+                hasNonZero = true;
+                break;
+            }
+        }
+        EXPECT_TRUE(hasNonZero);
+    }
+}
+
 TEST(ModulationMatrixTests, AllFourLfoEnginesAndShapes) {
     nova::synth::NovaSynthProcessor proc;
     auto& engine = proc.getEngine();

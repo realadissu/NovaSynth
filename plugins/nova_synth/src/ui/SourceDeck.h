@@ -4,6 +4,7 @@
 #include "nova_ui/ArcKnob.h"
 #include "HorizontalViewport.h"
 #include "../NovaSynthProcessor.h"
+#include "nova_dsp/oscillators/SampleBank.h"
 #include "BinaryData.h"
 #include <juce_gui_basics/juce_gui_basics.h>
 #include <array>
@@ -256,9 +257,12 @@ public:
             unisonKnob_.setLabel("CRACKLE");
             scatterKnob_.setLabel("WIDTH");
         } else if (slot.sourceType == 4 || slot.engine == ET::SamplePlayback) {
-            morphKnob_.setLabel("ATTACK");
+            morphKnob_.setLabel("START");
+            morphKnob_.setSuffix("%");
             unisonKnob_.setLabel("SPREAD");
+            unisonKnob_.setSuffix("%");
             scatterKnob_.setLabel("DETUNE");
+            scatterKnob_.setSuffix("ct");
         } else if (slot.engine == ET::EvolvingWavetable) {
             morphKnob_.setLabel("WT POS");
             warpKnob_.setLabel("WARP");
@@ -1061,16 +1065,35 @@ private:
             g.setColour(strokeCol);
             g.strokePath(p, juce::PathStrokeType(1.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
         } else if (sourceType == 4 || engine == ET::SamplePlayback) {
-            juce::Path p;
-            p.startNewSubPath(l, midY);
-            p.lineTo(l + r.getWidth() * 0.12f, t + 1.0f);
-            p.lineTo(l + r.getWidth() * 0.25f, b - 1.0f);
-            p.lineTo(l + r.getWidth() * 0.40f, midY - r.getHeight() * 0.35f);
-            p.lineTo(l + r.getWidth() * 0.60f, midY + r.getHeight() * 0.20f);
-            p.lineTo(l + r.getWidth() * 0.80f, midY - r.getHeight() * 0.10f);
-            p.lineTo(right, midY);
-            g.setColour(strokeCol);
-            g.strokePath(p, juce::PathStrokeType(1.3f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            const auto& smp = nova::dsp::SampleBank::getSample(modelIndex);
+            if (smp.zones != nullptr && smp.numZones > 0 && smp.zones[0].pcmL != nullptr && smp.zones[0].numSamples > 0) {
+                const auto& z = smp.zones[0];
+                constexpr int numPts = 32;
+                const int step = std::max(1, z.numSamples / numPts);
+                juce::Path p;
+                for (int i = 0; i <= numPts; ++i) {
+                    const float normX = static_cast<float>(i) / static_cast<float>(numPts);
+                    const float x = l + normX * r.getWidth();
+                    const int sIdx = std::clamp(static_cast<int>(normX * (z.numSamples - 1)), 0, z.numSamples - 1);
+                    float maxV = 0.0f;
+                    for (int k = 0; k < step && (sIdx + k) < z.numSamples; k += 8) {
+                        maxV = std::max(maxV, std::abs(static_cast<float>(z.pcmL[sIdx + k]) * (1.0f / 32768.0f)));
+                    }
+                    const float y = midY - maxV * (r.getHeight() * 0.42f) * ((i % 2 == 0) ? 1.0f : -0.8f);
+                    if (i == 0) p.startNewSubPath(x, midY);
+                    else p.lineTo(x, y);
+                }
+                g.setColour(strokeCol);
+                g.strokePath(p, juce::PathStrokeType(1.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+            } else {
+                juce::Path p;
+                p.startNewSubPath(l, midY);
+                p.lineTo(l + r.getWidth() * 0.20f, t + 2.0f);
+                p.lineTo(l + r.getWidth() * 0.40f, b - 2.0f);
+                p.lineTo(right, midY);
+                g.setColour(strokeCol);
+                g.strokePath(p, juce::PathStrokeType(1.2f));
+            }
         } else {
             switch (modelIndex) {
                 case 0: { // Classic Saw
@@ -1309,6 +1332,56 @@ private:
             g.strokePath(p, juce::PathStrokeType(2.2f));
             g.setColour(slotCol.brighter(0.4f));
             g.strokePath(p, juce::PathStrokeType(1.2f));
+        } else if (slot.sourceType == 4 || slot.engine == ET::SamplePlayback) {
+            // High-resolution sampled audio waveform & dynamic START offset indicator
+            const auto& smp = nova::dsp::SampleBank::getSample(slot.modelIndex);
+            if (smp.zones != nullptr && smp.numZones > 0 && smp.zones[0].pcmL != nullptr && smp.zones[0].numSamples > 0) {
+                const auto& z = smp.zones[0];
+                constexpr int numPts = 64;
+                const int step = std::max(1, z.numSamples / numPts);
+                juce::Path waveTop, waveBot;
+                const float startOffsetNorm = std::clamp(slot.shapeMorph * 0.60f, 0.0f, 0.60f);
+                const float startLineX = startX + startOffsetNorm * w;
+
+                for (int i = 0; i <= numPts; ++i) {
+                    const float normX = static_cast<float>(i) / static_cast<float>(numPts);
+                    const float x = startX + normX * w;
+                    const int sIdx = std::clamp(static_cast<int>(normX * (z.numSamples - 1)), 0, z.numSamples - 1);
+                    float maxV = 0.0f;
+                    for (int k = 0; k < step && (sIdx + k) < z.numSamples; k += 4) {
+                        maxV = std::max(maxV, std::abs(static_cast<float>(z.pcmL[sIdx + k]) * (1.0f / 32768.0f)));
+                    }
+                    const float yTop = midY - maxV * (bF.getHeight() * 0.38f);
+                    const float yBot = midY + maxV * (bF.getHeight() * 0.38f);
+                    if (i == 0) {
+                        waveTop.startNewSubPath(x, yTop);
+                        waveBot.startNewSubPath(x, yBot);
+                    } else {
+                        waveTop.lineTo(x, yTop);
+                        waveBot.lineTo(x, yBot);
+                    }
+                }
+
+                // Sample Fill
+                juce::Path fillP = waveTop;
+                fillP.lineTo(startX + w, midY);
+                fillP.lineTo(startX, midY);
+                fillP.closeSubPath();
+                g.setColour(slotCol.withAlpha(0.18f));
+                g.fillPath(fillP);
+
+                // Waveform contour
+                g.setColour(slotCol.withAlpha(0.85f));
+                g.strokePath(waveTop, juce::PathStrokeType(1.4f));
+                g.strokePath(waveBot, juce::PathStrokeType(1.1f));
+
+                // Sample START offset laser marker
+                g.setColour(juce::Colours::white.withAlpha(0.90f));
+                g.drawVerticalLine(static_cast<int>(startLineX), bF.getY() + 4.0f, bF.getBottom() - 4.0f);
+                g.setFont(theme_.getValueFont(9.0f));
+                g.setColour(juce::Colours::white);
+                g.drawText("START", static_cast<int>(startLineX + 3.0f), static_cast<int>(bF.getY() + 4.0f), 40, 11, juce::Justification::centredLeft);
+            }
         } else {
             juce::Path p;
             juce::Random rnd(slotIndex_ * 77 + slot.modelIndex * 13);
