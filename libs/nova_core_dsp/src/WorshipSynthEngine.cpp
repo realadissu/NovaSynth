@@ -1140,7 +1140,8 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
                 const auto& slotParam = params_.oscSlots[static_cast<std::size_t>(i)];
                 const bool isSubSlot = (slotParam.sourceType == 1 ||
                     slotParam.engine == MultiEngineOscillator::EngineType::SubOscillator);
-                if (isSubSlot && params_.subLowestOnly) {
+                const bool isLowestOnly = slotParam.lowestNoteOnly || params_.subLowestOnly;
+                if (isSubSlot && isLowestOnly) {
                     if (v.isDroneVoice) {
                         const bool isLowestDrone = v.heldByDrone
                             ? (v.midiNote == lowestHeldDroneNote)

@@ -40,13 +40,6 @@ public:
         scaleNormalBtn_.onClick = [this]() { setScale(NovaTheme::TextScale::Normal); };
         scaleLargeBtn_.onClick = [this]() { setScale(NovaTheme::TextScale::Large); };
 
-        // Voicing Buttons
-        addAndMakeVisible(voiceLowestBtn_);
-        addAndMakeVisible(voicePolyBtn_);
-
-        voiceLowestBtn_.onClick = [this]() { setSubLowest(true); };
-        voicePolyBtn_.onClick = [this]() { setSubLowest(false); };
-
         // Sustain Pedal Polarity Buttons (only if supported by processor)
         if (processor_.getAPVTS().getParameter("invertSustainPedal") != nullptr) {
             addAndMakeVisible(pedalNormalBtn_);
@@ -72,11 +65,6 @@ public:
         styleToggle(scaleSmallBtn_, curScale == NovaTheme::TextScale::Small);
         styleToggle(scaleNormalBtn_, curScale == NovaTheme::TextScale::Normal);
         styleToggle(scaleLargeBtn_, curScale == NovaTheme::TextScale::Large);
-
-        auto* subLowestParam = processor_.getAPVTS().getParameter("subLowestOnly");
-        const bool isLowest = (subLowestParam == nullptr || subLowestParam->getValue() > 0.5f);
-        styleToggle(voiceLowestBtn_, isLowest);
-        styleToggle(voicePolyBtn_, !isLowest);
 
         if (auto* invPedalParam = processor_.getAPVTS().getParameter("invertSustainPedal")) {
             const bool isInverted = (invPedalParam->getValue() > 0.5f);
@@ -121,9 +109,8 @@ public:
 
         const int cX = card.getX() + 20;
         g.drawText("UI LABEL & TYPOGRAPHY SCALE", juce::Rectangle<int>(cX, card.getY() + 58, 300, 16), juce::Justification::centredLeft);
-        g.drawText("SUB-BASS VOICING MODE", juce::Rectangle<int>(cX, card.getY() + 138, 300, 16), juce::Justification::centredLeft);
 
-        int nextSectionY = card.getY() + 218;
+        int nextSectionY = card.getY() + 138;
         if (processor_.getAPVTS().getParameter("invertSustainPedal") != nullptr) {
             g.drawText("SUSTAIN PEDAL POLARITY", juce::Rectangle<int>(cX, nextSectionY, 300, 16), juce::Justification::centredLeft);
             nextSectionY += 76;
@@ -151,14 +138,8 @@ public:
         scaleNormalBtn_.setBounds(card.getX() + 20 + sW + 8, sY, sW, 32);
         scaleLargeBtn_.setBounds(card.getX() + 20 + (sW + 8) * 2, sY, sW, 32);
 
-        // Voicing Buttons (row at y = 160)
-        const int vY = card.getY() + 160;
-        const int vW = (card.getWidth() - 40 - 10) / 2;
-        voiceLowestBtn_.setBounds(card.getX() + 20, vY, vW, 32);
-        voicePolyBtn_.setBounds(card.getX() + 20 + vW + 10, vY, vW, 32);
-
-        // Sustain Pedal Polarity Buttons
-        int nextRowY = card.getY() + 238;
+        // Sustain Pedal Polarity Buttons (row at y = 160)
+        int nextRowY = card.getY() + 160;
         if (processor_.getAPVTS().getParameter("invertSustainPedal") != nullptr) {
             const int pW = (card.getWidth() - 40 - 10) / 2;
             pedalNormalBtn_.setBounds(card.getX() + 20, nextRowY, pW, 32);
@@ -192,7 +173,7 @@ public:
 private:
     [[nodiscard]] juce::Rectangle<int> getCardBounds() const {
         constexpr int cardW = 480;
-        const int cardH = (processor_.getAPVTS().getParameter("invertSustainPedal") != nullptr) ? 425 : 350;
+        const int cardH = (onOpenAudioSettings_ != nullptr) ? 360 : 285;
         return juce::Rectangle<int>((getWidth() - cardW) / 2, (getHeight() - cardH) / 2, cardW, cardH);
     }
 
@@ -202,17 +183,11 @@ private:
         refreshStates();
     }
 
-    void setSubLowest(bool lowestOnly) {
-        if (auto* p = processor_.getAPVTS().getParameter("subLowestOnly")) {
-            p->setValueNotifyingHost(lowestOnly ? 1.0f : 0.0f);
-        }
-        refreshStates();
-    }
-
     void setInvertPedal(bool inverted) {
         if (auto* p = processor_.getAPVTS().getParameter("invertSustainPedal")) {
             p->setValueNotifyingHost(inverted ? 1.0f : 0.0f);
         }
+        processor_.getPresetManager().saveGlobalPreferences();
         refreshStates();
     }
 
@@ -253,9 +228,6 @@ private:
     juce::TextButton scaleSmallBtn_{ "SMALL (COMPACT)" };
     juce::TextButton scaleNormalBtn_{ "NORMAL (+15%)" };
     juce::TextButton scaleLargeBtn_{ "LARGE (+30%)" };
-
-    juce::TextButton voiceLowestBtn_{ "LOWEST NOTE (MONO)" };
-    juce::TextButton voicePolyBtn_{ "POLYPHONIC (CHORDS)" };
 
     juce::TextButton pedalNormalBtn_{ "NORMAL (POLARITY +)" };
     juce::TextButton pedalInvertBtn_{ "INVERTED (POLARITY -)" };

@@ -484,11 +484,12 @@ public:
                 wavePillRects_[4] = {};
                 wavePillRects_[5] = {};
 
-                lowestNoteRect_ = juce::Rectangle<int>(rightX, 50, 130, 20);
                 const int octW = 28;
                 for (int i = 0; i < 3; ++i) {
                     subOctPillRects_[static_cast<std::size_t>(i)] = juce::Rectangle<int>(rightX + rightW - (3 - i) * (octW + 3), 50, octW, 20);
                 }
+                const int octTotalW = 3 * (octW + 3);
+                lowestNoteRect_ = juce::Rectangle<int>(rightX, 50, std::max(140, rightW - octTotalW - 6), 20);
 
                 const int kw5 = (rightW - 16) / 5;
                 const int kh = getHeight() - 76;
@@ -944,7 +945,7 @@ private:
                 drawWaveformIcon(g, r.toFloat(), slot.engine, slot.sourceType, i, iconCol, isActive);
             }
 
-            // Lowest Note Only Toggle
+            // Lowest Note Only Voicing Toggle (Sub)
             const bool lowOn = slot.lowestNoteOnly;
             g.setColour(lowOn ? juce::Colour(0xff22c55e).withAlpha(0.25f) : theme_.bgElevated);
             g.fillRoundedRectangle(lowestNoteRect_.toFloat(), 3.0f);
@@ -952,7 +953,7 @@ private:
             g.drawRoundedRectangle(lowestNoteRect_.toFloat(), 3.0f, 1.0f);
             g.setFont(theme_.getValueFont(8.5f));
             g.setColour(lowOn ? juce::Colour(0xff4ade80) : theme_.textMuted);
-            g.drawText(lowOn ? "LOW NOTE ONLY: ON" : "LOWEST NOTE ONLY", lowestNoteRect_, juce::Justification::centred, false);
+            g.drawText(lowOn ? "VOICING: LOW NOTE (MONO)" : "VOICING: POLYPHONIC", lowestNoteRect_, juce::Justification::centred, false);
 
             // Octave Steppers [-1, -2, -3]
             static const char* kOctPills[] = { "-1", "-2", "-3" };

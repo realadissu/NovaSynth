@@ -3305,6 +3305,105 @@ TEST(NovaSynthProcessorTests, SustainPedalInversionToggle) {
     proc.processBlock(buffer, midi);
 }
 
+TEST(PresetManagerTests, GlobalHardwarePreferencesPersistAcrossPresetLoading) {
+    nova::synth::NovaSynthProcessor processor;
+    processor.prepareToPlay(48000.0, 512);
+
+    auto& pm = processor.getPresetManager();
+    auto& apvts = processor.getAPVTS();
+
+    // 1. Set global hardware preference (inverted sustain pedal)
+    processor.setInvertSustainPedal(true);
+    EXPECT_TRUE(processor.isInvertSustainPedal());
+    EXPECT_FLOAT_EQ(*apvts.getRawParameterValue("invertSustainPedal"), 1.0f);
+
+    // 2. Load multiple presets from different categories
+    EXPECT_TRUE(pm.loadPresetByName("Init Patch"));
+    EXPECT_FLOAT_EQ(*apvts.getRawParameterValue("invertSustainPedal"), 1.0f);
+    EXPECT_TRUE(processor.isInvertSustainPedal());
+
+    EXPECT_TRUE(pm.loadPresetByName("Bethel Shimmer Cloud"));
+    EXPECT_FLOAT_EQ(*apvts.getRawParameterValue("invertSustainPedal"), 1.0f);
+    EXPECT_TRUE(processor.isInvertSustainPedal());
+
+    EXPECT_TRUE(pm.loadPresetByName("Hillsong 1/8d Pluck Lead"));
+    EXPECT_FLOAT_EQ(*apvts.getRawParameterValue("invertSustainPedal"), 1.0f);
+    EXPECT_TRUE(processor.isInvertSustainPedal());
+
+    // 3. A/B switching also preserves global preferences
+    pm.switchABState();
+    EXPECT_FLOAT_EQ(*apvts.getRawParameterValue("invertSustainPedal"), 1.0f);
+    pm.switchABState();
+    EXPECT_FLOAT_EQ(*apvts.getRawParameterValue("invertSustainPedal"), 1.0f);
+}
+
+TEST(NovaSynthRegressionTests, SubOscCardLowestNoteVoicingToggle) {
+    nova::synth::NovaSynthProcessor processor;
+    processor.prepareToPlay(48000.0, 512);
+
+    auto& apvts = processor.getAPVTS();
+    auto& pm = processor.getPresetManager();
+    pm.loadPresetByName("Init Patch");
+
+    // Configure slot 1 as Sub Oscillator
+    if (auto* pEngine = apvts.getParameter("osc1_engine")) {
+        pEngine->setValueNotifyingHost(pEngine->convertTo0to1(3.0f)); // SubOscillator
+    }
+    if (auto* pAmpAtt = apvts.getParameter("ampAttackSec")) {
+        pAmpAtt->setValueNotifyingHost(pAmpAtt->convertTo0to1(0.005f));
+    }
+    if (auto* pAmpRel = apvts.getParameter("ampReleaseSec")) {
+        pAmpRel->setValueNotifyingHost(pAmpRel->convertTo0to1(0.05f));
+    }
+
+    // 1. Polyphonic mode (lowestNoteOnly = false)
+    if (auto* pLow = apvts.getParameter("osc1_lowestNoteOnly")) {
+        pLow->setValueNotifyingHost(0.0f);
+    }
+
+    juce::AudioBuffer<float> buffer(2, 512);
+    juce::MidiBuffer midi;
+    midi.addEvent(juce::MidiMessage::noteOn(1, 36, (juce::uint8)100), 0); // C2
+    midi.addEvent(juce::MidiMessage::noteOn(1, 40, (juce::uint8)100), 0); // E2
+    midi.addEvent(juce::MidiMessage::noteOn(1, 43, (juce::uint8)100), 0); // G2
+
+    float polyRms = 0.0f;
+    for (int b = 0; b < 6; ++b) {
+        buffer.clear();
+        processor.processBlock(buffer, midi);
+        midi.clear();
+        polyRms = buffer.getRMSLevel(0, 0, 512);
+    }
+    EXPECT_GT(polyRms, 0.04f);
+
+    // 2. Lowest-only Mono mode (lowestNoteOnly = true)
+    if (auto* pLow = apvts.getParameter("osc1_lowestNoteOnly")) {
+        pLow->setValueNotifyingHost(1.0f);
+    }
+
+    // Release and re-trigger chord
+    midi.addEvent(juce::MidiMessage::allNotesOff(1), 0);
+    buffer.clear();
+    processor.processBlock(buffer, midi);
+    midi.clear();
+
+    midi.addEvent(juce::MidiMessage::noteOn(1, 36, (juce::uint8)100), 0);
+    midi.addEvent(juce::MidiMessage::noteOn(1, 40, (juce::uint8)100), 0);
+    midi.addEvent(juce::MidiMessage::noteOn(1, 43, (juce::uint8)100), 0);
+
+    float monoRms = 0.0f;
+    for (int b = 0; b < 6; ++b) {
+        buffer.clear();
+        processor.processBlock(buffer, midi);
+        midi.clear();
+        monoRms = buffer.getRMSLevel(0, 0, 512);
+    }
+
+    // With lowest-note-only active, only C2 plays in sub instead of 3 simultaneous sub notes!
+    EXPECT_GT(monoRms, 0.015f);
+    EXPECT_LT(monoRms, polyRms * 0.90f);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {

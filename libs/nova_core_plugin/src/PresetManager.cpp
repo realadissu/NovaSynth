@@ -4,6 +4,7 @@ namespace nova::plugin {
 
 PresetManager::PresetManager(juce::AudioProcessorValueTreeState& apvts, const juce::String& pluginFolderName)
     : apvts_(apvts), pluginFolderName_(pluginFolderName) {
+    loadGlobalPreferences();
     slotAState_ = apvts_.copyState();
     slotBState_ = apvts_.copyState();
     loadUserPresetsFromDisk();
@@ -29,13 +30,20 @@ void PresetManager::loadPresetByIndex(int index) {
 
     // First reset all APVTS parameters to their clean defaults so omitted parameters
     // from a previously loaded preset never bleed into the newly loaded patch!
+    // Global hardware/user preferences (like invertSustainPedal) are preserved!
     for (auto* param : apvts_.processor.getParameters()) {
         if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*>(param)) {
+            if (isGlobalPreferenceParameter(ranged->getParameterID())) {
+                continue;
+            }
             ranged->setValueNotifyingHost(ranged->getDefaultValue());
         }
     }
 
     for (const auto& [paramId, rawVal] : preset.parameterValues) {
+        if (isGlobalPreferenceParameter(paramId)) {
+            continue;
+        }
         if (auto* param = apvts_.getParameter(paramId)) {
             const float normVal = param->convertTo0to1(rawVal);
             param->setValueNotifyingHost(normVal);
@@ -151,10 +159,13 @@ void PresetManager::saveUserPreset(const juce::String& name,
     entry.tags = tags;
     entry.isFactory = false;
 
-    // Capture ALL APVTS parameters!
+    // Capture ALL APVTS parameters (except global preferences like pedal polarity)!
     for (auto* param : apvts_.processor.getParameters()) {
         if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*>(param)) {
             const auto id = ranged->getParameterID();
+            if (isGlobalPreferenceParameter(id)) {
+                continue;
+            }
             const float val = ranged->convertFrom0to1(ranged->getValue());
             entry.parameterValues[id] = val;
         }
@@ -286,11 +297,72 @@ void PresetManager::captureCurrentStateToSlot(juce::ValueTree& slot) {
 
 void PresetManager::applyStateFromSlot(const juce::ValueTree& slot) {
     if (slot.isValid()) {
+        std::vector<std::pair<juce::RangedAudioParameter*, float>> savedGlobals;
+        for (auto* param : apvts_.processor.getParameters()) {
+            if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*>(param)) {
+                if (isGlobalPreferenceParameter(ranged->getParameterID())) {
+                    savedGlobals.emplace_back(ranged, ranged->getValue());
+                }
+            }
+        }
+
         apvts_.replaceState(slot.createCopy());
+
+        for (auto& [param, normVal] : savedGlobals) {
+            param->setValueNotifyingHost(normVal);
+        }
+
         if (onPresetLoaded) {
             onPresetLoaded();
         }
     }
+}
+
+juce::File PresetManager::getGlobalPreferencesFile() const {
+    const auto dir = juce::File::getSpecialLocation(juce::File::userApplicationDataDirectory)
+        .getChildFile("Application Support")
+        .getChildFile("Nova Audio");
+    if (!dir.exists()) {
+        dir.createDirectory();
+    }
+    return dir.getChildFile("GlobalPreferences.json");
+}
+
+void PresetManager::loadGlobalPreferences() {
+    auto file = getGlobalPreferencesFile();
+    if (!file.existsAsFile()) return;
+
+    auto parsed = juce::JSON::parse(file.loadFileAsString());
+    if (!parsed.isObject()) return;
+
+    if (auto* obj = parsed.getDynamicObject()) {
+        for (const auto& prop : obj->getProperties()) {
+            const auto id = prop.name.toString();
+            if (isGlobalPreferenceParameter(id)) {
+                if (auto* param = apvts_.getParameter(id)) {
+                    const float rawVal = static_cast<float>(prop.value);
+                    param->setValueNotifyingHost(param->convertTo0to1(rawVal));
+                }
+            }
+        }
+    }
+}
+
+void PresetManager::saveGlobalPreferences() {
+    auto file = getGlobalPreferencesFile();
+    juce::DynamicObject::Ptr obj = new juce::DynamicObject();
+
+    for (auto* param : apvts_.processor.getParameters()) {
+        if (auto* ranged = dynamic_cast<juce::RangedAudioParameter*>(param)) {
+            const auto id = ranged->getParameterID();
+            if (isGlobalPreferenceParameter(id)) {
+                const float rawVal = ranged->convertFrom0to1(ranged->getValue());
+                obj->setProperty(id, rawVal);
+            }
+        }
+    }
+
+    file.replaceWithText(juce::JSON::toString(juce::var(obj.get()), true));
 }
 
 } // namespace nova::plugin

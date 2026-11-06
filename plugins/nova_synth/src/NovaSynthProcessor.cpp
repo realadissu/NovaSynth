@@ -95,7 +95,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout NovaSynthProcessor::createPa
             juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.0f));
 
         params.push_back(std::make_unique<juce::AudioParameterBool>(
-            juce::ParameterID{prefix + "lowestNoteOnly", 1}, namePrefix + "Lowest Note Only", false));
+            juce::ParameterID{prefix + "lowestNoteOnly", 1}, namePrefix + "Lowest Note Only", true));
 
         params.push_back(std::make_unique<juce::AudioParameterChoice>(
             juce::ParameterID{prefix + "ampEnvSource", 1}, namePrefix + "Amp Env Source",
@@ -1565,7 +1565,7 @@ void NovaSynthProcessor::syncParametersFromAPVTS() noexcept {
     p.delayTimeSec  = apvts_.getRawParameterValue("delayTimeSec")->load();
     p.delayFeedback = apvts_.getRawParameterValue("delayFeedback")->load();
     if (auto* pSw = apvts_.getRawParameterValue("delaySwing")) p.delaySwing = pSw->load();
-    if (auto* pSubLow = apvts_.getRawParameterValue("subLowestOnly")) p.subLowestOnly = pSubLow->load() > 0.5f;
+    p.subLowestOnly = false; // per-slot lowestNoteOnly governs each sub slot independently!
 
     p.reverbDry     = apvts_.getRawParameterValue("reverbDry")->load();
     p.reverbMix     = apvts_.getRawParameterValue("reverbMix")->load();

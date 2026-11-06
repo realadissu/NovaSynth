@@ -54,6 +54,14 @@ public:
     [[nodiscard]] juce::String getCurrentPresetName() const;
     [[nodiscard]] juce::String getCurrentPresetCategory() const;
 
+    [[nodiscard]] static bool isGlobalPreferenceParameter(const juce::String& paramId) noexcept {
+        return paramId == "invertSustainPedal";
+    }
+
+    void loadGlobalPreferences();
+    void saveGlobalPreferences();
+    [[nodiscard]] juce::File getGlobalPreferencesFile() const;
+
     // A/B State Comparison
     void switchABState();
     void copyActiveToOtherABState();
