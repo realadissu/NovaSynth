@@ -18,6 +18,7 @@
 #include "ui/DroneHubPanel.h"
 #include "ui/ArpeggiatorHubPanel.h"
 #include "ui/MixerHubPanel.h"
+#include "ui/StandaloneKeyboardBar.h"
 #include <juce_events/juce_events.h>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <cmath>
@@ -3108,6 +3109,52 @@ TEST(SourceDeckTests, CompactEnvelopePillDirectInteraction) {
     EXPECT_EQ(static_cast<int>(apvts.getRawParameterValue("osc1_ampEnvSource")->load()), 2);
 
     card->repaint();
+}
+
+TEST(UiPolishTests, ArcKnobFrequencyFormattingAndParsing) {
+    auto theme = nova::ui::NovaTheme::create(nova::ui::NovaTheme::AccentPreset::SpaceCyan);
+    nova::ui::ArcKnob knob("CUTOFF", "Hz", theme);
+
+    // Frequencies >= 1000 Hz format as concise kHz string without truncation:
+    EXPECT_EQ(knob.getSlider().getTextFromValue(2388.0), "2.39k");
+    EXPECT_EQ(knob.getSlider().getTextFromValue(1100.0), "1.10k");
+    EXPECT_EQ(knob.getSlider().getTextFromValue(10000.0), "10.0k");
+
+    // Audio & LFO rates < 1000 Hz preserve full precision:
+    EXPECT_EQ(knob.getSlider().getTextFromValue(450.0), "450 Hz");
+    EXPECT_EQ(knob.getSlider().getTextFromValue(0.42), "0.42 Hz");
+
+    // Parsing kHz and Hz strings:
+    EXPECT_NEAR(knob.getSlider().getValueFromText("2.39k"), 2390.0, 1.0);
+    EXPECT_NEAR(knob.getSlider().getValueFromText("1.1 kHz"), 1100.0, 1.0);
+    EXPECT_NEAR(knob.getSlider().getValueFromText("350 Hz"), 350.0, 0.1);
+}
+
+TEST(UiPolishTests, StandaloneKeyboardBarVelocityAndQwertyAudition) {
+    nova::synth::NovaSynthProcessor proc;
+    auto theme = nova::ui::NovaTheme::create(nova::ui::NovaTheme::AccentPreset::SpaceCyan);
+    nova::synth::StandaloneKeyboardBar bar(proc, theme);
+    bar.setBounds(0, 0, 1200, 62);
+
+    // Initial state: default 85% velocity and QWERTY off
+    EXPECT_NEAR(bar.getAuditionVelocity(), 0.85f, 0.01f);
+    EXPECT_FALSE(bar.isQwertyActive());
+
+    // Enable QWERTY
+    bar.setQwertyActive(true);
+    EXPECT_TRUE(bar.isQwertyActive());
+
+    // Pressing 'A' (C4 = MIDI note 60) triggers audition note
+    const bool keyHandled = bar.keyPressed(juce::KeyPress('A'));
+    EXPECT_TRUE(keyHandled);
+
+    // Release key
+    const bool keyReleased = bar.keyStateChanged(false);
+    EXPECT_TRUE(keyReleased);
+
+    // Adjust velocity
+    bar.setAuditionVelocity(0.50f);
+    EXPECT_NEAR(bar.getAuditionVelocity(), 0.50f, 0.01f);
 }
 
 } // namespace

@@ -3550,20 +3550,11 @@ private:
         g.setColour(juce::Colour(0xfff59e0b));
         g.strokePath(rel, juce::PathStrokeType(1.6f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
-        // Amber Node Handle Dots
-        for (const auto& pt : { pPeak, pSusStart, pSusEnd, pEnd }) {
+        // Amber Node Handle Dots (Peak, Sustain, End)
+        for (const auto& pt : { pPeak, pSusStart, pEnd }) {
             g.setColour(juce::Colour(0xfff59e0b));
             g.fillEllipse(pt.x - 2.5f, pt.y - 2.5f, 5.0f, 5.0f);
         }
-
-        // ADSR Values text
-        g.setFont(theme_.getValueFont(10.0f));
-        g.setColour(theme_.textMuted);
-        const juce::String adsrStr = "A:" + juce::String(params.ampEnv.attackSec, 2) + "s  D:" +
-                                     juce::String(params.ampEnv.decaySec, 1) + "s  S:" +
-                                     juce::String(static_cast<int>(params.ampEnv.sustainLvl * 100.0f)) + "%  R:" +
-                                     juce::String(params.ampEnv.releaseSec, 1) + "s";
-        g.drawText(adsrStr, static_cast<int>(adsrBox.getX()), static_cast<int>(adsrBox.getBottom() - 15), static_cast<int>(adsrBox.getWidth()), 12, juce::Justification::centred);
 
         // =====================================================================
         // 4. FX CARD (Horizontal Pedalboard / Series Chain)
@@ -3615,7 +3606,7 @@ private:
         g.setColour(params.delayEnabled ? theme_.textPrimary : theme_.textMuted);
         g.drawText("Time: " + juce::String(static_cast<int>(params.delayTimeSec * 1000.0f)) + " ms", static_cast<int>(delaySlotR.getX() + 8), static_cast<int>(delaySlotR.getY() + 52), static_cast<int>(slotW - 16), 14, juce::Justification::centredLeft);
         g.setColour(params.delayEnabled ? theme_.textSecondary : theme_.textMuted);
-        g.drawText("Fdbk: " + juce::String(static_cast<int>(params.delayFeedback * 100.0f)) + "%", static_cast<int>(delaySlotR.getX() + 8), static_cast<int>(delaySlotR.getY() + 70), static_cast<int>(slotW - 16), 14, juce::Justification::centredLeft);
+        g.drawText("Feedback: " + juce::String(static_cast<int>(params.delayFeedback * 100.0f)) + "%", static_cast<int>(delaySlotR.getX() + 8), static_cast<int>(delaySlotR.getY() + 70), static_cast<int>(slotW - 16), 14, juce::Justification::centredLeft);
         g.drawText("Mix: " + juce::String(static_cast<int>(params.delayMix * 100.0f)) + "%", static_cast<int>(delaySlotR.getX() + 8), static_cast<int>(delaySlotR.getY() + 88), static_cast<int>(slotW - 16), 14, juce::Justification::centredLeft);
         g.drawText("Ping-Pong", static_cast<int>(delaySlotR.getX() + 8), static_cast<int>(delaySlotR.getBottom() - 20), static_cast<int>(slotW - 16), 14, juce::Justification::centredLeft);
 
@@ -3645,7 +3636,7 @@ private:
         g.setColour(revOn ? theme_.textPrimary : theme_.textMuted);
         g.drawText("Decay: " + juce::String(params.reverbDecay, 1) + " s", static_cast<int>(reverbSlotR.getX() + 8), static_cast<int>(reverbSlotR.getY() + 52), static_cast<int>(slotW - 16), 14, juce::Justification::centredLeft);
         g.setColour(revOn ? theme_.textSecondary : theme_.textMuted);
-        g.drawText("Shim: " + juce::String(static_cast<int>(params.reverbShimmer * 100.0f)) + "%", static_cast<int>(reverbSlotR.getX() + 8), static_cast<int>(reverbSlotR.getY() + 70), static_cast<int>(slotW - 16), 14, juce::Justification::centredLeft);
+        g.drawText("Shimmer: " + juce::String(static_cast<int>(params.reverbShimmer * 100.0f)) + "%", static_cast<int>(reverbSlotR.getX() + 8), static_cast<int>(reverbSlotR.getY() + 70), static_cast<int>(slotW - 16), 14, juce::Justification::centredLeft);
         g.drawText("Mix: " + juce::String(static_cast<int>(params.reverbMix * 100.0f)) + "%", static_cast<int>(reverbSlotR.getX() + 8), static_cast<int>(reverbSlotR.getY() + 88), static_cast<int>(slotW - 16), 14, juce::Justification::centredLeft);
         g.drawText("Lush Cloud", static_cast<int>(reverbSlotR.getX() + 8), static_cast<int>(reverbSlotR.getBottom() - 20), static_cast<int>(slotW - 16), 14, juce::Justification::centredLeft);
 

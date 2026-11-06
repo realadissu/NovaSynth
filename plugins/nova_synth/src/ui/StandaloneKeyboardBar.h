@@ -13,7 +13,13 @@ public:
     StandaloneKeyboardBar(NovaSynthProcessor& proc, const nova::ui::NovaTheme& theme)
         : proc_(proc), theme_(theme) {
         setOpaque(false);
+        setWantsKeyboardFocus(true);
     }
+
+    [[nodiscard]] bool isQwertyActive() const noexcept { return qwertyActive_; }
+    void setQwertyActive(bool active) noexcept { qwertyActive_ = active; repaint(); }
+    [[nodiscard]] float getAuditionVelocity() const noexcept { return auditionVelocity_; }
+    void setAuditionVelocity(float vel) noexcept { auditionVelocity_ = std::clamp(vel, 0.05f, 1.0f); repaint(); }
 
     void paint(juce::Graphics& g) override {
         const auto bounds = getLocalBounds().toFloat().reduced(1.0f);
@@ -42,11 +48,68 @@ public:
     }
 
     void mouseDrag(const juce::MouseEvent& e) override {
+        if (isDraggingVelocity_) {
+            const float norm = std::clamp(static_cast<float>(e.getPosition().x - velRect_.getX()) / static_cast<float>(velRect_.getWidth()), 0.05f, 1.0f);
+            auditionVelocity_ = norm;
+            repaint();
+            return;
+        }
         handleMouse(e, true);
     }
 
     void mouseUp(const juce::MouseEvent& e) override {
+        isDraggingVelocity_ = false;
         handleMouse(e, false);
+    }
+
+    bool keyPressed(const juce::KeyPress& key) override {
+        if (!qwertyActive_) return false;
+        const int code = key.getKeyCode();
+        int noteOffset = -1;
+        switch (std::toupper(code)) {
+            case 'A': noteOffset = 0; break;  // C
+            case 'W': noteOffset = 1; break;  // C#
+            case 'S': noteOffset = 2; break;  // D
+            case 'E': noteOffset = 3; break;  // D#
+            case 'D': noteOffset = 4; break;  // E
+            case 'F': noteOffset = 5; break;  // F
+            case 'T': noteOffset = 6; break;  // F#
+            case 'G': noteOffset = 7; break;  // G
+            case 'Y':
+            case 'Z': noteOffset = 8; break;  // G#
+            case 'H': noteOffset = 9; break;  // A
+            case 'U': noteOffset = 10; break; // A#
+            case 'J': noteOffset = 11; break; // B
+            case 'K': noteOffset = 12; break; // C next octave
+            case 'O': noteOffset = 13; break; // C#
+            case 'L': noteOffset = 14; break; // D
+            case 'P': noteOffset = 15; break; // D#
+            default: break;
+        }
+
+        if (noteOffset >= 0) {
+            const int targetNote = 60 + noteOffset + octaveShift_ * 12;
+            if (activeMidiNote_ != targetNote) {
+                if (activeMidiNote_ >= 0 && !isHoldActive_) {
+                    proc_.triggerAuditionNoteOff(activeMidiNote_);
+                }
+                activeMidiNote_ = targetNote;
+                proc_.triggerAuditionNoteOn(activeMidiNote_, auditionVelocity_);
+                repaint();
+            }
+            return true;
+        }
+        return false;
+    }
+
+    bool keyStateChanged(bool isKeyDown) override {
+        if (!isKeyDown && activeMidiNote_ >= 0 && !isHoldActive_ && qwertyActive_) {
+            proc_.triggerAuditionNoteOff(activeMidiNote_);
+            activeMidiNote_ = -1;
+            repaint();
+            return true;
+        }
+        return false;
     }
 
 private:
@@ -110,19 +173,31 @@ private:
     void drawRightControls(juce::Graphics& g, juce::Rectangle<int> area) {
         // Velocity Slider readout & toggle
         auto topRow = area.removeFromTop(20);
-        g.setFont(theme_.getValueFont(9.0f));
-        g.setColour(theme_.textMuted);
-        g.drawText("VELOCITY: 85%", topRow, juce::Justification::centredRight, false);
+        velRect_ = topRow;
+        g.setFont(theme_.getValueFont(9.5f));
+        g.setColour(isDraggingVelocity_ ? theme_.accentPrimary : theme_.textSecondary);
+        const int velPct = static_cast<int>(std::round(auditionVelocity_ * 100.0f));
+        g.drawText("VELOCITY: " + juce::String(velPct) + "%", topRow, juce::Justification::centredRight, false);
 
         auto botRow = area.removeFromBottom(22);
         vkToggleRect_ = botRow.reduced(4, 1);
-        g.setColour(theme_.bgElevated);
+        g.setColour(qwertyActive_ ? theme_.accentPrimary.withAlpha(0.25f) : theme_.bgElevated);
         g.fillRoundedRectangle(vkToggleRect_.toFloat(), 3.0f);
-        g.setColour(theme_.borderFocus.withAlpha(0.5f));
-        g.drawRoundedRectangle(vkToggleRect_.toFloat(), 3.0f, 0.8f);
+        g.setColour(qwertyActive_ ? theme_.accentPrimary : theme_.borderSubtle.withAlpha(0.7f));
+        g.drawRoundedRectangle(vkToggleRect_.toFloat(), 3.0f, qwertyActive_ ? 1.2f : 0.8f);
+
+        // Crisp vector keyboard icon
+        auto r = vkToggleRect_.toFloat().reduced(4.0f, 3.0f);
+        auto iconRect = r.removeFromLeft(14.0f).withSizeKeepingCentre(12.0f, 9.0f);
+        g.setColour(qwertyActive_ ? juce::Colours::white : theme_.accentPrimary);
+        g.drawRoundedRectangle(iconRect, 1.5f, 1.0f);
+        g.fillRect(iconRect.getX() + 2.5f, iconRect.getY() + 2.5f, 2.0f, 1.5f);
+        g.fillRect(iconRect.getX() + 6.5f, iconRect.getY() + 2.5f, 2.0f, 1.5f);
+        g.fillRect(iconRect.getX() + 4.5f, iconRect.getY() + 5.0f, 3.0f, 1.5f);
+
         g.setFont(theme_.getValueFont(9.0f));
-        g.setColour(theme_.accentPrimary);
-        g.drawText("\xe2\x8c\xa8 Virtual Keys", vkToggleRect_, juce::Justification::centred, false);
+        g.setColour(qwertyActive_ ? juce::Colours::white : theme_.textSecondary);
+        g.drawText(qwertyActive_ ? "QWERTY: ON" : "QWERTY: OFF", r.toNearestInt(), juce::Justification::centred, false);
     }
 
     void drawVirtualKeyboard(juce::Graphics& g, juce::Rectangle<int> area) {
@@ -212,6 +287,23 @@ private:
                     return;
                 }
             }
+
+            // QWERTY Key Toggle & Velocity readout
+            if (vkToggleRect_.contains(pos)) {
+                qwertyActive_ = !qwertyActive_;
+                if (qwertyActive_) {
+                    grabKeyboardFocus();
+                }
+                repaint();
+                return;
+            }
+            if (velRect_.contains(pos)) {
+                isDraggingVelocity_ = true;
+                const float norm = std::clamp(static_cast<float>(pos.x - velRect_.getX()) / static_cast<float>(velRect_.getWidth()), 0.05f, 1.0f);
+                auditionVelocity_ = norm;
+                repaint();
+                return;
+            }
         } else {
             // Mouse release: turn off chords unless hold active
             if (!isHoldActive_) {
@@ -258,7 +350,7 @@ private:
                 }
                 activeMidiNote_ = hitNote;
                 if (activeMidiNote_ >= 0) {
-                    proc_.triggerAuditionNoteOn(activeMidiNote_, 0.85f);
+                    proc_.triggerAuditionNoteOn(activeMidiNote_, auditionVelocity_);
                 }
                 repaint();
             }
@@ -271,12 +363,13 @@ private:
         }
     }
 
+
     void triggerChord(int chordIdx) {
         releaseAllChords();
         chordHeld_[static_cast<std::size_t>(chordIdx)] = true;
         const auto notes = getChordNotes(chordIdx);
         for (int n : notes) {
-            proc_.triggerAuditionNoteOn(n + octaveShift_ * 12, 0.85f);
+            proc_.triggerAuditionNoteOn(n + octaveShift_ * 12, auditionVelocity_);
         }
         repaint();
     }
@@ -313,12 +406,16 @@ private:
     const nova::ui::NovaTheme& theme_;
     int octaveShift_ = 0;
     bool isHoldActive_ = false;
+    bool qwertyActive_ = false;
+    float auditionVelocity_ = 0.85f;
+    bool isDraggingVelocity_ = false;
     int activeMidiNote_ = -1;
 
     juce::Rectangle<int> octDownRect_;
     juce::Rectangle<int> octDispRect_;
     juce::Rectangle<int> octUpRect_;
     juce::Rectangle<int> holdBtnRect_;
+    juce::Rectangle<int> velRect_;
     juce::Rectangle<int> vkToggleRect_;
     juce::Rectangle<int> keyboardArea_;
 

@@ -59,9 +59,11 @@ public:
         velSlider_.setSliderStyle(juce::Slider::LinearVertical);
         velSlider_.setTextBoxStyle(juce::Slider::NoTextBox, false, 0, 0);
         velSlider_.setScrollWheelEnabled(false);
-        velSlider_.setColour(juce::Slider::trackColourId, accentCol_.withAlpha(0.85f));
-        velSlider_.setColour(juce::Slider::backgroundColourId, theme_.bgControl.withAlpha(0.6f));
+        velSlider_.setColour(juce::Slider::trackColourId, accentCol_);
+        velSlider_.setColour(juce::Slider::backgroundColourId, juce::Colour(0xff18202c));
         velSlider_.setColour(juce::Slider::thumbColourId, juce::Colours::white);
+        velSlider_.setTooltip("Velocity Sensitivity (0% = fixed envelope volume, 100% = key velocity dynamically scales envelope amplitude)");
+        velSlider_.onValueChange = [this] { repaint(); };
         addAndMakeVisible(velSlider_);
 
         auto& apvts = proc_.getAPVTS();
@@ -172,11 +174,16 @@ public:
         // Zeichne Kurve
         drawAdsrCurve(g, curveBox_);
 
-        // Im expandierten Zustand: VEL Beschriftung
+        // Im expandierten Zustand: VEL SENS Beschriftung und Live-Prozentanzeige
         if (isExpanded_ && velBox_.getWidth() > 0) {
             g.setFont(theme_.getLabelFont(8.0f));
             g.setColour(theme_.accentPrimary);
-            g.drawText("VEL", velBox_.getX() - 2, velBox_.getY() - 14, velBox_.getWidth() + 4, 12, juce::Justification::centred, false);
+            g.drawText("VEL SENS", velBox_.getX() - 6, velBox_.getY(), velBox_.getWidth() + 12, 12, juce::Justification::centred, false);
+
+            const int pct = static_cast<int>(std::round(velSlider_.getValue() * 100.0));
+            g.setFont(theme_.getValueFont(8.5f));
+            g.setColour(theme_.textPrimary);
+            g.drawText(juce::String(pct) + "%", velBox_.getX() - 4, velBox_.getBottom() - 13, velBox_.getWidth() + 8, 12, juce::Justification::centred, false);
         }
     }
 
@@ -204,8 +211,11 @@ public:
             area.removeFromTop(4);
 
             // Unterer Bereich: Kurve (links) + VEL Slider (rechts)
-            velBox_ = area.removeFromRight(24);
-            velSlider_.setBounds(velBox_.reduced(4, 2));
+            velBox_ = area.removeFromRight(34);
+            auto vArea = velBox_;
+            vArea.removeFromTop(13);
+            vArea.removeFromBottom(15);
+            velSlider_.setBounds(vArea.reduced(5, 2));
 
             area.removeFromRight(6);
             curveBox_ = area.toFloat();
@@ -219,7 +229,6 @@ public:
         if (pos.getDistanceFrom(nodeAtk_) <= 18.0f) return DragNode::Attack;
         if (pos.getDistanceFrom(nodeHold_) <= 16.0f && cachedHoldW_ > 3.0f) return DragNode::Hold;
         if (pos.getDistanceFrom(nodeDec_) <= 18.0f) return DragNode::DecaySustain;
-        if (pos.getDistanceFrom(nodeSusEnd_) <= 18.0f) return DragNode::DecaySustain;
         if (pos.getDistanceFrom(nodeRel_) <= 18.0f) return DragNode::Release;
 
         const float startX = curveBox_.getX() + 6.0f;
@@ -263,7 +272,7 @@ public:
             hoveredNode_ == DragNode::Delay || hoveredNode_ == DragNode::Hold) {
             setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);
         } else if (hoveredNode_ == DragNode::DecaySustain) {
-            setMouseCursor(juce::MouseCursor::UpDownResizeCursor);
+            setMouseCursor(juce::MouseCursor::UpDownLeftRightResizeCursor);
         } else if (curveBox_.contains(e.position)) {
             setMouseCursor(juce::MouseCursor::PointingHandCursor);
         } else {
@@ -341,19 +350,19 @@ public:
         const float h = (curveBox_.getBottom() - 8.0f) - (curveBox_.getY() + 8.0f);
 
         if (activeDrag_ == DragNode::Delay) {
-            const float deltaSec = (delta.x / (w * 0.25f)) * 1.5f;
+            const float deltaSec = (delta.x / (w * 0.20f)) * 1.5f;
             const float newDel = std::clamp(dragStartDel_ + deltaSec, 0.0f, 2.0f);
             delKnob_.getSlider().setValue(newDel, juce::sendNotificationSync);
         } else if (activeDrag_ == DragNode::Attack) {
-            const float deltaSec = (delta.x / (w * 0.35f)) * 4.0f;
+            const float deltaSec = (delta.x / (w * 0.30f)) * 4.0f;
             const float newAtk = std::clamp(dragStartAtk_ + deltaSec, 0.002f, 8.0f);
             atkKnob_.getSlider().setValue(newAtk, juce::sendNotificationSync);
         } else if (activeDrag_ == DragNode::Hold) {
-            const float deltaSec = (delta.x / (w * 0.25f)) * 2.0f;
+            const float deltaSec = (delta.x / (w * 0.20f)) * 2.0f;
             const float newHold = std::clamp(dragStartHold_ + deltaSec, 0.0f, 3.0f);
             holdKnob_.getSlider().setValue(newHold, juce::sendNotificationSync);
         } else if (activeDrag_ == DragNode::DecaySustain) {
-            const float deltaDecSec = (delta.x / (w * 0.35f)) * 5.0f;
+            const float deltaDecSec = (delta.x / (w * 0.30f)) * 5.0f;
             const float newDec = std::clamp(dragStartDec_ + deltaDecSec, 0.02f, 10.0f);
             decKnob_.getSlider().setValue(newDec, juce::sendNotificationSync);
 
@@ -361,8 +370,8 @@ public:
             const float newSus = std::clamp(dragStartSus_ + deltaSus, 0.0f, 1.0f);
             susKnob_.getSlider().setValue(newSus, juce::sendNotificationSync);
         } else if (activeDrag_ == DragNode::Release) {
-            const float deltaRelSec = (delta.x / (w * 0.35f)) * 6.0f;
-            const float newRel = std::clamp(dragStartRel_ + deltaRelSec, 0.02f, 12.0f);
+            const float deltaRelSec = (delta.x / (w * 0.30f)) * 5.0f;
+            const float newRel = std::clamp(dragStartRel_ + deltaRelSec, 0.01f, 10.0f);
             relKnob_.getSlider().setValue(newRel, juce::sendNotificationSync);
         }
         repaint();
@@ -393,41 +402,51 @@ private:
 
         // 1. DEL segment: strictly depends on DEL
         const float delNorm = std::pow(std::clamp(del / 2.0f, 0.0f, 1.0f), 0.45f);
-        const float delW = (del > 0.005f) ? (w * 0.03f + delNorm * (w * 0.12f)) : 0.0f;
+        const float delW = (del > 0.005f) ? (w * 0.03f + delNorm * (w * 0.10f)) : 0.0f;
 
-        // 2. ATK segment: Strictly depends on ATK and width, completely invariant to HOLD!
-        // When adjusting HOLD, nodeAtk_ remains 100% frozen/stable!
-        const float atkNorm = std::pow(std::clamp(atk / 6.0f, 0.0f, 1.0f), 0.40f);
-        const float atkW = 8.0f + atkNorm * (w * 0.24f);
+        // 2. ATK segment: Strictly depends on ATK
+        const float atkNorm = std::pow(std::clamp(atk / 6.0f, 0.0f, 1.0f), 0.38f);
+        const float atkW = 6.0f + atkNorm * (w * 0.20f);
 
-        nodeDel_ = { startX + delW, bottomY };
-        nodeAtk_ = { nodeDel_.x + atkW, topY };
-
-        // 3. HOLD segment: extends to the right from nodeAtk_ without shifting nodeAtk_
+        // 3. HOLD segment: extends from nodeAtk_
         const float hldNorm = std::pow(std::clamp(hld / 3.0f, 0.0f, 1.0f), 0.45f);
-        const float hldW = (hld > 0.005f) ? (6.0f + hldNorm * (w * 0.18f)) : 0.0f;
-        nodeHold_ = { nodeAtk_.x + hldW, topY };
+        const float hldW = (hld > 0.005f) ? (4.0f + hldNorm * (w * 0.12f)) : 0.0f;
 
-        // 4. Remaining width after Hold distributed among Decay, Sustain, Release
-        const float remainingW = std::max(24.0f, (startX + w) - nodeHold_.x);
-        const float decNorm = std::max(0.08f, std::pow(std::clamp(dec / 8.0f, 0.0f, 1.0f), 0.40f));
-        const float relNorm = std::max(0.08f, std::pow(std::clamp(rel / 8.0f, 0.0f, 1.0f), 0.40f));
-        const float susWeight = 0.40f;
-        const float sumWeights = decNorm + susWeight + relNorm;
+        // 4. DECAY segment: strictly depends on DEC
+        const float decNorm = std::pow(std::clamp(dec / 8.0f, 0.0f, 1.0f), 0.38f);
+        const float decW = 6.0f + decNorm * (w * 0.22f);
 
-        const float decW = (decNorm / sumWeights) * remainingW;
-        const float susW = (susWeight / sumWeights) * remainingW;
+        // 5. SUSTAIN plateau: visual representation of the held key state (fixed proportion)
+        const float susW = std::clamp(w * 0.14f, 18.0f, 32.0f);
         const float susY = bottomY - std::clamp(sus, 0.05f, 1.0f) * h;
 
-        nodeDec_    = { nodeHold_.x + decW, susY };
-        nodeSusEnd_ = { nodeDec_.x + susW, susY };
-        nodeRel_    = { startX + w, bottomY };
+        // 6. RELEASE segment: strictly depends on REL
+        const float relNorm = std::pow(std::clamp(rel / 8.0f, 0.0f, 1.0f), 0.38f);
+        const float relW = 6.0f + relNorm * (w * 0.25f);
 
-        cachedDelW_ = delW;
-        cachedAtkW_ = atkW;
-        cachedHoldW_ = hldW;
-        cachedDecW_ = decW;
-        cachedSusW_ = susW;
+        // Total required width: if sum exceeds available width w, scale down proportionally
+        const float totalReq = delW + atkW + hldW + decW + susW + relW;
+        const float scale = (totalReq > w) ? (w / totalReq) : 1.0f;
+
+        const float finalDelW = delW * scale;
+        const float finalAtkW = atkW * scale;
+        const float finalHldW = hldW * scale;
+        const float finalDecW = decW * scale;
+        const float finalSusW = susW * scale;
+        const float finalRelW = relW * scale;
+
+        nodeDel_    = { startX + finalDelW, bottomY };
+        nodeAtk_    = { nodeDel_.x + finalAtkW, topY };
+        nodeHold_   = { nodeAtk_.x + finalHldW, topY };
+        nodeDec_    = { nodeHold_.x + finalDecW, susY };
+        nodeSusEnd_ = { nodeDec_.x + finalSusW, susY };
+        nodeRel_    = { nodeSusEnd_.x + finalRelW, bottomY };
+
+        cachedDelW_ = finalDelW;
+        cachedAtkW_ = finalAtkW;
+        cachedHoldW_ = finalHldW;
+        cachedDecW_ = finalDecW;
+        cachedSusW_ = finalSusW;
 
         // Path construction
         juce::Path p;
@@ -436,7 +455,7 @@ private:
         p.startNewSubPath(startX, bottomY);
         fillP.startNewSubPath(startX, bottomY);
 
-        if (delW > 1.0f) {
+        if (finalDelW > 1.0f) {
             p.lineTo(nodeDel_.x, nodeDel_.y);
             fillP.lineTo(nodeDel_.x, nodeDel_.y);
         }
@@ -445,7 +464,7 @@ private:
         p.quadraticTo(nodeDel_.x + (nodeAtk_.x - nodeDel_.x) * 0.25f, topY, nodeAtk_.x, nodeAtk_.y);
         fillP.quadraticTo(nodeDel_.x + (nodeAtk_.x - nodeDel_.x) * 0.25f, topY, nodeAtk_.x, nodeAtk_.y);
 
-        if (hldW > 1.0f) {
+        if (finalHldW > 1.0f) {
             p.lineTo(nodeHold_.x, nodeHold_.y);
             fillP.lineTo(nodeHold_.x, nodeHold_.y);
         }
@@ -461,6 +480,12 @@ private:
         // Curved Release (concave fall to bottom)
         p.quadraticTo(nodeSusEnd_.x + (nodeRel_.x - nodeSusEnd_.x) * 0.65f, bottomY, nodeRel_.x, nodeRel_.y);
         fillP.quadraticTo(nodeSusEnd_.x + (nodeRel_.x - nodeSusEnd_.x) * 0.65f, bottomY, nodeRel_.x, nodeRel_.y);
+
+        // Baseline continuation to the right edge if release finished early
+        if (nodeRel_.x < startX + w) {
+            p.lineTo(startX + w, bottomY);
+            fillP.lineTo(startX + w, bottomY);
+        }
 
         fillP.closeSubPath();
 
@@ -486,11 +511,10 @@ private:
         const bool decActive = (activeDrag_ == DragNode::DecaySustain) || (hoveredNode_ == DragNode::DecaySustain);
         const bool relActive = (activeDrag_ == DragNode::Release) || (hoveredNode_ == DragNode::Release);
 
-        if (delW > 3.0f) drawHandleDot(g, nodeDel_.x, nodeDel_.y, delActive ? 4.8f : 3.4f, delActive);
+        if (finalDelW > 3.0f) drawHandleDot(g, nodeDel_.x, nodeDel_.y, delActive ? 4.8f : 3.4f, delActive);
         drawHandleDot(g, nodeAtk_.x, nodeAtk_.y, atkActive ? 4.8f : 3.4f, atkActive);
-        if (hldW > 3.0f) drawHandleDot(g, nodeHold_.x, nodeHold_.y, hldActive ? 4.8f : 3.4f, hldActive);
-        drawHandleDot(g, nodeDec_.x, nodeDec_.y, decActive ? 4.8f : 3.4f, decActive);
-        drawHandleDot(g, nodeSusEnd_.x, nodeSusEnd_.y, decActive ? 4.8f : 3.4f, decActive);
+        if (finalHldW > 3.0f) drawHandleDot(g, nodeHold_.x, nodeHold_.y, hldActive ? 4.8f : 3.4f, hldActive);
+        drawHandleDot(g, nodeDec_.x, nodeDec_.y, decActive ? 5.2f : 3.8f, decActive);
         drawHandleDot(g, nodeRel_.x, nodeRel_.y, relActive ? 4.8f : 3.4f, relActive);
     }
 

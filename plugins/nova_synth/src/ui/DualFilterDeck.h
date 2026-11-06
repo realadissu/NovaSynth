@@ -291,9 +291,22 @@ private:
         g.fillRoundedRectangle(typeRectOut.toFloat(), 3.0f);
         g.setColour(theme_.borderSubtle);
         g.drawRoundedRectangle(typeRectOut.toFloat(), 3.0f, 0.8f);
+
+        auto rType = typeRectOut.reduced(3, 1);
+        const float triW = 5.0f;
+        const float triH = 3.5f;
+        auto triRect = rType.removeFromRight(static_cast<int>(triW + 3)).toFloat()
+                            .withSizeKeepingCentre(triW, triH);
+        juce::Path tri;
+        tri.addTriangle(triRect.getX(), triRect.getY(),
+                        triRect.getRight(), triRect.getY(),
+                        triRect.getCentreX(), triRect.getBottom());
+        g.setColour(accentCol.withAlpha(0.80f));
+        g.fillPath(tri);
+
         g.setFont(theme_.getValueFont(10.0f));
         g.setColour(accentCol);
-        g.drawFittedText(getFilterTypeName(fltNum, fltType) + " \xe2\x96\xbe", typeRectOut,
+        g.drawFittedText(getFilterTypeName(fltNum, fltType), rType,
                          juce::Justification::centred, 1, 0.85f);
 
         // Interactive Frequenzgang-Kurve (Response Curve)
@@ -551,7 +564,7 @@ private:
             // Subtitle
             g.setFont(theme_.getValueFont(8.0f));
             g.setColour(theme_.textMuted);
-            g.drawFittedText("1 \xe2\x9e\x94 2 SERIES", static_cast<int>(diagCard.getX()), static_cast<int>(diagCard.getBottom() - 14.0f),
+            g.drawFittedText("1 -> 2 SERIES", static_cast<int>(diagCard.getX()), static_cast<int>(diagCard.getBottom() - 14.0f),
                              static_cast<int>(diagCard.getWidth()), 12, juce::Justification::centred, 1, 0.85f);
         } else {
             // PARALLEL FLOW: IN splits to FLT 1 (top) and FLT 2 (bottom) -> merges to OUT

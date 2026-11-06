@@ -24,13 +24,17 @@ ArcKnob::ArcKnob(const juce::String& labelText,
 
 void ArcKnob::setupTextFormatters() {
     slider_.textFromValueFunction = [this](double val) -> juce::String {
-        juce::String s;
         double displayVal = val;
         const bool isPercentage = (suffix_ == "%" && slider_.getMaximum() <= 1.05);
         if (isPercentage) {
             displayVal = val * 100.0;
         }
 
+        if (suffix_ == "Hz" && std::abs(displayVal) >= 1000.0) {
+            return juce::String(displayVal / 1000.0, std::abs(displayVal) >= 10000.0 ? 1 : 2) + "k";
+        }
+
+        juce::String s;
         if (std::abs(displayVal - std::round(displayVal)) < 0.005) {
             s = juce::String(static_cast<int>(std::round(displayVal)));
         } else if (std::abs(displayVal) >= 1000.0) {
@@ -48,6 +52,19 @@ void ArcKnob::setupTextFormatters() {
 
     slider_.valueFromTextFunction = [this](const juce::String& text) -> double {
         auto clean = text.trim();
+        if (suffix_ == "Hz") {
+            if (clean.endsWithIgnoreCase("khz")) {
+                return clean.dropLastCharacters(3).trim().getDoubleValue() * 1000.0;
+            }
+            if (clean.endsWithIgnoreCase("k")) {
+                return clean.dropLastCharacters(1).trim().getDoubleValue() * 1000.0;
+            }
+            if (clean.endsWithIgnoreCase("hz")) {
+                return clean.dropLastCharacters(2).trim().getDoubleValue();
+            }
+            return clean.getDoubleValue();
+        }
+
         if (suffix_.isNotEmpty() && clean.endsWithIgnoreCase(suffix_)) {
             clean = clean.dropLastCharacters(suffix_.length()).trim();
         }
@@ -129,7 +146,7 @@ void ArcKnob::resized() {
     if (!hasCenterLabel_ || getHeight() >= 64) {
         area.removeFromTop(isCompact ? 11 : 12);
     }
-    slider_.setTextBoxStyle(juce::Slider::TextBoxBelow, false, std::min(64, getWidth()), isCompact ? 11 : 14);
+    slider_.setTextBoxStyle(juce::Slider::TextBoxBelow, false, std::min(68, getWidth() + 4), isCompact ? 11 : 14);
     slider_.setBounds(area);
 }
 

@@ -733,6 +733,31 @@ public:
     float currentWidth_ = 144.0f;
 
 private:
+    static void drawPillWithArrow(juce::Graphics& g, juce::Rectangle<int> rect, const juce::String& text,
+                                  juce::Colour bg, juce::Colour border, juce::Colour textCol,
+                                  const juce::Font& font) {
+        g.setColour(bg);
+        g.fillRoundedRectangle(rect.toFloat(), 3.0f);
+        g.setColour(border);
+        g.drawRoundedRectangle(rect.toFloat(), 3.0f, 0.8f);
+
+        auto r = rect.reduced(3, 1);
+        const float triW = 4.0f;
+        const float triH = 3.0f;
+        auto triRect = r.removeFromRight(static_cast<int>(triW + 3)).toFloat()
+                        .withSizeKeepingCentre(triW, triH);
+        juce::Path tri;
+        tri.addTriangle(triRect.getX(), triRect.getY(),
+                        triRect.getRight(), triRect.getY(),
+                        triRect.getCentreX(), triRect.getBottom());
+        g.setColour(textCol.withAlpha(0.80f));
+        g.fillPath(tri);
+
+        g.setFont(font);
+        g.setColour(textCol);
+        g.drawFittedText(text, r, juce::Justification::centred, 1, 0.85f);
+    }
+
     void paintCompact(juce::Graphics& g, juce::Colour slotCol,
                       const nova::dsp::MultiEngineOscillator::Parameters& slot) {
         auto header = getLocalBounds().removeFromTop(24).reduced(5, 2);
@@ -768,17 +793,14 @@ private:
         // Envelope Pill (directly visible & clickable in compact card!)
         if (ampEnvRect_.getWidth() >= 24) {
             const bool isCustomEnv = (slot.ampEnvSource != 0);
-            g.setColour(theme_.bgElevated);
-            g.fillRoundedRectangle(ampEnvRect_.toFloat(), 3.0f);
-            g.setColour(isCustomEnv ? theme_.accentWarm : theme_.borderSubtle);
-            g.drawRoundedRectangle(ampEnvRect_.toFloat(), 3.0f, 0.8f);
-            g.setFont(theme_.getValueFont(8.5f));
-            g.setColour(isCustomEnv ? theme_.accentWarm : theme_.textMuted);
-            const juce::String envShort = (slot.ampEnvSource == 1) ? "FLT \xe2\x96\xbe"
-                                        : ((slot.ampEnvSource == 2) ? "M3 \xe2\x96\xbe"
-                                        : ((slot.ampEnvSource == 3) ? "AUX \xe2\x96\xbe"
-                                        : "AMP \xe2\x96\xbe"));
-            g.drawFittedText(envShort, ampEnvRect_, juce::Justification::centred, 1, 0.85f);
+            const juce::String envShort = (slot.ampEnvSource == 1) ? "FLT"
+                                        : ((slot.ampEnvSource == 2) ? "M3"
+                                        : ((slot.ampEnvSource == 3) ? "AUX"
+                                        : "AMP"));
+            drawPillWithArrow(g, ampEnvRect_, envShort, theme_.bgElevated,
+                              isCustomEnv ? theme_.accentWarm : theme_.borderSubtle,
+                              isCustomEnv ? theme_.accentWarm : theme_.textMuted,
+                              theme_.getValueFont(8.5f));
         }
 
         // Visualizer Screen
@@ -837,37 +859,23 @@ private:
         header.removeFromLeft(4);
         header.setWidth(std::min(header.getWidth(), 80));
         engineRect_ = header;
-        g.setColour(theme_.bgElevated);
-        g.fillRoundedRectangle(engineRect_.toFloat(), 3.0f);
-        g.setColour(theme_.borderSubtle);
-        g.drawRoundedRectangle(engineRect_.toFloat(), 3.0f, 0.8f);
-        g.setFont(theme_.getValueFont(9.0f));
-        g.setColour(slotCol);
-        g.drawFittedText(getEngineDisplayName(slot) + " \xe2\x96\xbe", engineRect_, juce::Justification::centred, 1, 0.85f);
+        drawPillWithArrow(g, engineRect_, getEngineDisplayName(slot), theme_.bgElevated,
+                          theme_.borderSubtle, slotCol, theme_.getValueFont(9.0f));
 
         // Visualizer Screen (Waveform / 3D Wavetable)
         drawEngineVisualizer(g, visualizerRect_, slot, slotCol, true);
 
         // Filter Routing Pill (links unten über Model)
-        g.setColour(theme_.bgElevated);
-        g.fillRoundedRectangle(routingRect_.toFloat(), 3.0f);
-        g.setColour(theme_.borderFocus);
-        g.drawRoundedRectangle(routingRect_.toFloat(), 3.0f, 0.8f);
-        g.setFont(theme_.getValueFont(9.0f));
-        g.setColour(theme_.accentPrimary);
-        g.drawFittedText(getFilterRoutingDisplayName(slot.filterRouting) + " \xe2\x96\xbe",
-                         routingRect_, juce::Justification::centred, 1, 0.85f);
+        drawPillWithArrow(g, routingRect_, getFilterRoutingDisplayName(slot.filterRouting),
+                          theme_.bgElevated, theme_.borderFocus, theme_.accentPrimary,
+                          theme_.getValueFont(9.0f));
 
         // Amp Env Pill (rechts neben Routing)
-        g.setColour(theme_.bgElevated);
-        g.fillRoundedRectangle(ampEnvRect_.toFloat(), 3.0f);
         const bool isCustomEnv = (slot.ampEnvSource != 0);
-        g.setColour(isCustomEnv ? theme_.accentWarm : theme_.borderSubtle);
-        g.drawRoundedRectangle(ampEnvRect_.toFloat(), 3.0f, 0.8f);
-        g.setFont(theme_.getValueFont(9.0f));
-        g.setColour(isCustomEnv ? theme_.accentWarm : theme_.textSecondary);
-        g.drawFittedText(getAmpEnvDisplayName(slot.ampEnvSource) + " \xe2\x96\xbe",
-                         ampEnvRect_, juce::Justification::centred, 1, 0.85f);
+        drawPillWithArrow(g, ampEnvRect_, getAmpEnvDisplayName(slot.ampEnvSource),
+                          theme_.bgElevated, isCustomEnv ? theme_.accentWarm : theme_.borderSubtle,
+                          isCustomEnv ? theme_.accentWarm : theme_.textSecondary,
+                          theme_.getValueFont(9.0f));
 
         // Model Selector Box mit < und > Steppern
         g.setColour(theme_.bgElevated.brighter(0.08f));
