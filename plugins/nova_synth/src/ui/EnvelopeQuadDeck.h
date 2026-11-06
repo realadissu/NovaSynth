@@ -46,7 +46,7 @@ public:
           atkKnob_("ATK", "s", theme, false),
           holdKnob_("HOLD", "s", theme, false),
           decKnob_("DEC", "s", theme, false),
-          susKnob_("SUS", "", theme, false),
+          susKnob_("SUS", "%", theme, false),
           relKnob_("REL", "s", theme, false) {
 
         addAndMakeVisible(delKnob_);
@@ -243,8 +243,9 @@ public:
         if (!curveBox_.contains(pos)) return DragNode::None;
 
         if (pos.getDistanceFrom(nodeDel_) <= 16.0f && cachedDelW_ > 3.0f) return DragNode::Delay;
+        if (pos.getDistanceFrom(nodeHold_) <= 18.0f && pos.x >= nodeHold_.x) return DragNode::Hold;
         if (pos.getDistanceFrom(nodeAtk_) <= 18.0f) return DragNode::Attack;
-        if (pos.getDistanceFrom(nodeHold_) <= 16.0f && cachedHoldW_ > 3.0f) return DragNode::Hold;
+        if (pos.getDistanceFrom(nodeHold_) <= 18.0f) return DragNode::Hold;
         if (pos.getDistanceFrom(nodeDec_) <= 18.0f) return DragNode::DecaySustain;
         const bool hasSustain = (susKnob_.getSlider().getValue() > 0.005);
         if (hasSustain && pos.getDistanceFrom(nodeRel_) <= 18.0f) return DragNode::Release;
@@ -253,7 +254,7 @@ public:
         const float relX = pos.x - startX;
         if (relX <= cachedDelW_ + 4.0f && cachedDelW_ > 3.0f) return DragNode::Delay;
         if (relX <= (nodeAtk_.x - startX) + 4.0f) return DragNode::Attack;
-        if (relX <= (nodeHold_.x - startX) + 4.0f && cachedHoldW_ > 3.0f) return DragNode::Hold;
+        if (relX <= (nodeHold_.x - startX) + 6.0f) return DragNode::Hold;
         if (relX <= (nodeSusEnd_.x - startX) + 4.0f) return DragNode::DecaySustain;
         return DragNode::Release;
     }
@@ -542,7 +543,7 @@ private:
 
         if (finalDelW > 3.0f) drawHandleDot(g, nodeDel_.x, nodeDel_.y, delActive ? 4.8f : 3.4f, delActive);
         drawHandleDot(g, nodeAtk_.x, nodeAtk_.y, atkActive ? 4.8f : 3.4f, atkActive);
-        if (finalHldW > 3.0f) drawHandleDot(g, nodeHold_.x, nodeHold_.y, hldActive ? 4.8f : 3.4f, hldActive);
+        drawHandleDot(g, nodeHold_.x, nodeHold_.y, hldActive ? 4.8f : 3.4f, hldActive);
         drawHandleDot(g, nodeDec_.x, nodeDec_.y, decActive ? 5.2f : 3.8f, decActive);
         if (hasSustain) {
             drawHandleDot(g, nodeRel_.x, nodeRel_.y, relActive ? 4.8f : 3.4f, relActive);

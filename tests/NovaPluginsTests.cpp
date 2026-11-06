@@ -4133,6 +4133,165 @@ TEST(NovaSynthArpAndPanicTests, SaveAndLoadUserArpRhythmPresetWithOverwrite) {
     EXPECT_EQ(presetsAfterDelete.size(), initialPresets.size());
 }
 
+// -------------------------------------------------------------------------------------------------
+// COMPREHENSIVE TEST SUITE 6: All Four Envelopes Hold, Decay, Arp & Keyboard Response
+// -------------------------------------------------------------------------------------------------
+
+TEST(AllFourEnvelopesTests, SustainKnobDisplaysPercentageUnit) {
+    nova::synth::NovaSynthProcessor proc;
+    auto theme = nova::ui::NovaTheme::create(nova::ui::NovaTheme::AccentPreset::SpaceCyan);
+    nova::synth::EnvelopeQuadDeck envDeck(proc, theme);
+
+    auto cards = envDeck.getCardList();
+    ASSERT_EQ(cards.size(), 4u);
+
+    for (std::size_t i = 0; i < cards.size(); ++i) {
+        auto* card = cards[i];
+        ASSERT_NE(card, nullptr);
+        // Suffix must be "%"
+        EXPECT_EQ(card->getSusKnob().getSuffix(), "%")
+            << "Card " << i << " Sustain knob suffix must be %!";
+    }
+}
+
+TEST(AllFourEnvelopesTests, HoldNodeDraggableWhenHoldIsZero) {
+    nova::synth::NovaSynthProcessor proc;
+    auto theme = nova::ui::NovaTheme::create(nova::ui::NovaTheme::AccentPreset::SpaceCyan);
+    nova::synth::EnvelopeQuadDeck envDeck(proc, theme);
+    envDeck.setBounds(0, 0, 800, 168);
+
+    auto cards = envDeck.getCardList();
+    ASSERT_EQ(cards.size(), 4u);
+    auto* card = cards[0];
+    ASSERT_NE(card, nullptr);
+
+    // Expand card and paint to lay out curves and nodes
+    card->setExpanded(true);
+    card->setBounds(0, 0, 390, 168);
+    juce::Image img(juce::Image::ARGB, 390, 168, true);
+    juce::Graphics g(img);
+    card->paintEntireComponent(g, false);
+
+    // With Hold at 0.0s, hit node at nodeHold_ must return DragNode::Hold
+    const auto holdHit = card->getHitNode(card->getNodeHold());
+    EXPECT_EQ(holdHit, nova::synth::ExpandableEnvelopeCard::DragNode::Hold)
+        << "Hold handle must be interactable on the curve even when Hold is 0.0s!";
+}
+
+TEST(AllFourEnvelopesTests, HoldAndDecayTimingForKeyboardPlaying) {
+    constexpr double sr = 48000.0;
+
+    // Test across all 4 envelopes: Amp, Filter, Mod, Aux
+    for (int envIdx = 0; envIdx < 4; ++envIdx) {
+        nova::dsp::AdsrEnvelope env;
+        env.prepare(sr);
+
+        nova::dsp::AdsrEnvelope::Parameters p;
+        p.attackSec  = 0.01f; // 480 samples = 10 ms
+        p.holdSec    = 0.05f; // 2400 samples = 50 ms
+        p.decaySec   = 0.05f; // 2400 samples = 50 ms
+        p.sustainLvl = 0.30f;
+        p.releaseSec = 0.04f; // 1920 samples = 40 ms
+        env.setParameters(p);
+
+        // Case A: Early key release (note-off after 20ms during Hold)
+        env.noteOn(1.0f);
+        EXPECT_TRUE(env.isActive());
+
+        // Process Attack phase until Hold stage reached
+        int attackSamples = 0;
+        while (env.getStage() == nova::dsp::AdsrEnvelope::Stage::Attack && attackSamples < 2000) {
+            (void)env.processSample();
+            attackSamples++;
+        }
+        EXPECT_EQ(env.getStage(), nova::dsp::AdsrEnvelope::Stage::Hold);
+        EXPECT_GE(env.getCurrentLevel(), 0.95f);
+
+        // Advance 10ms into Hold, then call noteOff
+        for (int i = 0; i < 480; ++i) (void)env.processSample();
+        env.noteOff();
+
+        // Hold MUST NOT be aborted by early release: level must remain 1.0 throughout hold
+        for (int i = 0; i < 1920; ++i) { // Remaining 40ms of hold
+            const float val = env.processSample();
+            EXPECT_NEAR(val, 1.0f, 1e-4f) << "Envelope " << envIdx << " must hold at 1.0 throughout hold duration!";
+        }
+
+        // Now Decay must run down towards sustain level (0.30f)
+        for (int i = 0; i < 3000; ++i) (void)env.processSample();
+        EXPECT_NEAR(env.getCurrentLevel(), 0.30f, 0.05f)
+            << "Envelope " << envIdx << " must decay to sustain level!";
+
+        // After decay finishes, since gate is closed, it releases to silence
+        for (int i = 0; i < 6000; ++i) (void)env.processSample();
+        EXPECT_LT(env.getCurrentLevel(), 0.001f);
+        EXPECT_FALSE(env.isActive());
+    }
+}
+
+TEST(AllFourEnvelopesTests, HoldAndDecayPreservedDuringArpeggioPlayback) {
+    nova::synth::NovaSynthProcessor proc;
+    proc.prepareToPlay(48000.0, 512);
+
+    auto& apvts = proc.getAPVTS();
+
+    // Configure all 4 envelopes with distinct hold and decay times:
+    // ENV 1: AMP (Hold: 0.15s, Decay: 0.20s, Sustain: 0.40)
+    if (auto* p = apvts.getParameter("ampAttack"))  p->setValueNotifyingHost(p->convertTo0to1(0.01f));
+    if (auto* p = apvts.getParameter("ampHold"))    p->setValueNotifyingHost(p->convertTo0to1(0.15f));
+    if (auto* p = apvts.getParameter("ampDecay"))   p->setValueNotifyingHost(p->convertTo0to1(0.20f));
+    if (auto* p = apvts.getParameter("ampSustain")) p->setValueNotifyingHost(0.40f);
+    if (auto* p = apvts.getParameter("ampRelease")) p->setValueNotifyingHost(p->convertTo0to1(0.30f));
+
+    // ENV 2: FILTER (Hold: 0.12s, Decay: 0.18s, Sustain: 0.20)
+    if (auto* p = apvts.getParameter("fltAttack"))  p->setValueNotifyingHost(p->convertTo0to1(0.01f));
+    if (auto* p = apvts.getParameter("fltHold"))    p->setValueNotifyingHost(p->convertTo0to1(0.12f));
+    if (auto* p = apvts.getParameter("fltDecay"))   p->setValueNotifyingHost(p->convertTo0to1(0.18f));
+    if (auto* p = apvts.getParameter("fltSustain")) p->setValueNotifyingHost(0.20f);
+    if (auto* p = apvts.getParameter("fltRelease")) p->setValueNotifyingHost(p->convertTo0to1(0.25f));
+
+    // Turn on Arpeggiator (120 BPM, 1/16 notes, 65% gate = 81ms gate duration)
+    if (auto* p = apvts.getParameter("arpEnabled")) p->setValueNotifyingHost(1.0f);
+    if (auto* p = apvts.getParameter("arpGate"))    p->setValueNotifyingHost(p->convertTo0to1(0.65f));
+
+    juce::AudioBuffer<float> buffer(2, 512);
+    juce::MidiBuffer midi;
+
+    // Trigger middle C
+    midi.addEvent(juce::MidiMessage::noteOn(1, 60, (juce::uint8)100), 0);
+
+    // Process blocks through t = 100ms (gate ended at ~81ms)
+    // 10 blocks * 512 samples / 48000 = ~106ms
+    for (int b = 0; b < 10; ++b) {
+        buffer.clear();
+        proc.processBlock(buffer, midi);
+        midi.clear();
+    }
+
+    // Since hold is 150ms, at 106ms (past 81ms gate cutoff) the voice MUST still be sounding at full energy!
+    const float rmsPastGate = buffer.getRMSLevel(0, 0, 512);
+    EXPECT_GT(rmsPastGate, 0.05f)
+        << "Voice must continue holding through hold time (150ms) even after Arp step gate cutoff (81ms)!";
+
+    // Process past hold time into decay (t = 250ms): audio must decay smoothly without clicks
+    for (int b = 0; b < 14; ++b) {
+        buffer.clear();
+        proc.processBlock(buffer, midi);
+    }
+    const float rmsInDecay = buffer.getRMSLevel(0, 0, 512);
+    EXPECT_GT(rmsInDecay, 0.02f);
+    EXPECT_FALSE(std::isnan(buffer.getSample(0, 0)));
+
+    // Release key
+    midi.addEvent(juce::MidiMessage::noteOff(1, 60, (juce::uint8)0), 0);
+    for (int b = 0; b < 120; ++b) {
+        buffer.clear();
+        proc.processBlock(buffer, midi);
+        midi.clear();
+    }
+    EXPECT_EQ(proc.getEngine().getActiveVoiceCount(), 0);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {

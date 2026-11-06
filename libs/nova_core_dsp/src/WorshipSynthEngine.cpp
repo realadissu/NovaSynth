@@ -371,6 +371,15 @@ void WorshipSynthEngine::noteOff(int midiNote) noexcept {
         arpStepIndex_ = 0;
         arpPhaseSamples_ = 0.0;
         currentArpNote_ = -1;
+        for (auto& v : voices_) {
+            if (v.active && !v.isDroneVoice && v.isArpVoice && v.heldByArp) {
+                v.heldByArp = false;
+                v.ampEnv.noteOff();
+                v.filterEnv.noteOff();
+                v.modEnv.noteOff();
+                v.auxEnv.noteOff();
+            }
+        }
     }
 
     for (auto& v : voices_) {
@@ -784,18 +793,16 @@ void WorshipSynthEngine::stepArpeggiator(int numSamples) noexcept {
     }
 
     if (heldCount == 0) {
-        if (currentArpNote_ >= 0) {
-            for (auto& v : voices_) {
-                if (v.active && !v.isDroneVoice && v.isArpVoice && v.heldByArp) {
-                    v.heldByArp = false;
-                    v.ampEnv.noteOff();
-                    v.filterEnv.noteOff();
-                    v.modEnv.noteOff();
-                    v.auxEnv.noteOff();
-                }
+        for (auto& v : voices_) {
+            if (v.active && !v.isDroneVoice && v.isArpVoice && v.heldByArp) {
+                v.heldByArp = false;
+                v.ampEnv.noteOff();
+                v.filterEnv.noteOff();
+                v.modEnv.noteOff();
+                v.auxEnv.noteOff();
             }
-            currentArpNote_ = -1;
         }
+        currentArpNote_ = -1;
         return;
     }
 

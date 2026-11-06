@@ -29,6 +29,7 @@ public:
 
     [[nodiscard]] juce::Slider& getSlider() noexcept { return slider_; }
     [[nodiscard]] const juce::Slider& getSlider() const noexcept { return slider_; }
+    [[nodiscard]] const juce::String& getSuffix() const noexcept { return suffix_; }
 
     void paint(juce::Graphics& g) override;
     void resized() override;

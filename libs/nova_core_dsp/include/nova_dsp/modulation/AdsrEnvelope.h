@@ -47,6 +47,7 @@ public:
         delaySamplesRemaining_ = 0;
         holdSamplesRemaining_ = 0;
         velocityScale_ = 1.0f;
+        gateOpen_ = false;
     }
 
     void setParameters(const Parameters& p) noexcept {
@@ -64,6 +65,7 @@ public:
     [[nodiscard]] const Parameters& getParameters() const noexcept { return params_; }
 
     void noteOn(float velocity = 1.0f) noexcept {
+        gateOpen_ = true;
         const float safeVel = std::clamp(velocity, 0.05f, 1.0f);
         velocityScale_ = (1.0f - params_.velocitySens) + params_.velocitySens * safeVel;
 
@@ -78,8 +80,36 @@ public:
     }
 
     void noteOff() noexcept {
-        if (stage_ != Stage::Idle) {
+        gateOpen_ = false;
+        if (stage_ == Stage::Idle) return;
+        if (stage_ == Stage::Delay) {
+            stage_ = Stage::Idle;
+            level_ = 0.0f;
+            return;
+        }
+        if (stage_ == Stage::Attack) {
             stage_ = Stage::Release;
+            return;
+        }
+        if (stage_ == Stage::Hold) {
+            // If holdSec was 0, transition immediately to Decay or Release
+            if (params_.holdSec <= 0.001f) {
+                stage_ = (params_.sustainLvl < 0.05f) ? Stage::Decay : Stage::Release;
+            }
+            // If holdSec > 0, let Hold complete its full duration in processSample()
+            return;
+        }
+        if (stage_ == Stage::Decay) {
+            // If sustain is active, release from current decay level.
+            // If sustain is 0 (pluck), allow full natural decay.
+            if (params_.sustainLvl >= 0.05f) {
+                stage_ = Stage::Release;
+            }
+            return;
+        }
+        if (stage_ == Stage::Sustain) {
+            stage_ = Stage::Release;
+            return;
         }
     }
 
@@ -118,12 +148,22 @@ public:
                 level_ += decayCoeff_ * (params_.sustainLvl - level_);
                 if (std::abs(level_ - params_.sustainLvl) < 1e-4f) {
                     level_ = params_.sustainLvl;
-                    stage_ = Stage::Sustain;
+                    if (gateOpen_ && params_.sustainLvl > 1e-4f) {
+                        stage_ = Stage::Sustain;
+                    } else if (params_.sustainLvl <= 1e-4f) {
+                        level_ = 0.0f;
+                        stage_ = Stage::Idle;
+                    } else {
+                        stage_ = Stage::Release;
+                    }
                 }
                 return level_ * velocityScale_;
 
             case Stage::Sustain:
                 level_ = params_.sustainLvl;
+                if (!gateOpen_) {
+                    stage_ = Stage::Release;
+                }
                 return level_ * velocityScale_;
 
             case Stage::Release:
@@ -138,6 +178,7 @@ public:
     }
 
     [[nodiscard]] bool isActive() const noexcept { return stage_ != Stage::Idle; }
+    [[nodiscard]] bool isGateOpen() const noexcept { return gateOpen_; }
     [[nodiscard]] float getCurrentLevel() const noexcept { return level_; }
     [[nodiscard]] Stage getStage() const noexcept { return stage_; }
 
@@ -180,6 +221,7 @@ private:
     int delaySamplesRemaining_ = 0;
     int holdSamplesRemaining_ = 0;
     float velocityScale_ = 1.0f;
+    bool gateOpen_ = false;
     float attackCoeff_  = 0.01f;
     float decayCoeff_   = 0.005f;
     float releaseCoeff_ = 0.005f;
