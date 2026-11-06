@@ -104,10 +104,15 @@ public:
         ModEnv3Attack,
         ModEnv3Decay,
         ModEnv3Release,
+        AuxEnv4Attack,
+        AuxEnv4Decay,
+        AuxEnv4Release,
 
         // LFO Rates
         Lfo1Rate,
         Lfo2Rate,
+        Lfo3Rate,
+        Lfo4Rate,
 
         // Space & FX
         ReverbMix,
@@ -165,9 +170,14 @@ public:
             case Destination::ModEnv3Attack:   return "Mod 3 Attack";
             case Destination::ModEnv3Decay:    return "Mod 3 Decay";
             case Destination::ModEnv3Release:  return "Mod 3 Release";
+            case Destination::AuxEnv4Attack:   return "Aux 4 Attack";
+            case Destination::AuxEnv4Decay:    return "Aux 4 Decay";
+            case Destination::AuxEnv4Release:  return "Aux 4 Release";
 
             case Destination::Lfo1Rate:        return "LFO 1 Rate";
             case Destination::Lfo2Rate:        return "LFO 2 Rate";
+            case Destination::Lfo3Rate:        return "LFO 3 Rate";
+            case Destination::Lfo4Rate:        return "LFO 4 Rate";
 
             case Destination::ReverbMix:       return "Reverb Mix";
             case Destination::ShimmerAmount:   return "Shimmer";
@@ -258,7 +268,18 @@ public:
                 case Source::ModEnv3:   vVal = vs.modEnv; break;
                 case Source::AuxEnv4:   vVal = vs.auxEnv; break;
                 case Source::Velocity:  vVal = vs.velocity; break;
-                default: break;
+                case Source::None:
+                case Source::Lfo1:
+                case Source::Lfo2:
+                case Source::Lfo3:
+                case Source::Lfo4:
+                case Source::ModWheel:
+                case Source::MacroWarmth:
+                case Source::MacroMotion:
+                case Source::MacroShimmer:
+                case Source::MacroAir:
+                case Source::Count:
+                    break;
             }
             if (vVal != 0.0f) {
                 const auto dstIdx = static_cast<std::size_t>(s.destination);

@@ -198,6 +198,15 @@ public:
         durKnob_.attachToParameter(apvts,   prefix + "duration");
         warpKnob_.attachToParameter(apvts,  prefix + "warp");
 
+        // Repaint visualizer live when parameters change
+        octKnob_.getSlider().onValueChange = [this]() { repaint(); };
+        semiKnob_.getSlider().onValueChange = [this]() { repaint(); };
+        levelKnob_.getSlider().onValueChange = [this]() { repaint(); };
+        panKnob_.getSlider().onValueChange = [this]() { repaint(); };
+        morphKnob_.getSlider().onValueChange = [this]() { repaint(); };
+        unisonKnob_.getSlider().onValueChange = [this]() { repaint(); };
+        scatterKnob_.getSlider().onValueChange = [this]() { repaint(); };
+
         compactVolAttachment_ = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
             apvts, prefix + "level", compactVolSlider_);
         spreadAttachment_ = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
@@ -209,6 +218,13 @@ public:
     [[nodiscard]] int getSlotIndex() const noexcept { return slotIndex_; }
     [[nodiscard]] bool isExpanded() const noexcept { return isExpanded_; }
     [[nodiscard]] bool isPinned() const noexcept { return isPinned_; }
+    [[nodiscard]] const nova::ui::ArcKnob& getOctKnob() const noexcept { return octKnob_; }
+    [[nodiscard]] const nova::ui::ArcKnob& getSemiKnob() const noexcept { return semiKnob_; }
+    [[nodiscard]] const nova::ui::ArcKnob& getLevelKnob() const noexcept { return levelKnob_; }
+    [[nodiscard]] const nova::ui::ArcKnob& getPanKnob() const noexcept { return panKnob_; }
+    [[nodiscard]] const nova::ui::ArcKnob& getMorphKnob() const noexcept { return morphKnob_; }
+    [[nodiscard]] const nova::ui::ArcKnob& getUnisonKnob() const noexcept { return unisonKnob_; }
+    [[nodiscard]] const nova::ui::ArcKnob& getScatterKnob() const noexcept { return scatterKnob_; }
     [[nodiscard]] float getPreferredExpandedWidth() const noexcept {
         const auto params = proc_.getCurrentParameters();
         const auto& slot = params.oscSlots[static_cast<std::size_t>(slotIndex_)];
@@ -387,9 +403,9 @@ public:
             // Linke Hälfte: Visualizer & Routing & Model
             const int leftW = 135;
             visualizerRect_ = juce::Rectangle<int>(6, 26, leftW - 6, getHeight() - 74);
-            const int pillW = (leftW - 6 - 4) / 2;
-            routingRect_    = juce::Rectangle<int>(6, getHeight() - 46, pillW, 18);
-            ampEnvRect_     = juce::Rectangle<int>(6 + pillW + 4, getHeight() - 46, pillW, 18);
+            const int routingPillW = (leftW - 6 - 4) / 2;
+            routingRect_    = juce::Rectangle<int>(6, getHeight() - 46, routingPillW, 18);
+            ampEnvRect_     = juce::Rectangle<int>(6 + routingPillW + 4, getHeight() - 46, routingPillW, 18);
             modelRect_      = juce::Rectangle<int>(6, getHeight() - 25, leftW - 6, 20);
             modelPrevRect_  = juce::Rectangle<int>(modelRect_.getX(), modelRect_.getY(), 18, modelRect_.getHeight());
             modelNextRect_  = juce::Rectangle<int>(modelRect_.getRight() - 18, modelRect_.getY(), 18, modelRect_.getHeight());
@@ -407,7 +423,8 @@ public:
             const bool isSub      = (slot.sourceType == 1 || slot.engine == ET::SubOscillator);
             const bool isPluck    = (slot.sourceType == 2 || slot.engine == ET::PhysicalPluckModal);
             const bool isNoise    = (slot.sourceType == 3 || slot.engine == ET::NoiseTransient);
-            juce::ignoreUnused(isNoise);
+            const bool isSample   = (slot.sourceType == 4 || slot.engine == ET::SamplePlayback);
+            juce::ignoreUnused(isNoise, isSample);
 
             for (auto& r : wavePillRects_) r = {};
             for (auto& r : subOctPillRects_) r = {};
@@ -510,6 +527,25 @@ public:
                 unisonKnob_.setBounds(rightX + kw + 4, 26 + kh + 4, kw, kh);
                 rateKnob_.setBounds(rightX + (kw + 4) * 2, 26 + kh + 4, kw, kh);
                 scatterKnob_.setBounds(rightX + (kw + 4) * 3, 26 + kh + 4, kw, kh);
+            } else if (isSample) {
+                for (auto& r : wavePillRects_) r = {};
+
+                const int kw4 = (rightW - 12) / 4;
+                const int kh = (getHeight() - 56) / 2;
+                const int yRow1 = 26;
+                const int yRow2 = 26 + kh + 4;
+
+                // Row 1: Tuning & Output (4 equal columns)
+                octKnob_.setBounds(rightX, yRow1, kw4, kh);
+                semiKnob_.setBounds(rightX + kw4 + 4, yRow1, kw4, kh);
+                levelKnob_.setBounds(rightX + (kw4 + 4) * 2, yRow1, kw4, kh);
+                panKnob_.setBounds(rightX + (kw4 + 4) * 3, yRow1, kw4, kh);
+
+                // Row 2: Sample Shaping (START, SPREAD, DETUNE - 3 equal columns)
+                const int kw3 = (rightW - 8) / 3;
+                morphKnob_.setBounds(rightX, yRow2, kw3, kh);
+                unisonKnob_.setBounds(rightX + kw3 + 4, yRow2, kw3, kh);
+                scatterKnob_.setBounds(rightX + (kw3 + 4) * 2, yRow2, kw3, kh);
             } else {
                 const int pillCount = 4;
                 const int gap = 3;
@@ -1374,7 +1410,8 @@ private:
                 constexpr int numPts = 64;
                 const int step = std::max(1, z.numSamples / numPts);
                 juce::Path waveTop, waveBot;
-                const float startOffsetNorm = std::clamp(slot.shapeMorph * 0.60f, 0.0f, 0.60f);
+                const float currentMorph = static_cast<float>(morphKnob_.getSlider().getValue());
+                const float startOffsetNorm = std::clamp(currentMorph * 0.60f, 0.0f, 0.60f);
                 const float startLineX = startX + startOffsetNorm * w;
 
                 for (int i = 0; i <= numPts; ++i) {
@@ -1409,12 +1446,23 @@ private:
                 g.strokePath(waveTop, juce::PathStrokeType(1.4f));
                 g.strokePath(waveBot, juce::PathStrokeType(1.1f));
 
-                // Sample START offset laser marker
-                g.setColour(juce::Colours::white.withAlpha(0.90f));
-                g.drawVerticalLine(static_cast<int>(startLineX), bF.getY() + 4.0f, bF.getBottom() - 4.0f);
-                g.setFont(theme_.getValueFont(9.0f));
+                // Sample START offset laser marker with handle
+                const float clampedLineX = std::clamp(startLineX, startX, startX + w);
+                g.setColour(juce::Colours::white.withAlpha(0.95f));
+                g.drawVerticalLine(static_cast<int>(clampedLineX), bF.getY() + 4.0f, bF.getBottom() - 4.0f);
+
+                juce::Path markerHandle;
+                markerHandle.startNewSubPath(clampedLineX - 4.0f, bF.getY() + 4.0f);
+                markerHandle.lineTo(clampedLineX + 4.0f, bF.getY() + 4.0f);
+                markerHandle.lineTo(clampedLineX, bF.getY() + 10.0f);
+                markerHandle.closeSubPath();
+                g.setColour(juce::Colour(0xff38bdf8));
+                g.fillPath(markerHandle);
+
+                g.setFont(theme_.getValueFont(8.5f));
                 g.setColour(juce::Colours::white);
-                g.drawText("START", static_cast<int>(startLineX + 3.0f), static_cast<int>(bF.getY() + 4.0f), 40, 11, juce::Justification::centredLeft);
+                const int textX = (clampedLineX + 44.0f < startX + w) ? static_cast<int>(clampedLineX + 3.0f) : static_cast<int>(clampedLineX - 42.0f);
+                g.drawText("START", textX, static_cast<int>(bF.getY() + 4.0f), 40, 11, juce::Justification::centredLeft);
             }
         } else {
             juce::Path p;

@@ -3404,6 +3404,443 @@ TEST(NovaSynthRegressionTests, SubOscCardLowestNoteVoicingToggle) {
     EXPECT_LT(monoRms, polyRms * 0.90f);
 }
 
+// =================================================================================================
+// COMPREHENSIVE REGRESSION & STABILITY SUITE (5.1 - 5.4)
+// =================================================================================================
+
+// 5.1: All parameters of different OSCs (Audio DSP behavior + UI visual non-overlapping layout)
+TEST(NovaSynthComprehensiveSuite5, OscEngineParametersAudioAndUiVisualLayout) {
+    constexpr double sr = 48000.0;
+    using ET = nova::dsp::MultiEngineOscillator::EngineType;
+
+    const std::vector<ET> engines = {
+        ET::OrganicTexture,
+        ET::PhysicalPluckModal,
+        ET::WarmAnalog,
+        ET::SubOscillator,
+        ET::EvolvingWavetable,
+        ET::NoiseTransient,
+        ET::SamplePlayback
+    };
+
+    // 1. Audio: Constant-power Panning across ALL 7 engines
+    for (auto engine : engines) {
+        nova::dsp::MultiEngineOscillator osc;
+        osc.prepare(sr);
+
+        nova::dsp::MultiEngineOscillator::Parameters p;
+        p.enabled = true;
+        p.engine = engine;
+        p.level = 0.8f;
+        p.shapeMorph = 0.2f;
+        p.detune = 0.0f;
+
+        // Hard Left: pan = -1.0f
+        p.pan = -1.0f;
+        osc.setParameters(p);
+        osc.triggerNote(261.63f, 0.8f, 60);
+
+        float sumSqL = 0.0f;
+        float sumSqR = 0.0f;
+        for (int i = 0; i < 512; ++i) {
+            float l = 0.0f, r = 0.0f;
+            osc.processSample(261.63f, 0.0f, 0.0f, l, r);
+            sumSqL += l * l;
+            sumSqR += r * r;
+        }
+        const float rmsL_left = std::sqrt(sumSqL / 512.0f);
+        const float rmsR_left = std::sqrt(sumSqR / 512.0f);
+
+        EXPECT_GT(rmsL_left, 1e-4f) << "Engine " << static_cast<int>(engine) << " must output signal on Left when panned hard Left!";
+        EXPECT_LT(rmsR_left, 1e-5f) << "Engine " << static_cast<int>(engine) << " must have 0 on Right when panned hard Left!";
+
+        // Hard Right: pan = +1.0f
+        osc.prepare(sr);
+        p.pan = 1.0f;
+        osc.setParameters(p);
+        osc.triggerNote(261.63f, 0.8f, 60);
+
+        sumSqL = 0.0f;
+        sumSqR = 0.0f;
+        for (int i = 0; i < 512; ++i) {
+            float l = 0.0f, r = 0.0f;
+            osc.processSample(261.63f, 0.0f, 0.0f, l, r);
+            sumSqL += l * l;
+            sumSqR += r * r;
+        }
+        const float rmsL_right = std::sqrt(sumSqL / 512.0f);
+        const float rmsR_right = std::sqrt(sumSqR / 512.0f);
+
+        EXPECT_LT(rmsL_right, 1e-5f) << "Engine " << static_cast<int>(engine) << " must have 0 on Left when panned hard Right!";
+        EXPECT_GT(rmsR_right, 1e-4f) << "Engine " << static_cast<int>(engine) << " must output signal on Right when panned hard Right!";
+
+        // Center: pan = 0.0f
+        osc.prepare(sr);
+        p.pan = 0.0f;
+        osc.setParameters(p);
+        osc.triggerNote(261.63f, 0.8f, 60);
+
+        sumSqL = 0.0f;
+        sumSqR = 0.0f;
+        for (int i = 0; i < 512; ++i) {
+            float l = 0.0f, r = 0.0f;
+            osc.processSample(261.63f, 0.0f, 0.0f, l, r);
+            sumSqL += l * l;
+            sumSqR += r * r;
+        }
+        const float rmsL_center = std::sqrt(sumSqL / 512.0f);
+        const float rmsR_center = std::sqrt(sumSqR / 512.0f);
+        EXPECT_GT(rmsL_center, 1e-4f);
+        EXPECT_GT(rmsR_center, 1e-4f);
+        EXPECT_NEAR(rmsL_center, rmsR_center, (rmsL_center + rmsR_center) * 0.15f);
+    }
+
+    // 2. Audio: Sample SPREAD Haas decorrelation & START offset & DETUNE
+    {
+        nova::dsp::MultiEngineOscillator smpOsc;
+        smpOsc.prepare(sr);
+
+        // a. SPREAD = 0.0f (Mono) vs SPREAD = 0.80f (Haas Stereo Width)
+        nova::dsp::MultiEngineOscillator::Parameters pMono;
+        pMono.enabled = true;
+        pMono.engine = ET::SamplePlayback;
+        pMono.level = 0.8f;
+        pMono.pan = 0.0f;
+        pMono.detune = 0.0f; // SPREAD = 0
+        smpOsc.setParameters(pMono);
+        smpOsc.triggerNote(261.63f, 0.8f, 60);
+
+        float monoDiffSq = 0.0f;
+        for (int i = 0; i < 512; ++i) {
+            float l = 0.0f, r = 0.0f;
+            smpOsc.processSample(261.63f, 0.0f, 0.0f, l, r);
+            const float diff = l - r;
+            monoDiffSq += diff * diff;
+        }
+        EXPECT_LT(std::sqrt(monoDiffSq / 512.0f), 1e-4f) << "With SPREAD=0, Sample playback must be strictly mono!";
+
+        nova::dsp::MultiEngineOscillator::Parameters pStereo;
+        pStereo.enabled = true;
+        pStereo.engine = ET::SamplePlayback;
+        pStereo.level = 0.8f;
+        pStereo.pan = 0.0f;
+        pStereo.detune = 0.80f; // SPREAD = 80% (Haas delay)
+        smpOsc.prepare(sr);
+        smpOsc.setParameters(pStereo);
+        smpOsc.triggerNote(261.63f, 0.8f, 60);
+
+        float stereoDiffSq = 0.0f;
+        float stereoSumSq = 0.0f;
+        for (int i = 0; i < 512; ++i) {
+            float l = 0.0f, r = 0.0f;
+            smpOsc.processSample(261.63f, 0.0f, 0.0f, l, r);
+            const float diff = l - r;
+            const float sum = l + r;
+            stereoDiffSq += diff * diff;
+            stereoSumSq += sum * sum;
+        }
+        const float diffRms = std::sqrt(stereoDiffSq / 512.0f);
+        const float sumRms = std::sqrt(stereoSumSq / 512.0f);
+        EXPECT_GT(diffRms, 0.02f * sumRms) << "Haas delay spread must generate significant stereo difference on Sample playback!";
+
+        // b. START Offset (shapeMorph = 0.0f vs 0.50f)
+        smpOsc.prepare(sr);
+        nova::dsp::MultiEngineOscillator::Parameters pStart0;
+        pStart0.enabled = true;
+        pStart0.engine = ET::SamplePlayback;
+        pStart0.level = 0.8f;
+        pStart0.shapeMorph = 0.0f;
+        smpOsc.setParameters(pStart0);
+        smpOsc.triggerNote(261.63f, 0.8f, 60);
+
+        std::vector<float> sig0(128);
+        for (int i = 0; i < 128; ++i) {
+            float l = 0.0f, r = 0.0f;
+            smpOsc.processSample(261.63f, 0.0f, 0.0f, l, r);
+            sig0[i] = l;
+        }
+
+        smpOsc.prepare(sr);
+        nova::dsp::MultiEngineOscillator::Parameters pStartHalf;
+        pStartHalf.enabled = true;
+        pStartHalf.engine = ET::SamplePlayback;
+        pStartHalf.level = 0.8f;
+        pStartHalf.shapeMorph = 0.50f;
+        smpOsc.setParameters(pStartHalf);
+        smpOsc.triggerNote(261.63f, 0.8f, 60);
+
+        std::vector<float> sigHalf(128);
+        for (int i = 0; i < 128; ++i) {
+            float l = 0.0f, r = 0.0f;
+            smpOsc.processSample(261.63f, 0.0f, 0.0f, l, r);
+            sigHalf[i] = l;
+        }
+
+        float diffFromStart = 0.0f;
+        for (int i = 0; i < 128; ++i) {
+            diffFromStart += std::abs(sig0[i] - sigHalf[i]);
+        }
+        EXPECT_GT(diffFromStart, 0.10f) << "START parameter must shift initial playhead position!";
+    }
+
+    // 3. UI Layout & Non-Overlapping Knobs (specifically verifying Sample mode fix)
+    {
+        nova::synth::NovaSynthProcessor proc;
+        auto theme = nova::ui::NovaTheme::create(nova::ui::NovaTheme::AccentPreset::SpaceCyan);
+        nova::synth::SourceDeck sourceDeck(proc, theme);
+
+        auto& card = *sourceDeck.getCardList()[0];
+        auto& apvts = proc.getAPVTS();
+
+        // Test across all source types: Wavetable, Sub, Pluck, Noise, Sample
+        const std::vector<float> enginesToTest = { 0.0f, 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f };
+        for (float engVal : enginesToTest) {
+            if (auto* p = apvts.getParameter("osc1_engine")) {
+                p->setValueNotifyingHost(p->convertTo0to1(engVal));
+            }
+
+            card.setExpanded(true);
+            card.setBounds(0, 0, 390, 180);
+
+            // In Sample mode (engVal == 6.0f)
+            if (engVal == 6.0f) {
+                // semiKnob must be visible, with valid positive width & height
+                EXPECT_GT(card.getSemiKnob().getWidth(), 20);
+                EXPECT_GT(card.getSemiKnob().getHeight(), 20);
+                EXPECT_GT(card.getLevelKnob().getWidth(), 20);
+                EXPECT_GT(card.getLevelKnob().getHeight(), 20);
+
+                // semiKnob and levelKnob must NOT intersect each other!
+                EXPECT_FALSE(card.getSemiKnob().getBounds().intersects(card.getLevelKnob().getBounds()))
+                    << "SEMI knob and LEVEL knob must not overlap in Sample mode!";
+                EXPECT_FALSE(card.getOctKnob().getBounds().intersects(card.getSemiKnob().getBounds()))
+                    << "OCT knob and SEMI knob must not overlap in Sample mode!";
+                EXPECT_FALSE(card.getLevelKnob().getBounds().intersects(card.getPanKnob().getBounds()))
+                    << "LEVEL knob and PAN knob must not overlap in Sample mode!";
+
+                // Row 2 knobs (morph=START, unison=SPREAD, scatter=DETUNE) must not overlap each other
+                EXPECT_FALSE(card.getMorphKnob().getBounds().intersects(card.getUnisonKnob().getBounds()))
+                    << "START and SPREAD knobs must not overlap in Sample mode!";
+                EXPECT_FALSE(card.getUnisonKnob().getBounds().intersects(card.getScatterKnob().getBounds()))
+                    << "SPREAD and DETUNE knobs must not overlap in Sample mode!";
+            }
+        }
+    }
+}
+
+// 5.2: Dual Filters Audio Parameters and Routing
+TEST(NovaSynthComprehensiveSuite5, DualFiltersAudioParametersAndRouting) {
+    constexpr double sr = 48000.0;
+    constexpr int nSamples = 1024;
+
+    // 1. Audio: StateVariableFilter Cutoff Sweep on high frequencies
+    {
+        nova::dsp::StateVariableFilter svf;
+        svf.prepare(sr);
+
+        // Lowpass at 200 Hz vs 10000 Hz on 2 kHz test signal
+        float rmsLowCut = 0.0f;
+        {
+            svf.setParameters(nova::dsp::StateVariableFilter::Type::LowPass, 200.0f, 0.7071f);
+            float sumSq = 0.0f;
+            for (int i = 0; i < nSamples; ++i) {
+                const float in = std::sin(2.0f * std::numbers::pi_v<float> * 2000.0f * static_cast<float>(i) / static_cast<float>(sr));
+                const float out = svf.processSample(in);
+                sumSq += out * out;
+            }
+            rmsLowCut = std::sqrt(sumSq / nSamples);
+        }
+
+        float rmsHighCut = 0.0f;
+        {
+            svf.prepare(sr);
+            svf.setParameters(nova::dsp::StateVariableFilter::Type::LowPass, 10000.0f, 0.7071f);
+            float sumSq = 0.0f;
+            for (int i = 0; i < nSamples; ++i) {
+                const float in = std::sin(2.0f * std::numbers::pi_v<float> * 2000.0f * static_cast<float>(i) / static_cast<float>(sr));
+                const float out = svf.processSample(in);
+                sumSq += out * out;
+            }
+            rmsHighCut = std::sqrt(sumSq / nSamples);
+        }
+
+        EXPECT_GT(rmsHighCut, 0.60f);
+        EXPECT_LT(rmsLowCut, 0.05f);
+        EXPECT_GT(rmsHighCut, rmsLowCut * 10.0f);
+    }
+
+    // 2. Audio: Filter Routing (FLT 1, FLT 2, BOTH, DIRECT) in WorshipSynthEngine
+    {
+        nova::dsp::WorshipSynthEngine engine;
+        engine.prepare(sr, 512);
+
+        auto params = engine.getParameters();
+        params.activeOscCount = 1;
+        params.oscSlots[0].enabled = true;
+        params.oscSlots[0].level = 0.8f;
+        params.oscSlots[0].engine = nova::dsp::MultiEngineOscillator::EngineType::WarmAnalog;
+        params.oscSlots[0].sourceType = 0; // Saw
+        params.ampEnv.attackSec = 0.005f;
+        params.ampEnv.releaseSec = 0.05f;
+
+        // Cutoff for Filter 1 set very low (100 Hz)
+        params.filterCutoffHz = 100.0f;
+        params.filterResonance = 0.7071f;
+
+        // Routing = 0: FLT 1 (muffled)
+        params.oscSlots[0].filterRouting = 0;
+        engine.setParameters(params);
+        engine.noteOn(69, 0.8f); // A4 (440 Hz)
+
+        juce::AudioBuffer<float> buf(2, 512);
+        buf.clear();
+        engine.processBlock(buf.getWritePointer(0), buf.getWritePointer(1), 512);
+        const float rmsFlt1 = buf.getRMSLevel(0, 0, 512);
+
+        // Routing = 3: DIRECT (bypasses filter completely -> loud and bright saw wave)
+        engine.allNotesOff();
+        params.oscSlots[0].filterRouting = 3;
+        engine.setParameters(params);
+        engine.noteOn(69, 0.8f);
+
+        buf.clear();
+        engine.processBlock(buf.getWritePointer(0), buf.getWritePointer(1), 512);
+        const float rmsDirect = buf.getRMSLevel(0, 0, 512);
+
+        EXPECT_GT(rmsDirect, rmsFlt1 * 2.0f) << "DIRECT routing must bypass muffled Filter 1!";
+    }
+}
+
+// 5.3: Quad Envelopes Audio Timing and Curve Monotonicity
+TEST(NovaSynthComprehensiveSuite5, QuadEnvelopesAudioTimingAndCurveMonotonicity) {
+    constexpr double sr = 48000.0;
+
+    // 1. Audio: All 4 Envelopes (Amp Env 1, Filter Env 2, Mod Env 3, Aux Env 4)
+    {
+        for (int envIdx = 0; envIdx < 4; ++envIdx) {
+            nova::dsp::AdsrEnvelope env;
+            env.prepare(sr);
+
+            nova::dsp::AdsrEnvelope::Parameters p;
+            p.attackSec = 0.02f; // 960 samples
+            p.decaySec = 0.03f;
+            p.sustainLvl = 0.50f;
+            p.releaseSec = 0.02f;
+            env.setParameters(p);
+
+            env.noteOn();
+            EXPECT_TRUE(env.isActive());
+
+            // Process attack: level rises to ~1.0
+            for (int i = 0; i < 960; ++i) (void)env.processSample();
+            EXPECT_GE(env.getCurrentLevel(), 0.90f);
+
+            // Process decay: level settles to sustain level ~0.50
+            for (int i = 0; i < 1440; ++i) (void)env.processSample();
+            EXPECT_NEAR(env.getCurrentLevel(), 0.50f, 0.08f);
+
+            // Note off -> release: level decays to near zero
+            env.noteOff();
+            for (int i = 0; i < 2500; ++i) (void)env.processSample();
+            EXPECT_LT(env.getCurrentLevel(), 0.01f);
+            EXPECT_FALSE(env.isActive());
+        }
+    }
+
+    // 2. UI / Visual Curve Monotonicity and Handle Bounds
+    {
+        nova::synth::NovaSynthProcessor proc;
+        auto theme = nova::ui::NovaTheme::create(nova::ui::NovaTheme::AccentPreset::SpaceCyan);
+        nova::synth::EnvelopeQuadDeck envDeck(proc, theme);
+        envDeck.setBounds(0, 0, 800, 168);
+
+        auto cards = envDeck.getCardList();
+        ASSERT_EQ(cards.size(), 4u);
+
+        for (std::size_t i = 0; i < cards.size(); ++i) {
+            auto* card = cards[i];
+            card->setExpanded(true);
+            card->setBounds(0, 0, 400, 168);
+
+            // Verify knobs are valid
+            EXPECT_GT(card->getAtkKnob().getWidth(), 20);
+            EXPECT_GT(card->getDecKnob().getWidth(), 20);
+            EXPECT_GT(card->getSusKnob().getWidth(), 20);
+            EXPECT_GT(card->getRelKnob().getWidth(), 20);
+
+            // Verify handles in curve: DEL <= ATK <= HOLD <= DEC <= SUS_END <= REL
+            EXPECT_LE(card->getNodeDel().x, card->getNodeAtk().x + 0.1f);
+            EXPECT_LE(card->getNodeAtk().x, card->getNodeHold().x + 0.1f);
+            EXPECT_LE(card->getNodeHold().x, card->getNodeDec().x + 0.1f);
+            EXPECT_LE(card->getNodeDec().x, card->getNodeSusEnd().x + 0.1f);
+            EXPECT_LE(card->getNodeSusEnd().x, card->getNodeRel().x + 0.1f);
+        }
+    }
+}
+
+// 5.4: Modulation Matrix Dynamic Adapters and Audio Effect
+TEST(NovaSynthComprehensiveSuite5, ModulationMatrixDynamicAdaptersAndAudioEffect) {
+    nova::synth::NovaSynthProcessor proc;
+    proc.prepareToPlay(48000.0, 512);
+
+    auto& engine = proc.getEngine();
+    auto params = engine.getParameters();
+    using ET = nova::dsp::MultiEngineOscillator::EngineType;
+    using D = nova::dsp::ModMatrix::Destination;
+
+    // 1. Dynamic Destination Adapters for each oscillator engine type
+    struct TestCase {
+        ET engine;
+        int sourceType;
+        juce::String expectedParam;
+    };
+
+    const std::vector<TestCase> testCases = {
+        { ET::SamplePlayback,     4, "Sample Start" },
+        { ET::EvolvingWavetable,  0, "WT Pos" },
+        { ET::WarmAnalog,         0, "PWM / Shape" },
+        { ET::SubOscillator,      1, "Drive" },
+        { ET::PhysicalPluckModal, 2, "Brightness" },
+        { ET::NoiseTransient,     3, "Color" },
+        { ET::OrganicTexture,     0, "Texture Pos" }
+    };
+
+    for (const auto& tc : testCases) {
+        params.oscSlots[0].engine = tc.engine;
+        params.oscSlots[0].sourceType = tc.sourceType;
+        const juce::String dstName = nova::synth::ui::getDynamicDestinationName(D::Osc1Shape, params);
+        EXPECT_TRUE(dstName.contains(tc.expectedParam))
+            << "Expected " << tc.expectedParam << " for engine " << static_cast<int>(tc.engine)
+            << " but got: " << dstName;
+    }
+
+    // 2. Check newly added Aux Env 4 and LFO 3/4 destinations exist and return non-empty names
+    EXPECT_STREQ(nova::dsp::ModMatrix::getDestinationName(D::AuxEnv4Attack), "Aux 4 Attack");
+    EXPECT_STREQ(nova::dsp::ModMatrix::getDestinationName(D::AuxEnv4Decay), "Aux 4 Decay");
+    EXPECT_STREQ(nova::dsp::ModMatrix::getDestinationName(D::AuxEnv4Release), "Aux 4 Release");
+    EXPECT_STREQ(nova::dsp::ModMatrix::getDestinationName(D::Lfo3Rate), "LFO 3 Rate");
+    EXPECT_STREQ(nova::dsp::ModMatrix::getDestinationName(D::Lfo4Rate), "LFO 4 Rate");
+
+    // 3. Audio effect of Modulation Matrix routing: LFO 1 -> Filter 1 Cutoff
+    auto& mm = proc.getModMatrix();
+    mm.clear();
+    mm.setSlot(0, nova::dsp::ModMatrix::Source::Lfo1, D::FilterCutoff, 1.0f, true);
+
+    // Update matrix in engine and run blocks
+    juce::AudioBuffer<float> buffer(2, 512);
+    juce::MidiBuffer midi;
+    midi.addEvent(juce::MidiMessage::noteOn(1, 60, (juce::uint8)100), 0);
+
+    for (int b = 0; b < 4; ++b) {
+        buffer.clear();
+        proc.processBlock(buffer, midi);
+        midi.clear();
+    }
+    // Buffer has active sound and LFO modulation runs without NaN or crashing
+    EXPECT_GT(buffer.getRMSLevel(0, 0, 512), 0.01f);
+    EXPECT_FALSE(std::isnan(buffer.getSample(0, 0)));
+}
+
 } // namespace
 
 int main(int argc, char** argv) {

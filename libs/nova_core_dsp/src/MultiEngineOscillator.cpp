@@ -331,7 +331,7 @@ void MultiEngineOscillator::updateCoefficients() noexcept {
         const float cents = kUnisonDetuneFactors[idx] * detuneAmt * 34.0f + driftOffsetsCents_[idx];
         unisonPitchMultipliers_[idx] = std::pow(2.0f, cents / 1200.0f);
 
-        const float uPan = std::clamp(params_.pan + kUnisonPanPositions[idx] * detuneAmt, -1.0f, 1.0f);
+        const float uPan = std::clamp(kUnisonPanPositions[idx] * detuneAmt, -1.0f, 1.0f);
         const float panAngle = (uPan + 1.0f) * 0.25f * std::numbers::pi_v<float>;
         unisonPanL_[idx] = std::cos(panAngle);
         unisonPanR_[idx] = std::sin(panAngle);
@@ -1013,10 +1013,8 @@ void MultiEngineOscillator::processSample(float baseFrequencyHz,
                     break;
             }
 
-            const float uPan = std::clamp(params_.pan, -1.0f, 1.0f);
-            const float panAngle = (uPan + 1.0f) * 0.25f * std::numbers::pi_v<float>;
-            sigL = noiseSig * std::cos(panAngle);
-            sigR = noiseSig * std::sin(panAngle);
+            sigL = noiseSig;
+            sigR = noiseSig;
             break;
         }
 
@@ -1026,7 +1024,9 @@ void MultiEngineOscillator::processSample(float baseFrequencyHz,
             const auto* zone = activeSampleZone_;
             if (zone->pcmL == nullptr || zone->numSamples <= 4) break;
 
-            const double playbackRate = (static_cast<double>(slotFreq) / static_cast<double>(zone->rootFrequencyHz)) * (smp.sampleRate / sampleRate_);
+            const float detuneCents = (std::clamp(params_.scatter, 0.0f, 1.0f) - 0.5f) * 100.0f;
+            const float detuneRatio = std::pow(2.0f, detuneCents / 1200.0f);
+            const double playbackRate = (static_cast<double>(slotFreq) * static_cast<double>(detuneRatio) / static_cast<double>(zone->rootFrequencyHz)) * (smp.sampleRate / sampleRate_);
             const int idx = static_cast<int>(samplePlayhead_);
 
             if (idx >= zone->numSamples - 3) {
@@ -1060,41 +1060,42 @@ void MultiEngineOscillator::processSample(float baseFrequencyHz,
             const float c3L = 0.5f * (y3L - y0L) + 1.5f * (y1L - y2L);
             const float rawL = ((c3L * frac + c2L) * frac + c1L) * frac + c0L;
 
-            // Hermite cubic interpolation for Right channel
-            const int16_t* pcmR = zone->pcmR ? zone->pcmR : zone->pcmL;
-            const float y0R = static_cast<float>(i > 0 ? pcmR[i - 1] : pcmR[i]) * (1.0f / 32768.0f);
-            const float y1R = static_cast<float>(pcmR[i]) * (1.0f / 32768.0f);
-            const float y2R = static_cast<float>(pcmR[i + 1]) * (1.0f / 32768.0f);
-            const float y3R = static_cast<float>(i + 2 < zone->numSamples ? pcmR[i + 2] : pcmR[i + 1]) * (1.0f / 32768.0f);
+            // Stereo width & detune spray spread (true Haas stereo time-delay decorrelation on sample)
+            const float spreadAmt = std::clamp(params_.detune, 0.0f, 1.0f);
+            const double rightPlayhead = std::max(0.0, samplePlayhead_ - static_cast<double>(spreadAmt * 0.015f * sampleRate_));
+            const int iR = static_cast<int>(rightPlayhead);
+            const float fracR = static_cast<float>(rightPlayhead - static_cast<double>(iR));
+            const int16_t* pcmR = (zone->pcmR != nullptr) ? zone->pcmR : zone->pcmL;
+
+            const float y0R = static_cast<float>(iR > 0 ? pcmR[iR - 1] : pcmR[iR]) * (1.0f / 32768.0f);
+            const float y1R = static_cast<float>(pcmR[iR]) * (1.0f / 32768.0f);
+            const float y2R = static_cast<float>(iR + 1 < zone->numSamples ? pcmR[iR + 1] : pcmR[iR]) * (1.0f / 32768.0f);
+            const float y3R = static_cast<float>(iR + 2 < zone->numSamples ? pcmR[iR + 2] : pcmR[iR + 1]) * (1.0f / 32768.0f);
 
             const float c0R = y1R;
             const float c1R = 0.5f * (y2R - y0R);
             const float c2R = y0R - 2.5f * y1R + 2.0f * y2R - 0.5f * y3R;
             const float c3R = 0.5f * (y3R - y0R) + 1.5f * (y1R - y2R);
-            const float rawR = ((c3R * frac + c2R) * frac + c1R) * frac + c0R;
+            const float rawR = ((c3R * fracR + c2R) * fracR + c1R) * fracR + c0R;
 
-            // Stereo width & detune spray spread
-            const float spray = std::clamp(params_.detune, 0.0f, 1.0f);
-            const float uPan = std::clamp(params_.pan, -1.0f, 1.0f);
-            const float panAngle = (uPan + 1.0f) * 0.25f * std::numbers::pi_v<float>;
-
-            // Mid/Side stereo balance preserving acoustic space
             const float mid = 0.5f * (rawL + rawR);
             const float side = 0.5f * (rawL - rawR);
-            const float width = 1.0f + spray * 0.6f;
-            const float wideL = mid + side * width;
-            const float wideR = mid - side * width;
-
-            sigL = wideL * std::cos(panAngle) * 1.4142f;
-            sigR = wideR * std::sin(panAngle) * 1.4142f;
+            sigL = mid + spreadAmt * side;
+            sigR = mid - spreadAmt * side;
 
             samplePlayhead_ += playbackRate;
             break;
         }
     }
 
-    outLeft  += sigL * effLevel;
-    outRight += sigR * effLevel;
+    // Apply slot pan with true constant-power stereo panning law across all engines
+    const float uPan = std::clamp(params_.pan, -1.0f, 1.0f);
+    const float panAngle = (uPan + 1.0f) * 0.25f * std::numbers::pi_v<float>;
+    const float panGainL = std::cos(panAngle) * 1.41421356f;
+    const float panGainR = std::sin(panAngle) * 1.41421356f;
+
+    outLeft  += sigL * panGainL * effLevel;
+    outRight += sigR * panGainR * effLevel;
 }
 
 std::vector<const char*> MultiEngineOscillator::getModelsForEngine(EngineType engine, int sourceType) {

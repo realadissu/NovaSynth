@@ -12,6 +12,43 @@
 
 namespace nova::synth::ui {
 
+inline juce::String getOscShapeParamName(const nova::dsp::MultiEngineOscillator::Parameters& slot) {
+    using ET = nova::dsp::MultiEngineOscillator::EngineType;
+    if (slot.sourceType == 4 || slot.engine == ET::SamplePlayback) {
+        return "Sample Start";
+    }
+    if (slot.sourceType == 1 || slot.engine == ET::SubOscillator) {
+        return "Drive";
+    }
+    if (slot.sourceType == 2 || slot.engine == ET::PhysicalPluckModal) {
+        return "Brightness";
+    }
+    if (slot.sourceType == 3 || slot.engine == ET::NoiseTransient) {
+        return "Color";
+    }
+    if (slot.engine == ET::EvolvingWavetable) {
+        return "WT Pos";
+    }
+    if (slot.engine == ET::OrganicTexture) {
+        return "Texture Pos";
+    }
+    return "PWM / Shape";
+}
+
+inline juce::String getDynamicDestinationName(nova::dsp::ModMatrix::Destination dst,
+                                             const nova::dsp::WorshipSynthEngine::Parameters& params) {
+    using D = nova::dsp::ModMatrix::Destination;
+    if (dst == D::Osc1Shape) return "OSC 1 " + getOscShapeParamName(params.oscSlots[0]);
+    if (dst == D::Osc2Shape) return "OSC 2 " + getOscShapeParamName(params.oscSlots[1]);
+    if (dst == D::Osc3Shape) return "OSC 3 " + getOscShapeParamName(params.oscSlots[2]);
+    if (dst == D::Osc4Shape) return "OSC 4 " + getOscShapeParamName(params.oscSlots[3]);
+    if (dst == D::Osc5Shape) return "OSC 5 " + getOscShapeParamName(params.oscSlots[4]);
+    if (dst == D::Osc6Shape) return "OSC 6 " + getOscShapeParamName(params.oscSlots[5]);
+    if (dst == D::Osc7Shape) return "OSC 7 " + getOscShapeParamName(params.oscSlots[6]);
+    if (dst == D::Osc8Shape) return "OSC 8 " + getOscShapeParamName(params.oscSlots[7]);
+    return nova::dsp::ModMatrix::getDestinationName(dst);
+}
+
 /**
  * @brief Integrated All-in-One Worship Modulation Hub (Proposal 1).
  * Features:
@@ -735,6 +772,7 @@ private:
         g.drawText("+ Add Route", addBtnF, juce::Justification::centred);
 
         // Route Rows Area
+        const auto params = proc_.getCurrentParameters();
         const auto& rows = matrixRowRects_;
         std::vector<std::size_t> activeSlots;
         for (std::size_t i = 0; i < nova::dsp::ModMatrix::kMaxSlots; ++i) {
@@ -817,7 +855,7 @@ private:
             g.drawRoundedRectangle(dstF, 3.0f, 1.0f);
             g.setFont(theme_.getLabelFont(10.0f));
             g.setColour(theme_.textPrimary.withAlpha(alpha));
-            g.drawText(nova::dsp::ModMatrix::getDestinationName(slot.destination), dstF.reduced(4.0f, 0.0f),
+            g.drawText(getDynamicDestinationName(slot.destination, params), dstF.reduced(4.0f, 0.0f),
                        juce::Justification::left);
             drawChevron(dstF.getRight(), dstF.getY(), dstF.getHeight(), theme_.accentPrimary, alpha);
 
@@ -1029,6 +1067,7 @@ private:
 
     void showDestinationMenu(std::size_t slotIdx, juce::Rectangle<int> targetRect) {
         juce::PopupMenu m;
+        const auto params = proc_.getCurrentParameters();
 
         juce::PopupMenu fltMenu;
         fltMenu.addItem(1, "Filter 1 Cutoff");
@@ -1050,14 +1089,11 @@ private:
         m.addSubMenu("OSC Volume / Swell", levelMenu);
 
         juce::PopupMenu shapeMenu;
-        shapeMenu.addItem(20, "OSC 1 Shape / Morph");
-        shapeMenu.addItem(21, "OSC 2 Shape / Morph");
-        shapeMenu.addItem(22, "OSC 3 Shape / Morph");
-        shapeMenu.addItem(23, "OSC 4 Shape / Morph");
-        shapeMenu.addItem(24, "OSC 5 Shape / Morph");
-        shapeMenu.addItem(25, "OSC 6 Shape / Morph");
-        shapeMenu.addItem(26, "OSC 7 Shape / Morph");
-        shapeMenu.addItem(27, "OSC 8 Shape / Morph");
+        for (int i = 0; i < 8; ++i) {
+            const auto& oscSlot = params.oscSlots[static_cast<std::size_t>(i)];
+            const juce::String pName = getOscShapeParamName(oscSlot);
+            shapeMenu.addItem(20 + i, "OSC " + juce::String(i + 1) + ": " + pName);
+        }
         m.addSubMenu("OSC Shape / Morph", shapeMenu);
 
         juce::PopupMenu pitchMenu;
@@ -1085,11 +1121,17 @@ private:
         envMenu.addItem(56, "Mod Env 3 Attack");
         envMenu.addItem(57, "Mod Env 3 Decay");
         envMenu.addItem(58, "Mod Env 3 Release");
+        envMenu.addSeparator();
+        envMenu.addItem(70, "Aux Env 4 Attack");
+        envMenu.addItem(71, "Aux Env 4 Decay");
+        envMenu.addItem(72, "Aux Env 4 Release");
         m.addSubMenu("Envelopes (ADSR Times)", envMenu);
 
         juce::PopupMenu lfoMenu;
         lfoMenu.addItem(60, "LFO 1 Rate / Speed");
         lfoMenu.addItem(61, "LFO 2 Rate / Speed");
+        lfoMenu.addItem(62, "LFO 3 Rate / Speed");
+        lfoMenu.addItem(63, "LFO 4 Rate / Speed");
         m.addSubMenu("LFO Speed", lfoMenu);
 
         juce::PopupMenu fxMenu;
@@ -1148,9 +1190,14 @@ private:
                     case 56: dst = nova::dsp::ModMatrix::Destination::ModEnv3Attack; break;
                     case 57: dst = nova::dsp::ModMatrix::Destination::ModEnv3Decay; break;
                     case 58: dst = nova::dsp::ModMatrix::Destination::ModEnv3Release; break;
+                    case 70: dst = nova::dsp::ModMatrix::Destination::AuxEnv4Attack; break;
+                    case 71: dst = nova::dsp::ModMatrix::Destination::AuxEnv4Decay; break;
+                    case 72: dst = nova::dsp::ModMatrix::Destination::AuxEnv4Release; break;
 
                     case 60: dst = nova::dsp::ModMatrix::Destination::Lfo1Rate; break;
                     case 61: dst = nova::dsp::ModMatrix::Destination::Lfo2Rate; break;
+                    case 62: dst = nova::dsp::ModMatrix::Destination::Lfo3Rate; break;
+                    case 63: dst = nova::dsp::ModMatrix::Destination::Lfo4Rate; break;
 
                     case 40: dst = nova::dsp::ModMatrix::Destination::ReverbMix; break;
                     case 41: dst = nova::dsp::ModMatrix::Destination::ShimmerAmount; break;

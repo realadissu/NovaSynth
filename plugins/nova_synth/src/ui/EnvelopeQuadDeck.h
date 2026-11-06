@@ -113,6 +113,17 @@ public:
 
     [[nodiscard]] bool isPinned() const noexcept { return isPinned_; }
 
+    [[nodiscard]] juce::Point<float> getNodeDel() const noexcept { return nodeDel_; }
+    [[nodiscard]] juce::Point<float> getNodeAtk() const noexcept { return nodeAtk_; }
+    [[nodiscard]] juce::Point<float> getNodeHold() const noexcept { return nodeHold_; }
+    [[nodiscard]] juce::Point<float> getNodeDec() const noexcept { return nodeDec_; }
+    [[nodiscard]] juce::Point<float> getNodeSusEnd() const noexcept { return nodeSusEnd_; }
+    [[nodiscard]] juce::Point<float> getNodeRel() const noexcept { return nodeRel_; }
+    [[nodiscard]] const nova::ui::ArcKnob& getAtkKnob() const noexcept { return atkKnob_; }
+    [[nodiscard]] const nova::ui::ArcKnob& getDecKnob() const noexcept { return decKnob_; }
+    [[nodiscard]] const nova::ui::ArcKnob& getSusKnob() const noexcept { return susKnob_; }
+    [[nodiscard]] const nova::ui::ArcKnob& getRelKnob() const noexcept { return relKnob_; }
+
     void updateKnobVisibility() {
         delKnob_.setVisible(isExpanded_);
         atkKnob_.setVisible(isExpanded_);

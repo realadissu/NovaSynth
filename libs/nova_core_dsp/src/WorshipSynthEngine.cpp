@@ -229,7 +229,7 @@ void WorshipSynthEngine::setParameters(const Parameters& params) noexcept {
     masterGainSmoother_.setTargetValue(std::pow(10.0f, std::clamp(params_.masterGainDb, -24.0f, 12.0f) / 20.0f));
 
     for (auto& v : voices_) {
-        if (v.active && (v.heldByKey || v.heldByDrone)) {
+        if (v.active) {
             v.activeOscCountSnapshot = params_.activeOscCount;
             v.filterTypeSnapshot = params_.filterType;
             v.filterResSnapshot = params_.filterResonance;
@@ -286,7 +286,15 @@ void WorshipSynthEngine::setParameters(const Parameters& params) noexcept {
             effMod.decaySec   = applyEnvTimeMod(effMod.decaySec,   modDecMod, 0.005f, 15.0f);
             effMod.releaseSec = applyEnvTimeMod(effMod.releaseSec, modRelMod, 0.005f, 20.0f);
             v.modEnv.setParameters(effMod);
-            v.auxEnv.setParameters(params_.auxEnv);
+
+            auto effAux = params_.auxEnv;
+            const float auxAttMod = modMatrix_.getModulationOffset(ModMatrix::Destination::AuxEnv4Attack);
+            const float auxDecMod = modMatrix_.getModulationOffset(ModMatrix::Destination::AuxEnv4Decay);
+            const float auxRelMod = modMatrix_.getModulationOffset(ModMatrix::Destination::AuxEnv4Release);
+            effAux.attackSec  = applyEnvTimeMod(effAux.attackSec,  auxAttMod, 0.001f, 15.0f);
+            effAux.decaySec   = applyEnvTimeMod(effAux.decaySec,   auxDecMod, 0.005f, 15.0f);
+            effAux.releaseSec = applyEnvTimeMod(effAux.releaseSec, auxRelMod, 0.005f, 20.0f);
+            v.auxEnv.setParameters(effAux);
         }
     }
 
@@ -574,11 +582,20 @@ void WorshipSynthEngine::startVoice(int midiNote, float velocity, bool isDrone, 
         effMod.decaySec   = applyEnvTimeMod(effMod.decaySec,   modDecMod, 0.005f, 15.0f);
         effMod.releaseSec = applyEnvTimeMod(effMod.releaseSec, modRelMod, 0.005f, 20.0f);
         chosen->modEnv.setParameters(effMod);
+
+        auto effAux = params_.auxEnv;
+        const float auxAttMod = initOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::AuxEnv4Attack)];
+        const float auxDecMod = initOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::AuxEnv4Decay)];
+        const float auxRelMod = initOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::AuxEnv4Release)];
+        effAux.attackSec  = applyEnvTimeMod(effAux.attackSec,  auxAttMod, 0.001f, 15.0f);
+        effAux.decaySec   = applyEnvTimeMod(effAux.decaySec,   auxDecMod, 0.005f, 15.0f);
+        effAux.releaseSec = applyEnvTimeMod(effAux.releaseSec, auxRelMod, 0.005f, 20.0f);
+        chosen->auxEnv.setParameters(effAux);
     }
     if (isDrone) {
         chosen->modEnv.setParameters(params_.modEnv);
+        chosen->auxEnv.setParameters(params_.auxEnv);
     }
-    chosen->auxEnv.setParameters(params_.auxEnv);
     chosen->ampEnv.noteOn(chosen->velocity);
     chosen->filterEnv.noteOn(chosen->velocity);
     chosen->modEnv.noteOn(chosen->velocity);
@@ -1074,6 +1091,16 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
             if (std::abs(lfo2RMod) > 1e-4f) {
                 const float baseR2 = params_.lfo2Sync ? getLfoRateForDivision(params_.bpm, params_.lfo2SyncDiv) : params_.lfo2RateHz;
                 lfo2_.setParameters(params_.lfo2Shape, baseR2 * std::pow(2.0f, lfo2RMod * 3.0f), params_.lfo2Depth);
+            }
+            const float lfo3RMod = modMatrix_.getModulationOffset(ModMatrix::Destination::Lfo3Rate);
+            if (std::abs(lfo3RMod) > 1e-4f) {
+                const float baseR3 = params_.lfo3Sync ? getLfoRateForDivision(params_.bpm, params_.lfo3SyncDiv) : params_.lfo3RateHz;
+                lfo3_.setParameters(params_.lfo3Shape, baseR3 * std::pow(2.0f, lfo3RMod * 3.0f), params_.lfo3Depth);
+            }
+            const float lfo4RMod = modMatrix_.getModulationOffset(ModMatrix::Destination::Lfo4Rate);
+            if (std::abs(lfo4RMod) > 1e-4f) {
+                const float baseR4 = params_.lfo4Sync ? getLfoRateForDivision(params_.bpm, params_.lfo4SyncDiv) : params_.lfo4RateHz;
+                lfo4_.setParameters(params_.lfo4Shape, baseR4 * std::pow(2.0f, lfo4RMod * 3.0f), params_.lfo4Depth);
             }
         }
 
