@@ -4517,6 +4517,135 @@ TEST(SampleLoopingSystemTests, SampleLoopUiPillsAndMarkersInteraction) {
     EXPECT_NEAR(updatedStart, 0.55f, 0.05f) << "Dragging on waveform must interactively update START parameter!";
 }
 
+TEST(AudioGainStagingTests, AllEnginesProduceBalancedNominalLevels) {
+    using nova::dsp::MultiEngineOscillator;
+    MultiEngineOscillator osc;
+    osc.prepare(48000.0);
+
+    for (int e = 0; e <= 6; ++e) {
+        MultiEngineOscillator::Parameters p;
+        p.enabled = true;
+        p.engine = static_cast<MultiEngineOscillator::EngineType>(e);
+        p.shapeMorph = 0.0f;
+        p.detune = 0.0f;
+        p.level = 1.0f;
+        osc.setParameters(p);
+        osc.triggerNote(261.63f, 0.85f, 1u);
+
+        float maxPeak = 0.0f;
+        for (int i = 0; i < 2000; ++i) {
+            float l = 0.0f, r = 0.0f;
+            osc.processSample(261.63f, 0.0f, 0.0f, l, r, 0.0f);
+            maxPeak = std::max(maxPeak, std::max(std::abs(l), std::abs(r)));
+        }
+        EXPECT_GE(maxPeak, 0.30f) << "Engine " << e << " level is too low (< 0.30)!";
+        EXPECT_LE(maxPeak, 1.05f) << "Engine " << e << " level is clipping (> 1.05)!";
+    }
+
+    // Verify all 4 Pluck models produce balanced output
+    for (int m = 0; m < 4; ++m) {
+        MultiEngineOscillator::Parameters p;
+        p.enabled = true;
+        p.engine = MultiEngineOscillator::EngineType::PhysicalPluckModal;
+        p.modelIndex = m;
+        p.shapeMorph = 0.5f;
+        p.level = 1.0f;
+        osc.setParameters(p);
+        osc.triggerNote(261.63f, 0.85f, 1u);
+        float maxPeak = 0.0f;
+        for (int i = 0; i < 2000; ++i) {
+            float l = 0.0f, r = 0.0f;
+            osc.processSample(261.63f, 0.0f, 0.0f, l, r, 0.0f);
+            maxPeak = std::max(maxPeak, std::max(std::abs(l), std::abs(r)));
+        }
+        EXPECT_NEAR(maxPeak, 0.71f, 0.12f) << "Pluck model " << m << " must be balanced around 0.71!";
+    }
+}
+
+TEST(AudioGainStagingTests, PresetGainStagingAndClipperHeadroom) {
+    nova::synth::NovaSynthProcessor processor;
+    processor.prepareToPlay(48000.0, 512);
+
+    auto& pm = processor.getPresetManager();
+    const std::vector<std::string> testPresets = {
+        "Angelic Celestial Harp & Choir",
+        "Bethel Shimmer Cloud",
+        "Warm Juno 106 Pad",
+        "Celestial Concert Harp",
+        "Cathedral Prayer Drone (C)"
+    };
+
+    for (const auto& name : testPresets) {
+        pm.loadPresetByName(name);
+
+        // Render single note (vel = 100)
+        float notePeak = 0.0f;
+        for (int b = 0; b < 140; ++b) {
+            juce::AudioBuffer<float> buffer(2, 512);
+            buffer.clear();
+            juce::MidiBuffer midi;
+            if (b == 0) {
+                midi.addEvent(juce::MidiMessage::noteOn(1, 60, static_cast<juce::uint8>(100)), 0);
+            }
+            processor.processBlock(buffer, midi);
+            for (int c = 0; c < 2; ++c) {
+                const float* ch = buffer.getReadPointer(c);
+                for (int i = 0; i < 512; ++i) {
+                    notePeak = std::max(notePeak, std::abs(ch[i]));
+                }
+            }
+        }
+        // Single note should be present and audible: at least -7.5 dBFS (peak >= 0.42)
+        EXPECT_GE(notePeak, 0.42f) << "Preset '" << name << "' single note is too quiet (< -7.5 dBFS)!";
+        EXPECT_LE(notePeak, 0.95f) << "Preset '" << name << "' single note exceeds headroom!";
+
+        // Render 3-note chord
+        pm.loadPresetByName(name);
+        float chordPeak = 0.0f;
+        for (int b = 0; b < 140; ++b) {
+            juce::AudioBuffer<float> buffer(2, 512);
+            buffer.clear();
+            juce::MidiBuffer midi;
+            if (b == 0) {
+                midi.addEvent(juce::MidiMessage::noteOn(1, 60, static_cast<juce::uint8>(100)), 0);
+                midi.addEvent(juce::MidiMessage::noteOn(1, 64, static_cast<juce::uint8>(100)), 0);
+                midi.addEvent(juce::MidiMessage::noteOn(1, 67, static_cast<juce::uint8>(100)), 0);
+            }
+            processor.processBlock(buffer, midi);
+            for (int c = 0; c < 2; ++c) {
+                const float* ch = buffer.getReadPointer(c);
+                for (int i = 0; i < 512; ++i) {
+                    chordPeak = std::max(chordPeak, std::abs(ch[i]));
+                }
+            }
+        }
+        EXPECT_GE(chordPeak, 0.55f) << "Preset '" << name << "' chord is too quiet (< -5.2 dBFS)!";
+        EXPECT_LE(chordPeak, 0.98f) << "Preset '" << name << "' chord exceeds soft-clipper limit!";
+
+        // Big 8-note chord with maximum velocity (vel = 120) - Must never exceed 0.98 (-0.18 dBFS)
+        pm.loadPresetByName(name);
+        float bigChordPeak = 0.0f;
+        for (int b = 0; b < 140; ++b) {
+            juce::AudioBuffer<float> buffer(2, 512);
+            buffer.clear();
+            juce::MidiBuffer midi;
+            if (b == 0) {
+                for (int note : { 48, 55, 60, 64, 67, 71, 72, 76 }) {
+                    midi.addEvent(juce::MidiMessage::noteOn(1, note, static_cast<juce::uint8>(120)), 0);
+                }
+            }
+            processor.processBlock(buffer, midi);
+            for (int c = 0; c < 2; ++c) {
+                const float* ch = buffer.getReadPointer(c);
+                for (int i = 0; i < 512; ++i) {
+                    bigChordPeak = std::max(bigChordPeak, std::abs(ch[i]));
+                }
+            }
+        }
+        EXPECT_LE(bigChordPeak, 0.985f) << "Preset '" << name << "' big chord exceeded 0.985 limit!";
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv) {

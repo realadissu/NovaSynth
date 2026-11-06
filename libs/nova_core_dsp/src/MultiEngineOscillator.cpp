@@ -765,8 +765,8 @@ void MultiEngineOscillator::processSample(float baseFrequencyHz,
                         texFilterState2_ += cutoff * texFilterState1_;
 
                         const float airLvl = 0.06f + 0.14f * shape;
-                        texL = (texL * 0.90f + texFilterState1_ * airLvl) * breathEnv;
-                        texR = (texR * 0.90f - texFilterState1_ * airLvl) * breathEnv;
+                        texL = (texL * 0.90f + texFilterState1_ * airLvl) * breathEnv * 3.1f;
+                        texR = (texR * 0.90f - texFilterState1_ * airLvl) * breathEnv * 3.1f;
                     }
                     break;
 
@@ -792,8 +792,8 @@ void MultiEngineOscillator::processSample(float baseFrequencyHz,
                         texFilterState1_ += bodyCutoff * ((0.5f * (ensL + ensR) + bowRosin) - texFilterState1_ - 0.48f * texFilterState2_);
                         texFilterState2_ += bodyCutoff * texFilterState1_;
 
-                        texL = (ensL * 0.62f + texFilterState2_ * 0.58f) * bowPressure;
-                        texR = (ensR * 0.62f + texFilterState1_ * 0.52f) * bowPressure;
+                        texL = (ensL * 0.62f + texFilterState2_ * 0.58f) * bowPressure * 4.2f;
+                        texR = (ensR * 0.62f + texFilterState1_ * 0.52f) * bowPressure * 4.2f;
                     }
                     break;
 
@@ -817,8 +817,8 @@ void MultiEngineOscillator::processSample(float baseFrequencyHz,
 
                         const float drive = 1.15f + 1.45f * shape;
                         const float tapeHiss = noiseSample * (0.018f + 0.020f * shape);
-                        texL = std::tanh(texL * drive) * 0.78f + tapeHiss;
-                        texR = std::tanh(texR * drive) * 0.78f - tapeHiss;
+                        texL = (std::tanh(texL * drive) * 0.78f + tapeHiss) * 1.6f;
+                        texR = (std::tanh(texR * drive) * 0.78f - tapeHiss) * 1.6f;
                     }
                     break;
 
@@ -863,14 +863,14 @@ void MultiEngineOscillator::processSample(float baseFrequencyHz,
                         texFilterState2_ += windCutoff * texFilterState1_;
 
                         const float airMix = 0.25f + 0.45f * shape;
-                        texL = (texL * (1.0f - 0.30f * shape) + texFilterState1_ * airMix) * gust;
-                        texR = (texR * (1.0f - 0.30f * shape) - texFilterState1_ * airMix) * gust;
+                        texL = (texL * (1.0f - 0.30f * shape) + texFilterState1_ * airMix) * gust * 3.1f;
+                        texR = (texR * (1.0f - 0.30f * shape) - texFilterState1_ * airMix) * gust * 3.1f;
                     }
                     break;
             }
 
-            sigL = texL * 0.78f;
-            sigR = texR * 0.78f;
+            sigL = texL;
+            sigR = texR;
             break;
         }
 
@@ -903,8 +903,9 @@ void MultiEngineOscillator::processSample(float baseFrequencyHz,
                     }
                 }
 
-                sigL = modalSumL * 0.85f;
-                sigR = modalSumR * 0.85f;
+                const float modalScale = (params_.modelIndex == 2) ? 0.49f : 0.42f;
+                sigL = modalSumL * modalScale;
+                sigR = modalSumR * modalScale;
             } else {
                 // Waveguide Strings (Steel String & Nylon Harp)
                 const float delayLenL = std::clamp(sr / slotFreq, 8.0f, static_cast<float>(kMaxStringDelay - 8));
@@ -941,8 +942,9 @@ void MultiEngineOscillator::processSample(float baseFrequencyHz,
                     ? (0.15f * (1.0f - 2.0f * phases_[0]))
                     : (0.28f * std::sin(2.0f * std::numbers::pi_v<float> * phases_[0]));
 
-                sigL = (stringLpStateL_ + modalBody) * 0.85f;
-                sigR = (stringLpStateR_ + modalBody) * 0.85f;
+                const float pluckScale = (params_.modelIndex == 0) ? 4.7f : 2.5f;
+                sigL = (stringLpStateL_ + modalBody) * pluckScale;
+                sigR = (stringLpStateR_ + modalBody) * pluckScale;
             }
             break;
         }
@@ -1176,8 +1178,9 @@ void MultiEngineOscillator::processSample(float baseFrequencyHz,
 
             const float mid = 0.5f * (rawL + rawR);
             const float side = 0.5f * (rawL - rawR);
-            sigL = mid + spreadAmt * side;
-            sigR = mid - spreadAmt * side;
+            const float smpModelScale = (params_.modelIndex == 7) ? 4.2f : 1.0f;
+            sigL = (mid + spreadAmt * side) * smpModelScale;
+            sigR = (mid - spreadAmt * side) * smpModelScale;
             break;
         }
     }
