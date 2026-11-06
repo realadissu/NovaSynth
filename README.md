@@ -97,7 +97,7 @@ Nova Synth is engineered under strict audio-thread constraints:
 * **Zero Audio Thread Allocations:** No `malloc`, `new`, or standard container reallocations occur in `processBlock`.
 * **Lock-Free Communication:** Thread-safe lock-free ring buffers and atomic state machines connect the DSP engine to the GUI.
 * **Denormal Protection:** Scoped denormal flags (`juce::FloatVectorOperations::disableDenormalisedNumberSupport`) ensure CPU spikes never occur during reverb decay tails or silence.
-* **Realtime Verified:** Passes all 66 unit, integration, and DSP regression tests.
+* **Realtime Verified:** Passes all 71 unit, integration, and DSP regression tests.
 
 ---
 
@@ -161,7 +161,7 @@ auval -v aumu NvSy NovA
 
 **Nova Synth is proudly and entirely vibe-coded.**
 
-The entire instrument — from its real-time C++20 DSP audio core, SIMD algorithms, and lock-free state synchronization to its dark cyber-glass UI, preset architecture, and 66 passing regression tests — was created through iterative AI pair programming between **Wolfgang Meincke** and **Google DeepMind's Antigravity** agentic AI.
+The entire instrument — from its real-time C++20 DSP audio core, SIMD algorithms, and lock-free state synchronization to its dark cyber-glass UI, preset architecture, and 71 passing regression tests — was created through iterative AI pair programming between **Wolfgang Meincke** and **Google DeepMind's Antigravity** agentic AI.
 
 It serves as a real-world proof of concept that complex, professional-grade audio DSP and native audio plugins (AU, VST3, CLAP, and Standalone) with zero-compromise real-time safety can be designed, implemented, and refined through pure vibe coding and collaborative human-AI listening feedback loops.
 

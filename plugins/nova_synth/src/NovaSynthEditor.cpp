@@ -4528,7 +4528,6 @@ void NovaSynthEditor::timerCallback() {
         const auto tel = processor_.getSynthTelemetry();
         onUpdateTelemetry_(tel);
     }
-    repaint();
 }
 
 } // namespace nova::synth

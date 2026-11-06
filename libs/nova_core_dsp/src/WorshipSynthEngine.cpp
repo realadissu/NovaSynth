@@ -8,6 +8,33 @@ namespace {
 [[nodiscard]] inline float midiNoteToHz(int note) noexcept {
     return 440.0f * std::pow(2.0f, static_cast<float>(note - 69) / 12.0f);
 }
+
+[[nodiscard]] inline float applyEnvTimeMod(float baseSec, float modOffset, float minSec, float maxSec) noexcept {
+    if (std::abs(modOffset) < 1e-4f) return baseSec;
+    if (modOffset < 0.0f) {
+        return std::clamp(baseSec * std::pow(2.0f, modOffset * 3.5f), minSec, maxSec);
+    }
+    return std::clamp(baseSec * std::pow(2.0f, modOffset * 2.0f) + modOffset * 3.0f, minSec, maxSec);
+}
+
+constexpr std::array<ModMatrix::Destination, 8> kSlotShapeDests{
+    ModMatrix::Destination::Osc1Shape, ModMatrix::Destination::Osc2Shape,
+    ModMatrix::Destination::Osc3Shape, ModMatrix::Destination::Osc4Shape,
+    ModMatrix::Destination::Osc5Shape, ModMatrix::Destination::Osc6Shape,
+    ModMatrix::Destination::Osc7Shape, ModMatrix::Destination::Osc8Shape
+};
+constexpr std::array<ModMatrix::Destination, 8> kSlotPitchDests{
+    ModMatrix::Destination::Osc1Pitch, ModMatrix::Destination::Osc2Pitch,
+    ModMatrix::Destination::Osc3Pitch, ModMatrix::Destination::Osc4Pitch,
+    ModMatrix::Destination::Osc5Pitch, ModMatrix::Destination::Osc6Pitch,
+    ModMatrix::Destination::Osc7Pitch, ModMatrix::Destination::Osc8Pitch
+};
+constexpr std::array<ModMatrix::Destination, 8> kSlotLevelDests{
+    ModMatrix::Destination::Osc1Level, ModMatrix::Destination::Osc2Level,
+    ModMatrix::Destination::Osc3Level, ModMatrix::Destination::Osc4Level,
+    ModMatrix::Destination::Osc5Level, ModMatrix::Destination::Osc6Level,
+    ModMatrix::Destination::Osc7Level, ModMatrix::Destination::Osc8Level
+};
 } // namespace
 
 WorshipSynthEngine::WorshipSynthEngine() {
@@ -148,12 +175,15 @@ void WorshipSynthEngine::setParameters(const Parameters& params) noexcept {
     params_ = params;
     params_.activeOscCount = std::clamp(params_.activeOscCount, 1, kNumOscSlots);
 
-    const float rate1 = params_.lfo1Sync
+    const float lfo1RateMod = modMatrix_.getModulationOffset(ModMatrix::Destination::Lfo1Rate);
+    const float lfo2RateMod = modMatrix_.getModulationOffset(ModMatrix::Destination::Lfo2Rate);
+
+    const float rate1 = (params_.lfo1Sync
         ? getLfoRateForDivision(params_.bpm, params_.lfo1SyncDiv)
-        : params_.lfo1RateHz;
-    const float rate2 = params_.lfo2Sync
+        : params_.lfo1RateHz) * std::pow(2.0f, lfo1RateMod * 3.0f);
+    const float rate2 = (params_.lfo2Sync
         ? getLfoRateForDivision(params_.bpm, params_.lfo2SyncDiv)
-        : params_.lfo2RateHz;
+        : params_.lfo2RateHz) * std::pow(2.0f, lfo2RateMod * 3.0f);
     const float rate3 = params_.lfo3Sync
         ? getLfoRateForDivision(params_.bpm, params_.lfo3SyncDiv)
         : params_.lfo3RateHz;
@@ -216,8 +246,23 @@ void WorshipSynthEngine::setParameters(const Parameters& params) noexcept {
                 v.oscs[static_cast<std::size_t>(i)].setParameters(slotP);
             }
             if (!v.isDroneVoice) {
-                v.ampEnv.setParameters(params_.ampEnv);
-                v.filterEnv.setParameters(params_.filterEnv);
+                auto effAmp = params_.ampEnv;
+                const float ampAttMod = modMatrix_.getModulationOffset(ModMatrix::Destination::AmpAttack);
+                const float ampDecMod = modMatrix_.getModulationOffset(ModMatrix::Destination::AmpDecay);
+                const float ampRelMod = modMatrix_.getModulationOffset(ModMatrix::Destination::AmpRelease);
+                effAmp.attackSec  = applyEnvTimeMod(effAmp.attackSec,  ampAttMod, 0.001f, 15.0f);
+                effAmp.decaySec   = applyEnvTimeMod(effAmp.decaySec,   ampDecMod, 0.005f, 15.0f);
+                effAmp.releaseSec = applyEnvTimeMod(effAmp.releaseSec, ampRelMod, 0.005f, 20.0f);
+                v.ampEnv.setParameters(effAmp);
+
+                auto effFlt = params_.filterEnv;
+                const float fltAttMod = modMatrix_.getModulationOffset(ModMatrix::Destination::FilterAttack);
+                const float fltDecMod = modMatrix_.getModulationOffset(ModMatrix::Destination::FilterDecay);
+                const float fltRelMod = modMatrix_.getModulationOffset(ModMatrix::Destination::FilterRelease);
+                effFlt.attackSec  = applyEnvTimeMod(effFlt.attackSec,  fltAttMod, 0.001f, 15.0f);
+                effFlt.decaySec   = applyEnvTimeMod(effFlt.decaySec,   fltDecMod, 0.005f, 15.0f);
+                effFlt.releaseSec = applyEnvTimeMod(effFlt.releaseSec, fltRelMod, 0.005f, 20.0f);
+                v.filterEnv.setParameters(effFlt);
             } else {
                 AdsrEnvelope::Parameters droneAmp;
                 droneAmp.attackSec  = std::clamp(params_.droneGlide * 0.75f, 0.25f, 3.5f);
@@ -233,7 +278,14 @@ void WorshipSynthEngine::setParameters(const Parameters& params) noexcept {
                 droneFlt.releaseSec = std::clamp(params_.droneGlide, 0.5f, 4.5f);
                 v.filterEnv.setParameters(droneFlt);
             }
-            v.modEnv.setParameters(params_.modEnv);
+            auto effMod = params_.modEnv;
+            const float modAttMod = modMatrix_.getModulationOffset(ModMatrix::Destination::ModEnv3Attack);
+            const float modDecMod = modMatrix_.getModulationOffset(ModMatrix::Destination::ModEnv3Decay);
+            const float modRelMod = modMatrix_.getModulationOffset(ModMatrix::Destination::ModEnv3Release);
+            effMod.attackSec  = applyEnvTimeMod(effMod.attackSec,  modAttMod, 0.001f, 15.0f);
+            effMod.decaySec   = applyEnvTimeMod(effMod.decaySec,   modDecMod, 0.005f, 15.0f);
+            effMod.releaseSec = applyEnvTimeMod(effMod.releaseSec, modRelMod, 0.005f, 20.0f);
+            v.modEnv.setParameters(effMod);
             v.auxEnv.setParameters(params_.auxEnv);
         }
     }
@@ -317,6 +369,24 @@ void WorshipSynthEngine::noteOff(int midiNote) noexcept {
             if (sustainPedalDown_) {
                 v.sustainedByPedal = true;
             } else {
+                const float ampRelMod = modMatrix_.getModulationOffset(ModMatrix::Destination::AmpRelease);
+                if (std::abs(ampRelMod) > 1e-4f) {
+                    auto p = v.ampEnv.getParameters();
+                    p.releaseSec = applyEnvTimeMod(params_.ampEnv.releaseSec, ampRelMod, 0.005f, 20.0f);
+                    v.ampEnv.setParameters(p);
+                }
+                const float fltRelMod = modMatrix_.getModulationOffset(ModMatrix::Destination::FilterRelease);
+                if (std::abs(fltRelMod) > 1e-4f) {
+                    auto p = v.filterEnv.getParameters();
+                    p.releaseSec = applyEnvTimeMod(params_.filterEnv.releaseSec, fltRelMod, 0.005f, 20.0f);
+                    v.filterEnv.setParameters(p);
+                }
+                const float modRelMod = modMatrix_.getModulationOffset(ModMatrix::Destination::ModEnv3Release);
+                if (std::abs(modRelMod) > 1e-4f) {
+                    auto p = v.modEnv.getParameters();
+                    p.releaseSec = applyEnvTimeMod(params_.modEnv.releaseSec, modRelMod, 0.005f, 20.0f);
+                    v.modEnv.setParameters(p);
+                }
                 v.ampEnv.noteOff();
                 v.filterEnv.noteOff();
                 v.modEnv.noteOff();
@@ -472,16 +542,45 @@ void WorshipSynthEngine::startVoice(int midiNote, float velocity, bool isDrone, 
         droneFlt.sustainLvl = 1.0f; // Steady filter cutoff without punchy decay
         droneFlt.releaseSec = std::clamp(params_.droneGlide, 0.5f, 4.5f);
         chosen->filterEnv.setParameters(droneFlt);
-    } else if (isArp) {
-        auto arpAmp = params_.ampEnv;
-        arpAmp.attackSec = std::min(params_.ampEnv.attackSec, 0.025f);
-        chosen->ampEnv.setParameters(arpAmp);
-        chosen->filterEnv.setParameters(params_.filterEnv);
     } else {
-        chosen->ampEnv.setParameters(params_.ampEnv);
-        chosen->filterEnv.setParameters(params_.filterEnv);
+        const ModMatrix::VoiceSources initSources{
+            0.0f, 0.0f, 0.0f, 0.0f, chosen->velocity
+        };
+        const auto initOffsets = modMatrix_.evaluateVoice(initSources);
+
+        auto effAmp = isArp ? params_.ampEnv : params_.ampEnv;
+        if (isArp) {
+            effAmp.attackSec = std::min(params_.ampEnv.attackSec, 0.025f);
+        }
+        const float ampAttMod = initOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::AmpAttack)];
+        const float ampDecMod = initOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::AmpDecay)];
+        const float ampRelMod = initOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::AmpRelease)];
+        effAmp.attackSec  = applyEnvTimeMod(effAmp.attackSec,  ampAttMod, 0.001f, 15.0f);
+        effAmp.decaySec   = applyEnvTimeMod(effAmp.decaySec,   ampDecMod, 0.005f, 15.0f);
+        effAmp.releaseSec = applyEnvTimeMod(effAmp.releaseSec, ampRelMod, 0.005f, 20.0f);
+        chosen->ampEnv.setParameters(effAmp);
+
+        auto effFlt = params_.filterEnv;
+        const float fltAttMod = initOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::FilterAttack)];
+        const float fltDecMod = initOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::FilterDecay)];
+        const float fltRelMod = initOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::FilterRelease)];
+        effFlt.attackSec  = applyEnvTimeMod(effFlt.attackSec,  fltAttMod, 0.001f, 15.0f);
+        effFlt.decaySec   = applyEnvTimeMod(effFlt.decaySec,   fltDecMod, 0.005f, 15.0f);
+        effFlt.releaseSec = applyEnvTimeMod(effFlt.releaseSec, fltRelMod, 0.005f, 20.0f);
+        chosen->filterEnv.setParameters(effFlt);
+
+        auto effMod = params_.modEnv;
+        const float modAttMod = initOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::ModEnv3Attack)];
+        const float modDecMod = initOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::ModEnv3Decay)];
+        const float modRelMod = initOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::ModEnv3Release)];
+        effMod.attackSec  = applyEnvTimeMod(effMod.attackSec,  modAttMod, 0.001f, 15.0f);
+        effMod.decaySec   = applyEnvTimeMod(effMod.decaySec,   modDecMod, 0.005f, 15.0f);
+        effMod.releaseSec = applyEnvTimeMod(effMod.releaseSec, modRelMod, 0.005f, 20.0f);
+        chosen->modEnv.setParameters(effMod);
     }
-    chosen->modEnv.setParameters(params_.modEnv);
+    if (isDrone) {
+        chosen->modEnv.setParameters(params_.modEnv);
+    }
     chosen->auxEnv.setParameters(params_.auxEnv);
     chosen->ampEnv.noteOn(chosen->velocity);
     chosen->filterEnv.noteOn(chosen->velocity);
@@ -944,14 +1043,22 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
             modMatrix_.setSourceValue(ModMatrix::Source::Lfo3, lfo3Val);
             modMatrix_.setSourceValue(ModMatrix::Source::Lfo4, lfo4Val);
             modMatrix_.evaluate();
+
+            const float lfo1RMod = modMatrix_.getModulationOffset(ModMatrix::Destination::Lfo1Rate);
+            if (std::abs(lfo1RMod) > 1e-4f) {
+                const float baseR1 = params_.lfo1Sync ? getLfoRateForDivision(params_.bpm, params_.lfo1SyncDiv) : params_.lfo1RateHz;
+                lfo1_.setParameters(params_.lfo1Shape, baseR1 * (0.6f + 1.2f * params_.macroMotion) * std::pow(2.0f, lfo1RMod * 3.0f),
+                                    std::clamp(params_.lfo1Depth + params_.macroMotion * 0.25f, 0.0f, 1.0f));
+            }
+            const float lfo2RMod = modMatrix_.getModulationOffset(ModMatrix::Destination::Lfo2Rate);
+            if (std::abs(lfo2RMod) > 1e-4f) {
+                const float baseR2 = params_.lfo2Sync ? getLfoRateForDivision(params_.bpm, params_.lfo2SyncDiv) : params_.lfo2RateHz;
+                lfo2_.setParameters(params_.lfo2Shape, baseR2 * std::pow(2.0f, lfo2RMod * 3.0f), params_.lfo2Depth);
+            }
         }
 
         const float pitchMod = pitchBendSemitones_
                              + modMatrix_.getModulationOffset(ModMatrix::Destination::OscPitchAll) * 2.0f;
-        const float oscShapeMod1 = modMatrix_.getModulationOffset(ModMatrix::Destination::Osc1Shape);
-        const float oscShapeMod2 = modMatrix_.getModulationOffset(ModMatrix::Destination::Osc2Shape);
-        const float oscShapeMod3 = modMatrix_.getModulationOffset(ModMatrix::Destination::Osc3Shape);
-        const float oscShapeMod4 = modMatrix_.getModulationOffset(ModMatrix::Destination::Osc4Shape);
         const float cutoffModOctaves = modMatrix_.getModulationOffset(ModMatrix::Destination::FilterCutoff) * 1.8f;
         const float filterResoMod = modMatrix_.getModulationOffset(ModMatrix::Destination::FilterResonance) * 0.5f;
         const float vocalCarveMod = modMatrix_.getModulationOffset(ModMatrix::Destination::VocalCarve);
@@ -1024,18 +1131,10 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
                     }
                 }
 
-                const float sMod = (i == 0) ? oscShapeMod1
-                                 : ((i == 1) ? oscShapeMod2
-                                 : ((i == 2) ? oscShapeMod3
-                                 : ((i == 3) ? oscShapeMod4 : 0.0f)));
-                const float slotPitchMod = (i == 0) ? voiceOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::Osc1Pitch)]
-                                         : ((i == 1) ? voiceOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::Osc2Pitch)]
-                                         : ((i == 2) ? voiceOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::Osc3Pitch)]
-                                         : voiceOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::Osc4Pitch)]));
-                const float slotLevelMod = (i == 0) ? voiceOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::Osc1Level)]
-                                         : ((i == 1) ? voiceOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::Osc2Level)]
-                                         : ((i == 2) ? voiceOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::Osc3Level)]
-                                         : voiceOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::Osc4Level)]));
+                const auto sIdx = static_cast<std::size_t>(i);
+                const float sMod = (sIdx < 8) ? voiceOffsets.offsets[static_cast<std::size_t>(kSlotShapeDests[sIdx])] : 0.0f;
+                const float slotPitchMod = (sIdx < 8) ? voiceOffsets.offsets[static_cast<std::size_t>(kSlotPitchDests[sIdx])] : 0.0f;
+                const float slotLevelMod = (sIdx < 8) ? voiceOffsets.offsets[static_cast<std::size_t>(kSlotLevelDests[sIdx])] : 0.0f;
 
                 const float vPitch = pitchMod + slotPitchMod * 24.0f;
                 float oL = 0.0f, oR = 0.0f;

@@ -19,7 +19,7 @@ public:
         displayWave_.fill(0.0f);
         smoothedBins_.fill(0.0f);
         peakHoldBins_.fill(0.0f);
-        startTimerHz(60);
+        startTimerHz(30);
     }
 
     ~DualVisualizerHub() override {
@@ -48,15 +48,28 @@ public:
 
 private:
     void timerCallback() override {
+        if (!isVisible()) return;
+
         // 1. Drain all available audio samples from synth engine into circular buffer
         std::array<float, 512> tempBuf{};
+        std::size_t totalPopped = 0;
         for (int chunk = 0; chunk < 4; ++chunk) {
             const std::size_t popped = proc_.popVisualizerSamples(tempBuf.data(), tempBuf.size());
             if (popped == 0) break;
+            totalPopped += popped;
             for (std::size_t i = 0; i < popped; ++i) {
                 circularBuf_[writePos_] = tempBuf[i];
                 writePos_ = (writePos_ + 1) & (circularBuf_.size() - 1);
             }
+        }
+
+        // Idle power-saver: when audio engine is silent and bins have decayed, skip FFT and repaint
+        bool hasNonZeroBins = false;
+        for (float b : smoothedBins_) {
+            if (b > 0.005f) { hasNonZeroBins = true; break; }
+        }
+        if (totalPopped == 0 && !hasNonZeroBins && displayWave_[0] == 0.0f) {
+            return;
         }
 
         // 2. Oscilloscope: Trigger Search (Rising Zero-Crossing) for rock-solid stability

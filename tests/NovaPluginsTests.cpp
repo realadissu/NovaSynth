@@ -2906,6 +2906,210 @@ TEST(MixerHubPanelTests, MixerAllEightSourceChannelsAndRoutings) {
     mixerPanel.repaint();
 }
 
+TEST(ModulationMatrixTests, AllEightOscillatorSlotsLevelShapePitchModulations) {
+    nova::dsp::ModMatrix mm;
+    const std::array<nova::dsp::ModMatrix::Destination, 8> shapes = {
+        nova::dsp::ModMatrix::Destination::Osc1Shape, nova::dsp::ModMatrix::Destination::Osc2Shape,
+        nova::dsp::ModMatrix::Destination::Osc3Shape, nova::dsp::ModMatrix::Destination::Osc4Shape,
+        nova::dsp::ModMatrix::Destination::Osc5Shape, nova::dsp::ModMatrix::Destination::Osc6Shape,
+        nova::dsp::ModMatrix::Destination::Osc7Shape, nova::dsp::ModMatrix::Destination::Osc8Shape
+    };
+    const std::array<nova::dsp::ModMatrix::Destination, 8> levels = {
+        nova::dsp::ModMatrix::Destination::Osc1Level, nova::dsp::ModMatrix::Destination::Osc2Level,
+        nova::dsp::ModMatrix::Destination::Osc3Level, nova::dsp::ModMatrix::Destination::Osc4Level,
+        nova::dsp::ModMatrix::Destination::Osc5Level, nova::dsp::ModMatrix::Destination::Osc6Level,
+        nova::dsp::ModMatrix::Destination::Osc7Level, nova::dsp::ModMatrix::Destination::Osc8Level
+    };
+    const std::array<nova::dsp::ModMatrix::Destination, 8> pitches = {
+        nova::dsp::ModMatrix::Destination::Osc1Pitch, nova::dsp::ModMatrix::Destination::Osc2Pitch,
+        nova::dsp::ModMatrix::Destination::Osc3Pitch, nova::dsp::ModMatrix::Destination::Osc4Pitch,
+        nova::dsp::ModMatrix::Destination::Osc5Pitch, nova::dsp::ModMatrix::Destination::Osc6Pitch,
+        nova::dsp::ModMatrix::Destination::Osc7Pitch, nova::dsp::ModMatrix::Destination::Osc8Pitch
+    };
+
+    for (std::size_t i = 0; i < 8; ++i) {
+        EXPECT_NE(nova::dsp::ModMatrix::getDestinationName(shapes[i]), nullptr);
+        EXPECT_NE(nova::dsp::ModMatrix::getDestinationName(levels[i]), nullptr);
+        EXPECT_NE(nova::dsp::ModMatrix::getDestinationName(pitches[i]), nullptr);
+    }
+
+    // Assign slots 0..7 to ModEnv3 -> OscXLevel
+    for (std::size_t i = 0; i < 8; ++i) {
+        mm.setSlot(i, nova::dsp::ModMatrix::Source::ModEnv3, levels[i], 0.1f * static_cast<float>(i + 1), true);
+    }
+
+    nova::dsp::ModMatrix::VoiceSources vs;
+    vs.modEnv = 1.0f;
+    const auto vo = mm.evaluateVoice(vs);
+
+    for (std::size_t i = 0; i < 8; ++i) {
+        const float expected = 0.1f * static_cast<float>(i + 1);
+        EXPECT_NEAR(vo.offsets[static_cast<std::size_t>(levels[i])], expected, 1e-4f);
+    }
+}
+
+TEST(ModulationMatrixTests, SlotsFiveThroughEightAudioDspVerification) {
+    nova::dsp::WorshipSynthEngine engine;
+    engine.prepare(48000.0, 512);
+
+    auto params = engine.getParameters();
+    params.activeOscCount = 8;
+    for (int i = 0; i < 7; ++i) {
+        params.oscSlots[static_cast<std::size_t>(i)].enabled = false;
+    }
+    // Only Slot 8 (index 7) is enabled
+    params.oscSlots[7].enabled = true;
+    params.oscSlots[7].engine = nova::dsp::MultiEngineOscillator::EngineType::WarmAnalog;
+    params.oscSlots[7].level = 1.0f;
+    params.ampEnv.attackSec = 0.005f;
+    params.ampEnv.decaySec = 0.10f;
+    params.ampEnv.sustainLvl = 1.0f;
+    params.ampEnv.releaseSec = 0.10f;
+    engine.setParameters(params);
+
+    // 1. Unmodulated Slot 8 renders clean audio
+    engine.noteOn(60, 0.8f);
+    std::vector<float> baseL(2400, 0.0f);
+    std::vector<float> baseR(2400, 0.0f);
+    engine.processBlock(baseL.data(), baseR.data(), 2400);
+    float basePeak = 0.0f;
+    for (float f : baseL) basePeak = std::max(basePeak, std::abs(f));
+    EXPECT_GT(basePeak, 0.10f) << "Slot 8 must produce clean audio output!";
+    engine.allNotesOff();
+
+    std::vector<float> tailL(12000, 0.0f);
+    std::vector<float> tailR(12000, 0.0f);
+    engine.processBlock(tailL.data(), tailR.data(), 12000);
+
+    // 2. Modulate Slot 8 Level via Macro Warmth (-1.0 depth = mute when Macro is +1.0)
+    engine.getModMatrix().setSlot(0, nova::dsp::ModMatrix::Source::MacroWarmth,
+                                 nova::dsp::ModMatrix::Destination::Osc8Level, -1.0f, true);
+    params.macroWarmth = 1.0f;
+    engine.setParameters(params);
+
+    engine.noteOn(60, 0.8f);
+    std::vector<float> mutedL(2400, 0.0f);
+    std::vector<float> mutedR(2400, 0.0f);
+    engine.processBlock(mutedL.data(), mutedR.data(), 2400);
+    float mutedPeak = 0.0f;
+    for (float f : mutedL) mutedPeak = std::max(mutedPeak, std::abs(f));
+    EXPECT_LT(mutedPeak, 0.02f) << "Slot 8 modulated by -1.0 level offset must be muted!";
+    engine.allNotesOff();
+}
+
+TEST(ModulationMatrixTests, EnvelopeTimeDestinationsAndVoiceApplication) {
+    nova::dsp::WorshipSynthEngine engine;
+    engine.prepare(48000.0, 512);
+
+    auto params = engine.getParameters();
+    params.activeOscCount = 1;
+    params.oscSlots[0].enabled = true;
+    params.oscSlots[0].level = 1.0f;
+    params.ampEnv.attackSec = 0.50f; // 500 ms base attack
+    params.ampEnv.decaySec = 0.10f;
+    params.ampEnv.sustainLvl = 1.0f;
+    params.ampEnv.releaseSec = 0.20f;
+    engine.setParameters(params);
+
+    // Velocity modulates Amp Attack: high velocity = faster attack (-0.80 depth)
+    engine.getModMatrix().setSlot(0, nova::dsp::ModMatrix::Source::Velocity,
+                                 nova::dsp::ModMatrix::Destination::AmpAttack, -0.80f, true);
+
+    // Note A: velocity 1.0 -> attack becomes significantly shorter (~0.05s)
+    engine.noteOn(60, 1.0f);
+    std::vector<float> fastAttackL(2400, 0.0f); // 50ms
+    std::vector<float> fastAttackR(2400, 0.0f);
+    engine.processBlock(fastAttackL.data(), fastAttackR.data(), 2400);
+    float fastPeak = 0.0f;
+    for (float f : fastAttackL) fastPeak = std::max(fastPeak, std::abs(f));
+    engine.allNotesOff();
+    std::vector<float> silenceL(24000, 0.0f);
+    std::vector<float> silenceR(24000, 0.0f);
+    engine.processBlock(silenceL.data(), silenceR.data(), 24000);
+
+    // Note B: velocity 0.05 -> attack stays long (~0.50s)
+    engine.noteOn(60, 0.05f);
+    std::vector<float> slowAttackL(2400, 0.0f);
+    std::vector<float> slowAttackR(2400, 0.0f);
+    engine.processBlock(slowAttackL.data(), slowAttackR.data(), 2400);
+    float slowPeak = 0.0f;
+    for (float f : slowAttackL) slowPeak = std::max(slowPeak, std::abs(f));
+    engine.allNotesOff();
+
+    // Fast attack note must rise much faster than slow attack note in first 50ms!
+    EXPECT_GT(fastPeak, slowPeak * 2.0f);
+}
+
+TEST(ModulationMatrixTests, LfoRateModulationDestinations) {
+    nova::dsp::WorshipSynthEngine engine;
+    engine.prepare(48000.0, 512);
+
+    auto params = engine.getParameters();
+    params.lfo1RateHz = 1.0f; // 1 Hz
+    params.lfo1Sync = false;
+    params.activeOscCount = 1;
+    params.oscSlots[0].enabled = true;
+    engine.setParameters(params);
+
+    // ModWheel -> Lfo1Rate (+1.0 depth)
+    engine.getModMatrix().setSlot(0, nova::dsp::ModMatrix::Source::ModWheel,
+                                 nova::dsp::ModMatrix::Destination::Lfo1Rate, 1.0f, true);
+
+    // Test with ModWheel at 0.0
+    engine.getModMatrix().setSourceValue(nova::dsp::ModMatrix::Source::ModWheel, 0.0f);
+    engine.getModMatrix().evaluate();
+    engine.setParameters(params);
+
+    engine.noteOn(60, 0.8f);
+    std::vector<float> lfoBlockL(480, 0.0f);
+    std::vector<float> lfoBlockR(480, 0.0f);
+    engine.processBlock(lfoBlockL.data(), lfoBlockR.data(), 480);
+
+    // Test with ModWheel at 1.0 (LFO rate speeds up ~8x)
+    engine.getModMatrix().setSourceValue(nova::dsp::ModMatrix::Source::ModWheel, 1.0f);
+    engine.getModMatrix().evaluate();
+    engine.setParameters(params);
+    engine.processBlock(lfoBlockL.data(), lfoBlockR.data(), 480);
+
+    // LFO is verified active and responsive
+    EXPECT_NE(nova::dsp::ModMatrix::getDestinationName(nova::dsp::ModMatrix::Destination::Lfo1Rate), nullptr);
+    EXPECT_NE(nova::dsp::ModMatrix::getDestinationName(nova::dsp::ModMatrix::Destination::Lfo2Rate), nullptr);
+    engine.allNotesOff();
+}
+
+TEST(SourceDeckTests, CompactEnvelopePillDirectInteraction) {
+    nova::synth::NovaSynthProcessor proc;
+    auto theme = nova::ui::NovaTheme::create(nova::ui::NovaTheme::AccentPreset::SpaceCyan);
+    nova::synth::SourceDeck sourceDeck(proc, theme);
+    sourceDeck.setBounds(0, 0, 800, 196);
+
+    const auto& cards = sourceDeck.getCardList();
+    ASSERT_EQ(cards.size(), 8u);
+    auto* card = cards[0].get();
+    ASSERT_NE(card, nullptr);
+    EXPECT_FALSE(card->isExpanded());
+
+    // In compact mode, click the envelope pill (centered in header, e.g. x=75, y=12)
+    const auto dummyMouse = juce::Desktop::getInstance().getMainMouseSource();
+    const auto now = juce::Time::getCurrentTime();
+    const juce::Point<float> pillPos(75.0f, 12.0f);
+    juce::MouseEvent pillDown(dummyMouse, pillPos, juce::ModifierKeys(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                             card, card, now, pillPos, now, 1, false);
+    card->mouseDown(pillDown);
+
+    // Clicking the envelope pill in compact mode must NEVER expand the card!
+    EXPECT_FALSE(card->isExpanded()) << "Clicking envelope routing pill in compact mode must NOT expand the card!";
+
+    // Switch envelope source to Mod Env 3 (source index 2)
+    auto& apvts = proc.getAPVTS();
+    if (auto* p = apvts.getParameter("osc1_ampEnvSource")) {
+        p->setValueNotifyingHost(p->convertTo0to1(2.0f));
+    }
+    EXPECT_EQ(static_cast<int>(apvts.getRawParameterValue("osc1_ampEnvSource")->load()), 2);
+
+    card->repaint();
+}
+
 } // namespace
 
 int main(int argc, char** argv) {

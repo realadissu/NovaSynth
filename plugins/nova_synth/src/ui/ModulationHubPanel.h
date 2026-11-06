@@ -1043,6 +1043,10 @@ private:
         levelMenu.addItem(11, "OSC 2 Level (Swell/Vol)");
         levelMenu.addItem(12, "OSC 3 Level (Swell/Pad)");
         levelMenu.addItem(13, "OSC 4 Level (Swell/Sub)");
+        levelMenu.addItem(14, "OSC 5 Level (Swell)");
+        levelMenu.addItem(15, "OSC 6 Level (Swell)");
+        levelMenu.addItem(16, "OSC 7 Level (Swell)");
+        levelMenu.addItem(17, "OSC 8 Level (Swell)");
         m.addSubMenu("OSC Volume / Swell", levelMenu);
 
         juce::PopupMenu shapeMenu;
@@ -1050,6 +1054,10 @@ private:
         shapeMenu.addItem(21, "OSC 2 Shape / Morph");
         shapeMenu.addItem(22, "OSC 3 Shape / Morph");
         shapeMenu.addItem(23, "OSC 4 Shape / Morph");
+        shapeMenu.addItem(24, "OSC 5 Shape / Morph");
+        shapeMenu.addItem(25, "OSC 6 Shape / Morph");
+        shapeMenu.addItem(26, "OSC 7 Shape / Morph");
+        shapeMenu.addItem(27, "OSC 8 Shape / Morph");
         m.addSubMenu("OSC Shape / Morph", shapeMenu);
 
         juce::PopupMenu pitchMenu;
@@ -1057,8 +1065,32 @@ private:
         pitchMenu.addItem(31, "OSC 2 Pitch");
         pitchMenu.addItem(32, "OSC 3 Pitch");
         pitchMenu.addItem(33, "OSC 4 Pitch");
-        pitchMenu.addItem(34, "Pitch All (Master Vibrato)");
+        pitchMenu.addItem(34, "OSC 5 Pitch");
+        pitchMenu.addItem(35, "OSC 6 Pitch");
+        pitchMenu.addItem(36, "OSC 7 Pitch");
+        pitchMenu.addItem(37, "OSC 8 Pitch");
+        pitchMenu.addSeparator();
+        pitchMenu.addItem(38, "Pitch All (Master Vibrato)");
         m.addSubMenu("OSC Pitch", pitchMenu);
+
+        juce::PopupMenu envMenu;
+        envMenu.addItem(50, "Amp Env Attack");
+        envMenu.addItem(51, "Amp Env Decay");
+        envMenu.addItem(52, "Amp Env Release");
+        envMenu.addSeparator();
+        envMenu.addItem(53, "Filter Env Attack");
+        envMenu.addItem(54, "Filter Env Decay");
+        envMenu.addItem(55, "Filter Env Release");
+        envMenu.addSeparator();
+        envMenu.addItem(56, "Mod Env 3 Attack");
+        envMenu.addItem(57, "Mod Env 3 Decay");
+        envMenu.addItem(58, "Mod Env 3 Release");
+        m.addSubMenu("Envelopes (ADSR Times)", envMenu);
+
+        juce::PopupMenu lfoMenu;
+        lfoMenu.addItem(60, "LFO 1 Rate / Speed");
+        lfoMenu.addItem(61, "LFO 2 Rate / Speed");
+        m.addSubMenu("LFO Speed", lfoMenu);
 
         juce::PopupMenu fxMenu;
         fxMenu.addItem(40, "Reverb Cloud Mix");
@@ -1083,17 +1115,42 @@ private:
                     case 11: dst = nova::dsp::ModMatrix::Destination::Osc2Level; break;
                     case 12: dst = nova::dsp::ModMatrix::Destination::Osc3Level; break;
                     case 13: dst = nova::dsp::ModMatrix::Destination::Osc4Level; break;
+                    case 14: dst = nova::dsp::ModMatrix::Destination::Osc5Level; break;
+                    case 15: dst = nova::dsp::ModMatrix::Destination::Osc6Level; break;
+                    case 16: dst = nova::dsp::ModMatrix::Destination::Osc7Level; break;
+                    case 17: dst = nova::dsp::ModMatrix::Destination::Osc8Level; break;
 
                     case 20: dst = nova::dsp::ModMatrix::Destination::Osc1Shape; break;
                     case 21: dst = nova::dsp::ModMatrix::Destination::Osc2Shape; break;
                     case 22: dst = nova::dsp::ModMatrix::Destination::Osc3Shape; break;
                     case 23: dst = nova::dsp::ModMatrix::Destination::Osc4Shape; break;
+                    case 24: dst = nova::dsp::ModMatrix::Destination::Osc5Shape; break;
+                    case 25: dst = nova::dsp::ModMatrix::Destination::Osc6Shape; break;
+                    case 26: dst = nova::dsp::ModMatrix::Destination::Osc7Shape; break;
+                    case 27: dst = nova::dsp::ModMatrix::Destination::Osc8Shape; break;
 
                     case 30: dst = nova::dsp::ModMatrix::Destination::Osc1Pitch; break;
                     case 31: dst = nova::dsp::ModMatrix::Destination::Osc2Pitch; break;
                     case 32: dst = nova::dsp::ModMatrix::Destination::Osc3Pitch; break;
                     case 33: dst = nova::dsp::ModMatrix::Destination::Osc4Pitch; break;
-                    case 34: dst = nova::dsp::ModMatrix::Destination::OscPitchAll; break;
+                    case 34: dst = nova::dsp::ModMatrix::Destination::Osc5Pitch; break;
+                    case 35: dst = nova::dsp::ModMatrix::Destination::Osc6Pitch; break;
+                    case 36: dst = nova::dsp::ModMatrix::Destination::Osc7Pitch; break;
+                    case 37: dst = nova::dsp::ModMatrix::Destination::Osc8Pitch; break;
+                    case 38: dst = nova::dsp::ModMatrix::Destination::OscPitchAll; break;
+
+                    case 50: dst = nova::dsp::ModMatrix::Destination::AmpAttack; break;
+                    case 51: dst = nova::dsp::ModMatrix::Destination::AmpDecay; break;
+                    case 52: dst = nova::dsp::ModMatrix::Destination::AmpRelease; break;
+                    case 53: dst = nova::dsp::ModMatrix::Destination::FilterAttack; break;
+                    case 54: dst = nova::dsp::ModMatrix::Destination::FilterDecay; break;
+                    case 55: dst = nova::dsp::ModMatrix::Destination::FilterRelease; break;
+                    case 56: dst = nova::dsp::ModMatrix::Destination::ModEnv3Attack; break;
+                    case 57: dst = nova::dsp::ModMatrix::Destination::ModEnv3Decay; break;
+                    case 58: dst = nova::dsp::ModMatrix::Destination::ModEnv3Release; break;
+
+                    case 60: dst = nova::dsp::ModMatrix::Destination::Lfo1Rate; break;
+                    case 61: dst = nova::dsp::ModMatrix::Destination::Lfo2Rate; break;
 
                     case 40: dst = nova::dsp::ModMatrix::Destination::ReverbMix; break;
                     case 41: dst = nova::dsp::ModMatrix::Destination::ShimmerAmount; break;

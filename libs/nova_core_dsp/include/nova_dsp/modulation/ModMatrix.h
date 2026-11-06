@@ -56,29 +56,66 @@ public:
 
     enum class Destination : int {
         None = 0,
+        // OSC Shape / Morph (1 - 8)
         Osc1Shape,
         Osc2Shape,
         Osc3Shape,
         Osc4Shape,
+        Osc5Shape,
+        Osc6Shape,
+        Osc7Shape,
+        Osc8Shape,
+
+        // OSC Level / Swell (1 - 8)
         Osc1Level,
         Osc2Level,
         Osc3Level,
         Osc4Level,
+        Osc5Level,
+        Osc6Level,
+        Osc7Level,
+        Osc8Level,
+
+        // OSC Pitch (1 - 8)
         Osc1Pitch,
         Osc2Pitch,
         Osc3Pitch,
         Osc4Pitch,
+        Osc5Pitch,
+        Osc6Pitch,
+        Osc7Pitch,
+        Osc8Pitch,
         OscPitchAll,
+
+        // Dual Filters
         FilterCutoff,
         FilterResonance,
         Filter2Cutoff,
         Filter2Resonance,
         VocalCarve,
+
+        // Envelopes
+        AmpAttack,
+        AmpDecay,
+        AmpRelease,
+        FilterAttack,
+        FilterDecay,
+        FilterRelease,
+        ModEnv3Attack,
+        ModEnv3Decay,
+        ModEnv3Release,
+
+        // LFO Rates
+        Lfo1Rate,
+        Lfo2Rate,
+
+        // Space & FX
         ReverbMix,
         ShimmerAmount,
         PanSpread,
         DelayMix,
         DelayFeedback,
+
         Count
     };
 
@@ -89,20 +126,49 @@ public:
             case Destination::Osc2Shape:       return "OSC 2 Shape";
             case Destination::Osc3Shape:       return "OSC 3 Shape";
             case Destination::Osc4Shape:       return "OSC 4 Shape";
+            case Destination::Osc5Shape:       return "OSC 5 Shape";
+            case Destination::Osc6Shape:       return "OSC 6 Shape";
+            case Destination::Osc7Shape:       return "OSC 7 Shape";
+            case Destination::Osc8Shape:       return "OSC 8 Shape";
+
             case Destination::Osc1Level:       return "OSC 1 Level";
             case Destination::Osc2Level:       return "OSC 2 Level";
             case Destination::Osc3Level:       return "OSC 3 Level";
             case Destination::Osc4Level:       return "OSC 4 Level";
+            case Destination::Osc5Level:       return "OSC 5 Level";
+            case Destination::Osc6Level:       return "OSC 6 Level";
+            case Destination::Osc7Level:       return "OSC 7 Level";
+            case Destination::Osc8Level:       return "OSC 8 Level";
+
             case Destination::Osc1Pitch:       return "OSC 1 Pitch";
             case Destination::Osc2Pitch:       return "OSC 2 Pitch";
             case Destination::Osc3Pitch:       return "OSC 3 Pitch";
             case Destination::Osc4Pitch:       return "OSC 4 Pitch";
+            case Destination::Osc5Pitch:       return "OSC 5 Pitch";
+            case Destination::Osc6Pitch:       return "OSC 6 Pitch";
+            case Destination::Osc7Pitch:       return "OSC 7 Pitch";
+            case Destination::Osc8Pitch:       return "OSC 8 Pitch";
             case Destination::OscPitchAll:     return "Pitch (All)";
+
             case Destination::FilterCutoff:    return "Cutoff 1";
             case Destination::FilterResonance: return "Resonance 1";
             case Destination::Filter2Cutoff:   return "Cutoff 2";
             case Destination::Filter2Resonance:return "Resonance 2";
             case Destination::VocalCarve:      return "Vocal Carve";
+
+            case Destination::AmpAttack:       return "Amp Attack";
+            case Destination::AmpDecay:        return "Amp Decay";
+            case Destination::AmpRelease:      return "Amp Release";
+            case Destination::FilterAttack:    return "Filter Attack";
+            case Destination::FilterDecay:     return "Filter Decay";
+            case Destination::FilterRelease:   return "Filter Release";
+            case Destination::ModEnv3Attack:   return "Mod 3 Attack";
+            case Destination::ModEnv3Decay:    return "Mod 3 Decay";
+            case Destination::ModEnv3Release:  return "Mod 3 Release";
+
+            case Destination::Lfo1Rate:        return "LFO 1 Rate";
+            case Destination::Lfo2Rate:        return "LFO 2 Rate";
+
             case Destination::ReverbMix:       return "Reverb Mix";
             case Destination::ShimmerAmount:   return "Shimmer";
             case Destination::PanSpread:       return "Pan Spread";

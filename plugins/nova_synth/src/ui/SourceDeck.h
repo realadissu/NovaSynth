@@ -364,7 +364,10 @@ public:
             visualizerRect_ = juce::Rectangle<int>(6, 26, getWidth() - 12, getHeight() - 56);
             compactVolSlider_.setBounds(8, getHeight() - 25, getWidth() - 16, 18);
             routingRect_ = {};
-            ampEnvRect_ = {};
+            header.removeFromLeft(48); // Badge
+            header.removeFromLeft(3);  // Gap
+            header.removeFromRight(3); // Gap before solo
+            ampEnvRect_ = header;      // Directly accessible Envelope Routing Pill!
             modelRect_ = {};
             modelPrevRect_ = {};
             modelNextRect_ = {};
@@ -598,6 +601,12 @@ public:
             return;
         }
 
+        // 2b. Envelope Pill (funktioniert sowohl im kompakten als auch im expandierten Modus!)
+        if (ampEnvRect_.contains(pos)) {
+            openAmpEnvMenu();
+            return;
+        }
+
         // 3. Kompakter Zustand: Klick auf Slot Badge oder Karte expandiert!
         if (!isExpanded_) {
             if (onExpandRequested) onExpandRequested(slotIndex_, true);
@@ -755,6 +764,22 @@ private:
         g.setFont(theme_.getLabelFont(10.0f));
         g.setColour(isSolo ? juce::Colour(0xff1e1b4b) : theme_.textMuted);
         g.drawText("S", soloRect_, juce::Justification::centred, false);
+
+        // Envelope Pill (directly visible & clickable in compact card!)
+        if (ampEnvRect_.getWidth() >= 24) {
+            const bool isCustomEnv = (slot.ampEnvSource != 0);
+            g.setColour(theme_.bgElevated);
+            g.fillRoundedRectangle(ampEnvRect_.toFloat(), 3.0f);
+            g.setColour(isCustomEnv ? theme_.accentWarm : theme_.borderSubtle);
+            g.drawRoundedRectangle(ampEnvRect_.toFloat(), 3.0f, 0.8f);
+            g.setFont(theme_.getValueFont(8.5f));
+            g.setColour(isCustomEnv ? theme_.accentWarm : theme_.textMuted);
+            const juce::String envShort = (slot.ampEnvSource == 1) ? "FLT \xe2\x96\xbe"
+                                        : ((slot.ampEnvSource == 2) ? "M3 \xe2\x96\xbe"
+                                        : ((slot.ampEnvSource == 3) ? "AUX \xe2\x96\xbe"
+                                        : "AMP \xe2\x96\xbe"));
+            g.drawFittedText(envShort, ampEnvRect_, juce::Justification::centred, 1, 0.85f);
+        }
 
         // Visualizer Screen
         drawEngineVisualizer(g, visualizerRect_, slot, slotCol, false);
@@ -1791,6 +1816,10 @@ private:
     int hoveredWavePill_ = -1;
 
     juce::String getTooltip() override {
+        const auto mousePos = getMouseXYRelative();
+        if (ampEnvRect_.contains(mousePos)) {
+            return "Envelope Routing: Click to route slot to Amp Env 1, Filter Env 2, Mod Env 3, or Aux Env 4";
+        }
         if (hoveredWavePill_ >= 0 && hoveredWavePill_ < 6) {
             const auto params = proc_.getCurrentParameters();
             const auto& slot = params.oscSlots[static_cast<std::size_t>(slotIndex_)];
