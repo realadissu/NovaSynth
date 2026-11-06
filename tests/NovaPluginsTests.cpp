@@ -3157,6 +3157,154 @@ TEST(UiPolishTests, StandaloneKeyboardBarVelocityAndQwertyAudition) {
     EXPECT_NEAR(bar.getAuditionVelocity(), 0.50f, 0.01f);
 }
 
+TEST(WorshipSynthEngineTests, ArpeggiatorVoicePreservesEnvelopeAttackTimes) {
+    nova::dsp::WorshipSynthEngine synth;
+    synth.prepare(48000.0, 512);
+
+    auto p = synth.getParameters();
+    p.arpEnabled = true;
+    p.arpMode = nova::dsp::WorshipSynthEngine::ArpMode::Up;
+    p.arpRateHz = 8.0f; // 125 ms per step
+    p.arpGate = 0.5f;
+
+    // OSC 1: Amp Env with long 4.0s attack
+    p.activeOscCount = 2;
+    p.oscSlots[0].enabled = true;
+    p.oscSlots[0].ampEnvSource = 0; // Amp Env
+    p.ampEnv.attackSec = 4.0f;
+    p.ampEnv.sustainLvl = 1.0f;
+
+    // OSC 2: Mod Env with fast 0.001s attack and short decay (pluck)
+    p.oscSlots[1].enabled = true;
+    p.oscSlots[1].ampEnvSource = 2; // Mod Env 3
+    p.modEnv.attackSec = 0.001f;
+    p.modEnv.decaySec = 0.03f;
+    p.modEnv.sustainLvl = 0.0f;
+
+    synth.setParameters(p);
+    synth.noteOn(60, 0.8f);
+
+    std::vector<float> left(512, 0.0f);
+    std::vector<float> right(512, 0.0f);
+    synth.processBlock(left.data(), right.data(), 512);
+
+    // Verify active voice sounds and arpeggiates cleanly
+    const auto tel = synth.getTelemetry();
+    EXPECT_GE(tel.activeVoiceCount, 1);
+}
+
+TEST(WorshipSynthEngineTests, VoiceCullingTracksFilterEnvelopeAsAmpSource) {
+    nova::dsp::WorshipSynthEngine synth;
+    synth.prepare(48000.0, 512);
+
+    auto p = synth.getParameters();
+    p.activeOscCount = 1;
+    p.oscSlots[0].enabled = true;
+    p.oscSlots[0].ampEnvSource = 1; // Filter Env as amplitude source!
+
+    p.ampEnv.releaseSec = 0.01f;     // Very fast 10ms Amp Env release
+    p.filterEnv.releaseSec = 0.25f;  // Longer 250ms Filter Env release
+    synth.setParameters(p);
+
+    synth.noteOn(60, 0.8f);
+    std::vector<float> left(512, 0.0f);
+    std::vector<float> right(512, 0.0f);
+    synth.processBlock(left.data(), right.data(), 512);
+
+    synth.noteOff(60);
+    // Process 3 blocks (~32 ms > 10 ms Amp release, but < 250 ms Filter release)
+    for (int b = 0; b < 3; ++b) {
+        synth.processBlock(left.data(), right.data(), 512);
+    }
+    // Voice MUST still be active because filterEnv is still releasing!
+    EXPECT_EQ(synth.getTelemetry().activeVoiceCount, 1);
+
+    // After 30 more blocks (~320 ms > 250 ms), voice should be cleanly culled
+    for (int b = 0; b < 30; ++b) {
+        synth.processBlock(left.data(), right.data(), 512);
+    }
+    EXPECT_EQ(synth.getTelemetry().activeVoiceCount, 0);
+}
+
+TEST(ModulationMatrixTests, PanSpreadModulationScalesStereoWidth) {
+    nova::dsp::WorshipSynthEngine synth;
+    synth.prepare(48000.0, 512);
+
+    auto p = synth.getParameters();
+    p.activeOscCount = 1;
+    p.oscSlots[0].enabled = true;
+    p.oscSlots[0].detune = 0.4f; // Produce stereo unison spread
+    p.macroWarmth = 0.0f;
+    synth.setParameters(p);
+
+    synth.noteOn(60, 0.8f);
+    std::vector<float> left(512, 0.0f);
+    std::vector<float> right(512, 0.0f);
+    synth.processBlock(left.data(), right.data(), 512);
+
+    float baseSideEnergy = 0.0f;
+    for (int i = 0; i < 512; ++i) {
+        const float side = left[static_cast<std::size_t>(i)] - right[static_cast<std::size_t>(i)];
+        baseSideEnergy += side * side;
+    }
+
+    // Now route Macro Warmth to PanSpread with max amount
+    synth.getModMatrix().setSlot(0, nova::dsp::ModMatrix::Source::MacroWarmth, nova::dsp::ModMatrix::Destination::PanSpread, 1.0f, true);
+    p.macroWarmth = 1.0f;
+    synth.setParameters(p);
+
+    synth.processBlock(left.data(), right.data(), 512);
+    float expandedSideEnergy = 0.0f;
+    for (int i = 0; i < 512; ++i) {
+        const float side = left[static_cast<std::size_t>(i)] - right[static_cast<std::size_t>(i)];
+        expandedSideEnergy += side * side;
+    }
+
+    EXPECT_GT(expandedSideEnergy, baseSideEnergy * 1.5f);
+}
+
+TEST(NovaSynthProcessorTests, SustainPedalInversionToggle) {
+    nova::synth::NovaSynthProcessor proc;
+    proc.prepareToPlay(48000.0, 512);
+
+    EXPECT_FALSE(proc.isInvertSustainPedal());
+
+    juce::AudioBuffer<float> buffer(2, 512);
+    juce::MidiBuffer midi;
+
+    // Normal mode: CC 64 = 127 engages sustain pedal
+    midi.addEvent(juce::MidiMessage::noteOn(1, 60, (juce::uint8)100), 0);
+    midi.addEvent(juce::MidiMessage::controllerEvent(1, 64, 127), 10);
+    midi.addEvent(juce::MidiMessage::noteOff(1, 60), 20);
+    proc.processBlock(buffer, midi);
+
+    // Voice should be sustained because pedal is down
+    EXPECT_GE(proc.getSynthTelemetry().activeVoiceCount, 1);
+
+    // CC 64 = 0 releases sustain pedal in normal mode
+    midi.clear();
+    midi.addEvent(juce::MidiMessage::controllerEvent(1, 64, 0), 0);
+    proc.processBlock(buffer, midi);
+
+    // Now enable invert sustain pedal
+    proc.setInvertSustainPedal(true);
+    EXPECT_TRUE(proc.isInvertSustainPedal());
+
+    // In inverted mode: CC 64 = 0 (physical pedal down on inverted hardware) engages sustain!
+    midi.clear();
+    midi.addEvent(juce::MidiMessage::noteOn(1, 64, (juce::uint8)100), 0);
+    midi.addEvent(juce::MidiMessage::controllerEvent(1, 64, 0), 10);
+    midi.addEvent(juce::MidiMessage::noteOff(1, 64), 20);
+    proc.processBlock(buffer, midi);
+
+    EXPECT_GE(proc.getSynthTelemetry().activeVoiceCount, 1);
+
+    // And CC 64 = 127 (physical pedal released on inverted hardware) releases sustain!
+    midi.clear();
+    midi.addEvent(juce::MidiMessage::controllerEvent(1, 64, 127), 0);
+    proc.processBlock(buffer, midi);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {

@@ -174,16 +174,22 @@ public:
         // Zeichne Kurve
         drawAdsrCurve(g, curveBox_);
 
-        // Im expandierten Zustand: VEL SENS Beschriftung und Live-Prozentanzeige
+        // Im expandierten Zustand: VEL SENS Pill & Beschriftung
         if (isExpanded_ && velBox_.getWidth() > 0) {
+            const auto vBoxF = velBox_.toFloat();
+            g.setColour(juce::Colour(0xff090f18));
+            g.fillRoundedRectangle(vBoxF, 4.0f);
+            g.setColour(theme_.borderSubtle.withAlpha(0.7f));
+            g.drawRoundedRectangle(vBoxF, 4.0f, 0.8f);
+
             g.setFont(theme_.getLabelFont(8.0f));
             g.setColour(theme_.accentPrimary);
-            g.drawText("VEL SENS", velBox_.getX() - 6, velBox_.getY(), velBox_.getWidth() + 12, 12, juce::Justification::centred, false);
+            g.drawText("VEL", velBox_.getX(), velBox_.getY() + 3, velBox_.getWidth(), 11, juce::Justification::centred, false);
 
             const int pct = static_cast<int>(std::round(velSlider_.getValue() * 100.0));
             g.setFont(theme_.getValueFont(8.5f));
-            g.setColour(theme_.textPrimary);
-            g.drawText(juce::String(pct) + "%", velBox_.getX() - 4, velBox_.getBottom() - 13, velBox_.getWidth() + 8, 12, juce::Justification::centred, false);
+            g.setColour(pct > 0 ? theme_.textPrimary : theme_.textMuted);
+            g.drawText(juce::String(pct) + "%", velBox_.getX(), velBox_.getBottom() - 14, velBox_.getWidth(), 12, juce::Justification::centred, false);
         }
     }
 
@@ -229,7 +235,8 @@ public:
         if (pos.getDistanceFrom(nodeAtk_) <= 18.0f) return DragNode::Attack;
         if (pos.getDistanceFrom(nodeHold_) <= 16.0f && cachedHoldW_ > 3.0f) return DragNode::Hold;
         if (pos.getDistanceFrom(nodeDec_) <= 18.0f) return DragNode::DecaySustain;
-        if (pos.getDistanceFrom(nodeRel_) <= 18.0f) return DragNode::Release;
+        const bool hasSustain = (susKnob_.getSlider().getValue() > 0.005);
+        if (hasSustain && pos.getDistanceFrom(nodeRel_) <= 18.0f) return DragNode::Release;
 
         const float startX = curveBox_.getX() + 6.0f;
         const float relX = pos.x - startX;
@@ -404,9 +411,9 @@ private:
         const float delNorm = std::pow(std::clamp(del / 2.0f, 0.0f, 1.0f), 0.45f);
         const float delW = (del > 0.005f) ? (w * 0.03f + delNorm * (w * 0.10f)) : 0.0f;
 
-        // 2. ATK segment: Strictly depends on ATK
+        // 2. ATK segment: Strictly depends on ATK (0s = instant vertical leap)
         const float atkNorm = std::pow(std::clamp(atk / 6.0f, 0.0f, 1.0f), 0.38f);
-        const float atkW = 6.0f + atkNorm * (w * 0.20f);
+        const float atkW = (atk > 0.005f) ? (3.0f + atkNorm * (w * 0.20f)) : 0.0f;
 
         // 3. HOLD segment: extends from nodeAtk_
         const float hldNorm = std::pow(std::clamp(hld / 3.0f, 0.0f, 1.0f), 0.45f);
@@ -414,15 +421,16 @@ private:
 
         // 4. DECAY segment: strictly depends on DEC
         const float decNorm = std::pow(std::clamp(dec / 8.0f, 0.0f, 1.0f), 0.38f);
-        const float decW = 6.0f + decNorm * (w * 0.22f);
+        const float decW = (dec > 0.005f) ? (4.0f + decNorm * (w * 0.22f)) : 2.0f;
 
-        // 5. SUSTAIN plateau: visual representation of the held key state (fixed proportion)
-        const float susW = std::clamp(w * 0.14f, 18.0f, 32.0f);
-        const float susY = bottomY - std::clamp(sus, 0.05f, 1.0f) * h;
+        // 5. SUSTAIN plateau: visual representation of the held key state
+        const bool hasSustain = (sus > 0.005f);
+        const float susW = hasSustain ? std::clamp(w * 0.14f, 16.0f, 32.0f) : 0.0f;
+        const float susY = bottomY - std::clamp(sus, 0.0f, 1.0f) * h;
 
         // 6. RELEASE segment: strictly depends on REL
         const float relNorm = std::pow(std::clamp(rel / 8.0f, 0.0f, 1.0f), 0.38f);
-        const float relW = 6.0f + relNorm * (w * 0.25f);
+        const float relW = hasSustain ? (4.0f + relNorm * (w * 0.22f)) : 0.0f;
 
         // Total required width: if sum exceeds available width w, scale down proportionally
         const float totalReq = delW + atkW + hldW + decW + susW + relW;
@@ -461,8 +469,13 @@ private:
         }
 
         // Curved Attack (convex rise to peak)
-        p.quadraticTo(nodeDel_.x + (nodeAtk_.x - nodeDel_.x) * 0.25f, topY, nodeAtk_.x, nodeAtk_.y);
-        fillP.quadraticTo(nodeDel_.x + (nodeAtk_.x - nodeDel_.x) * 0.25f, topY, nodeAtk_.x, nodeAtk_.y);
+        if (finalAtkW > 1.0f) {
+            p.quadraticTo(nodeDel_.x + (nodeAtk_.x - nodeDel_.x) * 0.25f, topY, nodeAtk_.x, nodeAtk_.y);
+            fillP.quadraticTo(nodeDel_.x + (nodeAtk_.x - nodeDel_.x) * 0.25f, topY, nodeAtk_.x, nodeAtk_.y);
+        } else {
+            p.lineTo(nodeAtk_.x, nodeAtk_.y);
+            fillP.lineTo(nodeAtk_.x, nodeAtk_.y);
+        }
 
         if (finalHldW > 1.0f) {
             p.lineTo(nodeHold_.x, nodeHold_.y);
@@ -473,16 +486,19 @@ private:
         p.quadraticTo(nodeHold_.x + (nodeDec_.x - nodeHold_.x) * 0.70f, susY, nodeDec_.x, nodeDec_.y);
         fillP.quadraticTo(nodeHold_.x + (nodeDec_.x - nodeHold_.x) * 0.70f, susY, nodeDec_.x, nodeDec_.y);
 
-        // Flat Sustain section
-        p.lineTo(nodeSusEnd_.x, nodeSusEnd_.y);
-        fillP.lineTo(nodeSusEnd_.x, nodeSusEnd_.y);
+        if (hasSustain) {
+            // Flat Sustain section
+            p.lineTo(nodeSusEnd_.x, nodeSusEnd_.y);
+            fillP.lineTo(nodeSusEnd_.x, nodeSusEnd_.y);
 
-        // Curved Release (concave fall to bottom)
-        p.quadraticTo(nodeSusEnd_.x + (nodeRel_.x - nodeSusEnd_.x) * 0.65f, bottomY, nodeRel_.x, nodeRel_.y);
-        fillP.quadraticTo(nodeSusEnd_.x + (nodeRel_.x - nodeSusEnd_.x) * 0.65f, bottomY, nodeRel_.x, nodeRel_.y);
+            // Curved Release (concave fall to bottom)
+            p.quadraticTo(nodeSusEnd_.x + (nodeRel_.x - nodeSusEnd_.x) * 0.65f, bottomY, nodeRel_.x, nodeRel_.y);
+            fillP.quadraticTo(nodeSusEnd_.x + (nodeRel_.x - nodeSusEnd_.x) * 0.65f, bottomY, nodeRel_.x, nodeRel_.y);
+        }
 
-        // Baseline continuation to the right edge if release finished early
-        if (nodeRel_.x < startX + w) {
+        // Baseline continuation to the right edge if release/decay finished early
+        const float endX = hasSustain ? nodeRel_.x : nodeDec_.x;
+        if (endX < startX + w) {
             p.lineTo(startX + w, bottomY);
             fillP.lineTo(startX + w, bottomY);
         }
@@ -494,9 +510,11 @@ private:
                                               accentCol_.withAlpha(0.03f), startX, bottomY, false));
         g.fillPath(fillP);
 
-        // Vertical guideline indicating Note-Off / Key Release Gate
-        g.setColour(juce::Colour(0xfff59e0b).withAlpha(0.55f));
-        g.drawVerticalLine(static_cast<int>(nodeSusEnd_.x), topY - 2.0f, bottomY + 2.0f);
+        // Vertical guideline indicating Note-Off / Key Release Gate (only if sustain is active)
+        if (hasSustain) {
+            g.setColour(juce::Colour(0xfff59e0b).withAlpha(0.55f));
+            g.drawVerticalLine(static_cast<int>(nodeSusEnd_.x), topY - 2.0f, bottomY + 2.0f);
+        }
 
         // Leuchtende Kurven-Kontur
         g.setColour(accentCol_.withAlpha(0.25f));
@@ -515,7 +533,9 @@ private:
         drawHandleDot(g, nodeAtk_.x, nodeAtk_.y, atkActive ? 4.8f : 3.4f, atkActive);
         if (finalHldW > 3.0f) drawHandleDot(g, nodeHold_.x, nodeHold_.y, hldActive ? 4.8f : 3.4f, hldActive);
         drawHandleDot(g, nodeDec_.x, nodeDec_.y, decActive ? 5.2f : 3.8f, decActive);
-        drawHandleDot(g, nodeRel_.x, nodeRel_.y, relActive ? 4.8f : 3.4f, relActive);
+        if (hasSustain) {
+            drawHandleDot(g, nodeRel_.x, nodeRel_.y, relActive ? 4.8f : 3.4f, relActive);
+        }
     }
 
     void drawHandleDot(juce::Graphics& g, float x, float y, float radius, bool isHighlighted) {

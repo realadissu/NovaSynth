@@ -28,6 +28,7 @@ public:
     void setCenterLabel(const juce::String& text);
 
     [[nodiscard]] juce::Slider& getSlider() noexcept { return slider_; }
+    [[nodiscard]] const juce::Slider& getSlider() const noexcept { return slider_; }
 
     void paint(juce::Graphics& g) override;
     void resized() override;

@@ -47,6 +47,14 @@ public:
         voiceLowestBtn_.onClick = [this]() { setSubLowest(true); };
         voicePolyBtn_.onClick = [this]() { setSubLowest(false); };
 
+        // Sustain Pedal Polarity Buttons (only if supported by processor)
+        if (processor_.getAPVTS().getParameter("invertSustainPedal") != nullptr) {
+            addAndMakeVisible(pedalNormalBtn_);
+            addAndMakeVisible(pedalInvertBtn_);
+            pedalNormalBtn_.onClick = [this]() { setInvertPedal(false); };
+            pedalInvertBtn_.onClick = [this]() { setInvertPedal(true); };
+        }
+
         // Audio Settings Button
         if (onOpenAudioSettings_ != nullptr) {
             addAndMakeVisible(audioSetupBtn_);
@@ -69,6 +77,12 @@ public:
         const bool isLowest = (subLowestParam == nullptr || subLowestParam->getValue() > 0.5f);
         styleToggle(voiceLowestBtn_, isLowest);
         styleToggle(voicePolyBtn_, !isLowest);
+
+        if (auto* invPedalParam = processor_.getAPVTS().getParameter("invertSustainPedal")) {
+            const bool isInverted = (invPedalParam->getValue() > 0.5f);
+            styleToggle(pedalNormalBtn_, !isInverted);
+            styleToggle(pedalInvertBtn_, isInverted);
+        }
     }
 
     void paint(juce::Graphics& g) override {
@@ -77,46 +91,53 @@ public:
         g.fillRect(getLocalBounds());
 
         // 2. Dialog Card bounds
-        const auto card = getCardBounds().toFloat();
+        const auto card = getCardBounds();
+        const auto cardF = card.toFloat();
 
         // Card Drop Shadow
         g.setColour(juce::Colours::black.withAlpha(0.70f));
-        g.fillRoundedRectangle(card.translated(0.0f, 6.0f), 10.0f);
+        g.fillRoundedRectangle(cardF.translated(0.0f, 6.0f), 10.0f);
 
         // Solid Deep Obsidian Desk Background
         g.setColour(juce::Colour(0xff090e17));
-        g.fillRoundedRectangle(card, 10.0f);
+        g.fillRoundedRectangle(cardF, 10.0f);
 
         // Border
         g.setColour(juce::Colour(0xff1e2d42));
-        g.drawRoundedRectangle(card, 10.0f, 1.2f);
+        g.drawRoundedRectangle(cardF, 10.0f, 1.2f);
 
         // Header Accent Strip
-        auto headerR = card.withHeight(48.0f).reduced(16.0f, 0.0f);
+        auto headerR = cardF.withHeight(48.0f).reduced(16.0f, 0.0f);
         g.setFont(theme_.getSectionFont(15.0f));
         g.setColour(theme_.accentPrimary);
         g.drawText("SETTINGS & PREFERENCES", headerR, juce::Justification::centredLeft);
 
         g.setColour(juce::Colour(0xff1e2d42));
-        g.drawHorizontalLine(static_cast<int>(card.getY() + 48.0f), card.getX(), card.getRight());
+        g.drawHorizontalLine(card.getY() + 48, cardF.getX(), cardF.getRight());
 
         // Section Headers
         g.setFont(theme_.getLabelFont(10.5f));
         g.setColour(juce::Colour(0xff94a3b8));
 
-        const float cX = card.getX() + 20.0f;
-        g.drawText("UI LABEL & TYPOGRAPHY SCALE", cX, card.getY() + 58.0f, 300.0f, 16.0f, juce::Justification::centredLeft);
-        g.drawText("SUB-BASS VOICING MODE", cX, card.getY() + 138.0f, 300.0f, 16.0f, juce::Justification::centredLeft);
+        const int cX = card.getX() + 20;
+        g.drawText("UI LABEL & TYPOGRAPHY SCALE", juce::Rectangle<int>(cX, card.getY() + 58, 300, 16), juce::Justification::centredLeft);
+        g.drawText("SUB-BASS VOICING MODE", juce::Rectangle<int>(cX, card.getY() + 138, 300, 16), juce::Justification::centredLeft);
+
+        int nextSectionY = card.getY() + 218;
+        if (processor_.getAPVTS().getParameter("invertSustainPedal") != nullptr) {
+            g.drawText("SUSTAIN PEDAL POLARITY", juce::Rectangle<int>(cX, nextSectionY, 300, 16), juce::Justification::centredLeft);
+            nextSectionY += 76;
+        }
 
         if (onOpenAudioSettings_ != nullptr) {
-            g.drawText("STANDALONE AUDIO & MIDI DEVICE", cX, card.getY() + 218.0f, 300.0f, 16.0f, juce::Justification::centredLeft);
+            g.drawText("STANDALONE AUDIO & MIDI DEVICE", juce::Rectangle<int>(cX, nextSectionY, 300, 16), juce::Justification::centredLeft);
         }
 
         // Legal & Licensing footer
         g.setFont(theme_.getValueFont(9.0f));
         g.setColour(juce::Colour(0xff64748b));
         g.drawText("Nova Audio Library: CC0 1.0 Universal / Public Domain (VCSL) • Fonts: SIL OFL 1.1",
-                   cX, card.getBottom() - 36.0f, card.getWidth() - 140.0f, 20.0f, juce::Justification::centredLeft);
+                   juce::Rectangle<int>(cX, card.getBottom() - 36, card.getWidth() - 140, 20), juce::Justification::centredLeft);
     }
 
     void resized() override {
@@ -136,9 +157,18 @@ public:
         voiceLowestBtn_.setBounds(card.getX() + 20, vY, vW, 32);
         voicePolyBtn_.setBounds(card.getX() + 20 + vW + 10, vY, vW, 32);
 
-        // Audio Setup Button (row at y = 240)
+        // Sustain Pedal Polarity Buttons
+        int nextRowY = card.getY() + 238;
+        if (processor_.getAPVTS().getParameter("invertSustainPedal") != nullptr) {
+            const int pW = (card.getWidth() - 40 - 10) / 2;
+            pedalNormalBtn_.setBounds(card.getX() + 20, nextRowY, pW, 32);
+            pedalInvertBtn_.setBounds(card.getX() + 20 + pW + 10, nextRowY, pW, 32);
+            nextRowY += 76;
+        }
+
+        // Audio Setup Button
         if (onOpenAudioSettings_ != nullptr) {
-            audioSetupBtn_.setBounds(card.getX() + 20, card.getY() + 240, card.getWidth() - 40, 32);
+            audioSetupBtn_.setBounds(card.getX() + 20, nextRowY, card.getWidth() - 40, 32);
         }
 
         // Done button in bottom right
@@ -162,7 +192,7 @@ public:
 private:
     [[nodiscard]] juce::Rectangle<int> getCardBounds() const {
         constexpr int cardW = 480;
-        constexpr int cardH = 350;
+        const int cardH = (processor_.getAPVTS().getParameter("invertSustainPedal") != nullptr) ? 425 : 350;
         return juce::Rectangle<int>((getWidth() - cardW) / 2, (getHeight() - cardH) / 2, cardW, cardH);
     }
 
@@ -175,6 +205,13 @@ private:
     void setSubLowest(bool lowestOnly) {
         if (auto* p = processor_.getAPVTS().getParameter("subLowestOnly")) {
             p->setValueNotifyingHost(lowestOnly ? 1.0f : 0.0f);
+        }
+        refreshStates();
+    }
+
+    void setInvertPedal(bool inverted) {
+        if (auto* p = processor_.getAPVTS().getParameter("invertSustainPedal")) {
+            p->setValueNotifyingHost(inverted ? 1.0f : 0.0f);
         }
         refreshStates();
     }
@@ -219,6 +256,9 @@ private:
 
     juce::TextButton voiceLowestBtn_{ "LOWEST NOTE (MONO)" };
     juce::TextButton voicePolyBtn_{ "POLYPHONIC (CHORDS)" };
+
+    juce::TextButton pedalNormalBtn_{ "NORMAL (POLARITY +)" };
+    juce::TextButton pedalInvertBtn_{ "INVERTED (POLARITY -)" };
 
     juce::TextButton audioSetupBtn_{ "OPEN AUDIO & MIDI SETTINGS..." };
     juce::TextButton doneBtn_{ "DONE" };

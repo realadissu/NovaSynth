@@ -10,6 +10,7 @@ NovaSynthProcessor::NovaSynthProcessor()
               .withOutput("Output", juce::AudioChannelSet::stereo(), true),
           createParameterLayout(),
           "Nova Synth") {
+    invertSustainPedalParam_ = apvts_.getRawParameterValue("invertSustainPedal");
     registerFactoryPresets();
     syncParametersFromAPVTS();
 }
@@ -431,6 +432,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout NovaSynthProcessor::createPa
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{"masterGainDb", 1}, "Master Output",
         juce::NormalisableRange<float>(-24.0f, 12.0f, 0.1f), 0.0f));
+
+    params.push_back(std::make_unique<juce::AudioParameterBool>(
+        juce::ParameterID{"invertSustainPedal", 1}, "Invert Sustain Pedal", false));
 
     return { params.begin(), params.end() };
 }
@@ -1337,6 +1341,7 @@ void NovaSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock) {
     currentSampleRate_ = sampleRate;
     synthEngine_.prepare(sampleRate, samplesPerBlock);
 
+    invertSustainPedalParam_ = apvts_.getRawParameterValue("invertSustainPedal");
     arpPatternLengthParam_ = apvts_.getRawParameterValue("arpPatternLength");
     for (int s = 0; s < 64; ++s) {
         arpStepGateParams_[static_cast<std::size_t>(s)] = apvts_.getRawParameterValue("arpStepGate_" + juce::String(s + 1));
@@ -1616,16 +1621,17 @@ void NovaSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mi
         }
     }
 
+    const bool invertPedal = (invertSustainPedalParam_ != nullptr && invertSustainPedalParam_->load(std::memory_order_relaxed) > 0.5f);
+
     for (const auto metadata : midiMessages) {
         const auto msg = metadata.getMessage();
         if (msg.isNoteOn()) {
             synthEngine_.noteOn(msg.getNoteNumber(), msg.getFloatVelocity());
         } else if (msg.isNoteOff()) {
             synthEngine_.noteOff(msg.getNoteNumber());
-        } else if (msg.isSustainPedalOn()) {
-            synthEngine_.setSustainPedal(true);
-        } else if (msg.isSustainPedalOff()) {
-            synthEngine_.setSustainPedal(false);
+        } else if (msg.isController() && msg.getControllerNumber() == 64) {
+            const bool isDown = (msg.getControllerValue() >= 64);
+            synthEngine_.setSustainPedal(invertPedal ? !isDown : isDown);
         } else if (msg.isPitchWheel()) {
             const float bend = (static_cast<float>(msg.getPitchWheelValue()) - 8192.0f) / 8192.0f;
             synthEngine_.setPitchBend(bend * 2.0f);
@@ -1765,6 +1771,19 @@ void NovaSynthProcessor::setArpStepVelocity(int step, float velocity) {
         if (auto* p = apvts_.getParameter("arpStepVel_" + juce::String(step + 1))) {
             p->setValueNotifyingHost(p->convertTo0to1(std::clamp(velocity, 0.05f, 1.0f)));
         }
+    }
+}
+
+bool NovaSynthProcessor::isInvertSustainPedal() const noexcept {
+    if (invertSustainPedalParam_ != nullptr) {
+        return invertSustainPedalParam_->load(std::memory_order_relaxed) > 0.5f;
+    }
+    return false;
+}
+
+void NovaSynthProcessor::setInvertSustainPedal(bool inverted) {
+    if (auto* p = apvts_.getParameter("invertSustainPedal")) {
+        p->setValueNotifyingHost(inverted ? 1.0f : 0.0f);
     }
 }
 

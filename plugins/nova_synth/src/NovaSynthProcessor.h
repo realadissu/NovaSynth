@@ -135,6 +135,10 @@ public:
         return 0.0f;
     }
 
+    // Sustain Pedal Polarity Inversion
+    [[nodiscard]] bool isInvertSustainPedal() const noexcept;
+    void setInvertSustainPedal(bool inverted);
+
 private:
     void registerFactoryPresets();
 
@@ -152,7 +156,8 @@ private:
     std::atomic<float> masterPeakR_{0.0f};
     std::array<std::atomic<float>, 8> sourcePeaks_{};
 
-    // Arpeggiator APVTS Pointers for lock-free audio thread sync
+    // Sustain Pedal & Arpeggiator APVTS Pointers for lock-free audio thread sync
+    std::atomic<float>* invertSustainPedalParam_ = nullptr;
     std::atomic<float>* arpPatternLengthParam_ = nullptr;
     std::array<std::atomic<float>*, 64> arpStepGateParams_{};
     std::array<std::atomic<float>*, 64> arpStepVelParams_{};

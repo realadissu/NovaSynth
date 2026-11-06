@@ -548,10 +548,7 @@ void WorshipSynthEngine::startVoice(int midiNote, float velocity, bool isDrone, 
         };
         const auto initOffsets = modMatrix_.evaluateVoice(initSources);
 
-        auto effAmp = isArp ? params_.ampEnv : params_.ampEnv;
-        if (isArp) {
-            effAmp.attackSec = std::min(params_.ampEnv.attackSec, 0.025f);
-        }
+        auto effAmp = params_.ampEnv;
         const float ampAttMod = initOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::AmpAttack)];
         const float ampDecMod = initOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::AmpDecay)];
         const float ampRelMod = initOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::AmpRelease)];
@@ -795,9 +792,23 @@ void WorshipSynthEngine::stepArpeggiator(int numSamples) noexcept {
                     v.heldByKey = false;
                     // Fast release tailored to remaining time before next step (staccato duration)
                     const double remainingSec = std::max(0.005, (stepSamples - arpPhaseSamples_) / sampleRate_);
+                    const float arpRel = std::clamp(static_cast<float>(remainingSec * 0.5), 0.008f, 0.050f);
+
                     auto ampParams = v.ampEnv.getParameters();
-                    ampParams.releaseSec = std::clamp(static_cast<float>(remainingSec * 0.5), 0.008f, 0.050f);
+                    ampParams.releaseSec = std::min(ampParams.releaseSec, arpRel);
                     v.ampEnv.setParameters(ampParams);
+
+                    auto fltParams = v.filterEnv.getParameters();
+                    fltParams.releaseSec = std::min(fltParams.releaseSec, arpRel);
+                    v.filterEnv.setParameters(fltParams);
+
+                    auto modParams = v.modEnv.getParameters();
+                    modParams.releaseSec = std::min(modParams.releaseSec, arpRel);
+                    v.modEnv.setParameters(modParams);
+
+                    auto auxParams = v.auxEnv.getParameters();
+                    auxParams.releaseSec = std::min(auxParams.releaseSec, arpRel);
+                    v.auxEnv.setParameters(auxParams);
 
                     v.ampEnv.noteOff();
                     v.filterEnv.noteOff();
@@ -824,9 +835,23 @@ void WorshipSynthEngine::stepArpeggiator(int numSamples) noexcept {
         for (auto& v : voices_) {
             if (v.active && !v.isDroneVoice && v.isArpVoice) {
                 v.heldByKey = false;
+                constexpr float kStepEndRelease = 0.008f;
                 auto ampParams = v.ampEnv.getParameters();
-                ampParams.releaseSec = 0.008f; // Rapid 8ms fade to avoid clicks while guaranteeing silence on rests
+                ampParams.releaseSec = std::min(ampParams.releaseSec, kStepEndRelease);
                 v.ampEnv.setParameters(ampParams);
+
+                auto fltParams = v.filterEnv.getParameters();
+                fltParams.releaseSec = std::min(fltParams.releaseSec, kStepEndRelease);
+                v.filterEnv.setParameters(fltParams);
+
+                auto modParams = v.modEnv.getParameters();
+                modParams.releaseSec = std::min(modParams.releaseSec, kStepEndRelease);
+                v.modEnv.setParameters(modParams);
+
+                auto auxParams = v.auxEnv.getParameters();
+                auxParams.releaseSec = std::min(auxParams.releaseSec, kStepEndRelease);
+                v.auxEnv.setParameters(auxParams);
+
                 v.ampEnv.noteOff();
                 v.filterEnv.noteOff();
                 v.modEnv.noteOff();
@@ -1008,18 +1033,13 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
         const float flt2DriveGain = 1.0f + flt2Drive * 2.2f;
         const float flt2DriveComp = flt2DriveActive ? (1.0f / std::sqrt(1.0f + flt2Drive * 1.4f)) : 1.0f;
 
-        bool modEnvInUse = false;
-        bool auxEnvInUse = false;
+        bool fltEnvAsAmp = false;
+        bool modEnvAsAmp = false;
+        bool auxEnvAsAmp = false;
         for (int i = 0; i < params_.activeOscCount; ++i) {
-            if (params_.oscSlots[static_cast<std::size_t>(i)].ampEnvSource == 2) modEnvInUse = true;
-            if (params_.oscSlots[static_cast<std::size_t>(i)].ampEnvSource == 3) auxEnvInUse = true;
-        }
-        for (std::size_t sIdx = 0; sIdx < ModMatrix::kMaxSlots; ++sIdx) {
-            const auto& sl = modMatrix_.getSlot(sIdx);
-            if (sl.enabled) {
-                if (sl.source == ModMatrix::Source::ModEnv3) modEnvInUse = true;
-                if (sl.source == ModMatrix::Source::AuxEnv4) auxEnvInUse = true;
-            }
+            if (params_.oscSlots[static_cast<std::size_t>(i)].ampEnvSource == 1) fltEnvAsAmp = true;
+            if (params_.oscSlots[static_cast<std::size_t>(i)].ampEnvSource == 2) modEnvAsAmp = true;
+            if (params_.oscSlots[static_cast<std::size_t>(i)].ampEnvSource == 3) auxEnvAsAmp = true;
         }
 
         for (int s = 0; s < numSamples; ++s) {
@@ -1085,11 +1105,15 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
             // Voice Activity Culling: Instant termination when release has faded to silence
             bool anyEnvActive = v.ampEnv.isActive();
             float maxEnv = ampEnvVal;
-            if (modEnvInUse) {
+            if (fltEnvAsAmp) {
+                anyEnvActive = anyEnvActive || v.filterEnv.isActive();
+                maxEnv = std::max(maxEnv, fltEnvVal);
+            }
+            if (modEnvAsAmp) {
                 anyEnvActive = anyEnvActive || v.modEnv.isActive();
                 maxEnv = std::max(maxEnv, modEnvVal);
             }
-            if (auxEnvInUse) {
+            if (auxEnvAsAmp) {
                 anyEnvActive = anyEnvActive || v.auxEnv.isActive();
                 maxEnv = std::max(maxEnv, auxEnvVal);
             }
@@ -1168,14 +1192,14 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
             if (params_.filter1Enabled) {
                 const float voiceResoMod = voiceOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::FilterResonance)] * 0.5f;
                 const float voiceCutMod = voiceOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::FilterCutoff)] * 1.8f;
-                const float effReso = std::clamp(params_.filterResonance + filterResoMod + voiceResoMod, 0.35f, 6.0f);
+                const float effReso = std::clamp(params_.filterResonance + voiceResoMod, 0.35f, 6.0f);
                 const bool isFourPoleLadder = (params_.filterType == 0 || params_.filterType == 2);
 
                 if ((s & 15) == 0) {
                     const float baseCut = baseCutoff;
                     const float envOctaves = fltEnvVal * params_.filterEnvAmount * 2.1f;
                     const float voiceCutoff = std::clamp(
-                        baseCut * std::exp2(envOctaves + cutoffModOctaves + voiceCutMod),
+                        baseCut * std::exp2(envOctaves + voiceCutMod),
                         40.0f, static_cast<float>(sampleRate_ * 0.46));
 
                     auto svfType = StateVariableFilter::Type::LowPass;
@@ -1298,6 +1322,16 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
         if (effCarve > 0.02f) {
             synthL = vocalCarveL_.processSample(synthL);
             synthR = vocalCarveR_.processSample(synthR);
+        }
+
+        // Dynamic Pan Spread Modulation (Mid/Side stereo width expansion via ModMatrix)
+        const float panSpreadMod = modMatrix_.getModulationOffset(ModMatrix::Destination::PanSpread);
+        if (std::abs(panSpreadMod) > 1e-4f) {
+            const float spread = std::clamp(1.0f + panSpreadMod * 1.5f, 0.0f, 2.5f);
+            const float mid = 0.5f * (synthL + synthR);
+            const float side = 0.5f * (synthL - synthR) * spread;
+            synthL = mid + side;
+            synthR = mid - side;
         }
 
         // Dedicated Drone Warmth Filter
