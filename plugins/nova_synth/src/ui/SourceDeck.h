@@ -146,6 +146,9 @@ public:
           scatterKnob_("SCAT", "", theme, false),
           durKnob_("DUR", "", theme, false),
           warpKnob_("WARP", "", theme, false),
+          loopStartKnob_("LOOP ST", "%", theme, false),
+          loopEndKnob_("LOOP END", "%", theme, false),
+          loopXfadeKnob_("XFADE", "%", theme, false),
           compactVolSlider_("VOL", theme),
           spreadSlider_("SPREAD", theme) {
 
@@ -159,6 +162,9 @@ public:
         addAndMakeVisible(scatterKnob_);
         addAndMakeVisible(durKnob_);
         addAndMakeVisible(warpKnob_);
+        addChildComponent(loopStartKnob_);
+        addChildComponent(loopEndKnob_);
+        addChildComponent(loopXfadeKnob_);
 
         const auto slotCol = getSlotColour(slotIndex_);
         compactVolSlider_.setAccentColour(slotCol);
@@ -176,6 +182,9 @@ public:
         scatterKnob_.getSlider().setScrollWheelEnabled(false);
         durKnob_.getSlider().setScrollWheelEnabled(false);
         warpKnob_.getSlider().setScrollWheelEnabled(false);
+        loopStartKnob_.getSlider().setScrollWheelEnabled(false);
+        loopEndKnob_.getSlider().setScrollWheelEnabled(false);
+        loopXfadeKnob_.getSlider().setScrollWheelEnabled(false);
 
         addAndMakeVisible(compactVolSlider_);
         addAndMakeVisible(spreadSlider_);
@@ -197,6 +206,9 @@ public:
         scatterKnob_.attachToParameter(apvts, prefix + "scatter");
         durKnob_.attachToParameter(apvts,   prefix + "duration");
         warpKnob_.attachToParameter(apvts,  prefix + "warp");
+        loopStartKnob_.attachToParameter(apvts, prefix + "loopStart");
+        loopEndKnob_.attachToParameter(apvts,   prefix + "loopEnd");
+        loopXfadeKnob_.attachToParameter(apvts, prefix + "loopXfade");
 
         // Repaint visualizer live when parameters change
         octKnob_.getSlider().onValueChange = [this]() { repaint(); };
@@ -206,6 +218,9 @@ public:
         morphKnob_.getSlider().onValueChange = [this]() { repaint(); };
         unisonKnob_.getSlider().onValueChange = [this]() { repaint(); };
         scatterKnob_.getSlider().onValueChange = [this]() { repaint(); };
+        loopStartKnob_.getSlider().onValueChange = [this]() { repaint(); };
+        loopEndKnob_.getSlider().onValueChange = [this]() { repaint(); };
+        loopXfadeKnob_.getSlider().onValueChange = [this]() { repaint(); };
 
         compactVolAttachment_ = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment>(
             apvts, prefix + "level", compactVolSlider_);
@@ -225,11 +240,22 @@ public:
     [[nodiscard]] const nova::ui::ArcKnob& getMorphKnob() const noexcept { return morphKnob_; }
     [[nodiscard]] const nova::ui::ArcKnob& getUnisonKnob() const noexcept { return unisonKnob_; }
     [[nodiscard]] const nova::ui::ArcKnob& getScatterKnob() const noexcept { return scatterKnob_; }
+    [[nodiscard]] const nova::ui::ArcKnob& getLoopStartKnob() const noexcept { return loopStartKnob_; }
+    [[nodiscard]] const nova::ui::ArcKnob& getLoopEndKnob() const noexcept { return loopEndKnob_; }
+    [[nodiscard]] const nova::ui::ArcKnob& getLoopXfadeKnob() const noexcept { return loopXfadeKnob_; }
+    [[nodiscard]] juce::Rectangle<int> getWavePillRect(int index) const noexcept {
+        if (index >= 0 && index < 6) return wavePillRects_[static_cast<std::size_t>(index)];
+        return {};
+    }
+    [[nodiscard]] juce::Rectangle<int> getVisualizerRect() const noexcept { return visualizerRect_; }
     [[nodiscard]] float getPreferredExpandedWidth() const noexcept {
         const auto params = proc_.getCurrentParameters();
         const auto& slot = params.oscSlots[static_cast<std::size_t>(slotIndex_)];
         if (slot.engine == nova::dsp::MultiEngineOscillator::EngineType::OrganicTexture && slot.sourceType == 0) {
             return 520.0f;
+        }
+        if (slot.sourceType == 4 || slot.engine == nova::dsp::MultiEngineOscillator::EngineType::SamplePlayback) {
+            return 470.0f;
         }
         return 390.0f;
     }
@@ -275,6 +301,12 @@ public:
         } else if (slot.sourceType == 4 || slot.engine == ET::SamplePlayback) {
             morphKnob_.setLabel("START");
             morphKnob_.setSuffix("%");
+            loopStartKnob_.setLabel("LOOP ST");
+            loopStartKnob_.setSuffix("%");
+            loopEndKnob_.setLabel("LOOP END");
+            loopEndKnob_.setSuffix("%");
+            loopXfadeKnob_.setLabel("XFADE");
+            loopXfadeKnob_.setSuffix("%");
             unisonKnob_.setLabel("SPREAD");
             unisonKnob_.setSuffix("%");
             scatterKnob_.setLabel("DETUNE");
@@ -314,6 +346,9 @@ public:
             scatterKnob_.setVisible(false);
             durKnob_.setVisible(false);
             warpKnob_.setVisible(false);
+            loopStartKnob_.setVisible(false);
+            loopEndKnob_.setVisible(false);
+            loopXfadeKnob_.setVisible(false);
             spreadSlider_.setVisible(false);
             return;
         }
@@ -335,6 +370,10 @@ public:
         panKnob_.setVisible(true);
         morphKnob_.setVisible(true);
         unisonKnob_.setVisible(true);
+
+        loopStartKnob_.setVisible(isSample);
+        loopEndKnob_.setVisible(isSample);
+        loopXfadeKnob_.setVisible(isSample);
 
         rateKnob_.setVisible(isGranular || isPluck);
         scatterKnob_.setVisible(isGranular || isWT || isAnalog || isPluck || isNoise || isSample);
@@ -528,24 +567,34 @@ public:
                 rateKnob_.setBounds(rightX + (kw + 4) * 2, 26 + kh + 4, kw, kh);
                 scatterKnob_.setBounds(rightX + (kw + 4) * 3, 26 + kh + 4, kw, kh);
             } else if (isSample) {
-                for (auto& r : wavePillRects_) r = {};
+                const int pillCount = 4;
+                const int gap = 4;
+                const int pillW = (rightW - (pillCount - 1) * gap) / pillCount;
+                for (int i = 0; i < pillCount; ++i) {
+                    wavePillRects_[static_cast<std::size_t>(i)] = juce::Rectangle<int>(rightX + i * (pillW + gap), 26, pillW, 20);
+                }
+                wavePillRects_[4] = {};
+                wavePillRects_[5] = {};
 
-                const int kw4 = (rightW - 12) / 4;
+                const int yRow1 = 50;
                 const int kh = (getHeight() - 56) / 2;
-                const int yRow1 = 26;
-                const int yRow2 = 26 + kh + 4;
+                const int yRow2 = 50 + kh + 2;
 
-                // Row 1: Tuning & Output (4 equal columns)
+                // Row 1: Tuning & Output (4 equal columns: OCT, SEMI, LEVEL, PAN)
+                const int kw4 = (rightW - 12) / 4;
                 octKnob_.setBounds(rightX, yRow1, kw4, kh);
                 semiKnob_.setBounds(rightX + kw4 + 4, yRow1, kw4, kh);
                 levelKnob_.setBounds(rightX + (kw4 + 4) * 2, yRow1, kw4, kh);
                 panKnob_.setBounds(rightX + (kw4 + 4) * 3, yRow1, kw4, kh);
 
-                // Row 2: Sample Shaping (START, SPREAD, DETUNE - 3 equal columns)
-                const int kw3 = (rightW - 8) / 3;
-                morphKnob_.setBounds(rightX, yRow2, kw3, kh);
-                unisonKnob_.setBounds(rightX + kw3 + 4, yRow2, kw3, kh);
-                scatterKnob_.setBounds(rightX + (kw3 + 4) * 2, yRow2, kw3, kh);
+                // Row 2: Sample Shaping & Looping (6 equal columns: START, LOOP ST, LOOP END, XFADE, SPREAD, DETUNE)
+                const int kw6 = (rightW - 20) / 6;
+                morphKnob_.setBounds(rightX, yRow2, kw6, kh);
+                loopStartKnob_.setBounds(rightX + kw6 + 4, yRow2, kw6, kh);
+                loopEndKnob_.setBounds(rightX + (kw6 + 4) * 2, yRow2, kw6, kh);
+                loopXfadeKnob_.setBounds(rightX + (kw6 + 4) * 3, yRow2, kw6, kh);
+                unisonKnob_.setBounds(rightX + (kw6 + 4) * 4, yRow2, kw6, kh);
+                scatterKnob_.setBounds(rightX + (kw6 + 4) * 5, yRow2, kw6, kh);
             } else {
                 const int pillCount = 4;
                 const int gap = 3;
@@ -585,6 +634,27 @@ public:
     void mouseMove(const juce::MouseEvent& e) override {
         const auto pos = e.getPosition();
 
+        const auto params = proc_.getCurrentParameters();
+        const auto& slot = params.oscSlots[static_cast<std::size_t>(slotIndex_)];
+        using ET = nova::dsp::MultiEngineOscillator::EngineType;
+        const bool isSample = (slot.sourceType == 4 || slot.engine == ET::SamplePlayback);
+
+        if (isExpanded_ && isSample && visualizerRect_.contains(pos)) {
+            const float startX = static_cast<float>(visualizerRect_.getX()) + 4.0f;
+            const float w = static_cast<float>(visualizerRect_.getWidth()) - 8.0f;
+            if (w > 1.0f) {
+                const float currentMorph = static_cast<float>(morphKnob_.getSlider().getValue());
+                const float startXLine = startX + currentMorph * w;
+                const float loopStartLine = startX + static_cast<float>(loopStartKnob_.getSlider().getValue()) * w;
+                const float loopEndLine = startX + static_cast<float>(loopEndKnob_.getSlider().getValue()) * w;
+                const float px = static_cast<float>(pos.x);
+                if (std::abs(px - startXLine) <= 7.0f || std::abs(px - loopStartLine) <= 7.0f || std::abs(px - loopEndLine) <= 7.0f) {
+                    setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);
+                    return;
+                }
+            }
+        }
+
         int newHover = -1;
         for (int i = 0; i < 6; ++i) {
             if (wavePillRects_[static_cast<std::size_t>(i)].contains(pos)) {
@@ -609,6 +679,30 @@ public:
                 return;
             }
         }
+        setMouseCursor(juce::MouseCursor::NormalCursor);
+    }
+
+    void mouseDrag(const juce::MouseEvent& e) override {
+        if (activeDragMarker_ == DragMarker::None) return;
+        const float startX = static_cast<float>(visualizerRect_.getX()) + 4.0f;
+        const float w = static_cast<float>(visualizerRect_.getWidth()) - 8.0f;
+        if (w <= 1.0f) return;
+
+        const float normX = std::clamp((static_cast<float>(e.x) - startX) / w, 0.0f, 1.0f);
+        if (activeDragMarker_ == DragMarker::Start) {
+            morphKnob_.getSlider().setValue(normX, juce::sendNotificationSync);
+        } else if (activeDragMarker_ == DragMarker::LoopStart) {
+            const double endVal = loopEndKnob_.getSlider().getValue();
+            loopStartKnob_.getSlider().setValue(std::min(static_cast<double>(normX), endVal - 0.01), juce::sendNotificationSync);
+        } else if (activeDragMarker_ == DragMarker::LoopEnd) {
+            const double startVal = loopStartKnob_.getSlider().getValue();
+            loopEndKnob_.getSlider().setValue(std::max(static_cast<double>(normX), startVal + 0.01), juce::sendNotificationSync);
+        }
+        repaint();
+    }
+
+    void mouseUp(const juce::MouseEvent&) override {
+        activeDragMarker_ = DragMarker::None;
         setMouseCursor(juce::MouseCursor::NormalCursor);
     }
 
@@ -689,6 +783,39 @@ public:
             return;
         }
 
+        // 7c. Sample Waveform Visualizer Markers (START, LOOP START, LOOP END)
+        const auto params = proc_.getCurrentParameters();
+        const auto& slot = params.oscSlots[static_cast<std::size_t>(slotIndex_)];
+        using ET = nova::dsp::MultiEngineOscillator::EngineType;
+        const bool isSample = (slot.sourceType == 4 || slot.engine == ET::SamplePlayback);
+
+        if (isExpanded_ && isSample && visualizerRect_.contains(pos)) {
+            const float startX = static_cast<float>(visualizerRect_.getX()) + 4.0f;
+            const float w = static_cast<float>(visualizerRect_.getWidth()) - 8.0f;
+            if (w > 1.0f) {
+                const float currentMorph = static_cast<float>(morphKnob_.getSlider().getValue());
+                const float startXLine = startX + currentMorph * w;
+                const float loopStartLine = startX + static_cast<float>(loopStartKnob_.getSlider().getValue()) * w;
+                const float loopEndLine = startX + static_cast<float>(loopEndKnob_.getSlider().getValue()) * w;
+                const float px = static_cast<float>(pos.x);
+
+                if (std::abs(px - startXLine) <= 8.0f) {
+                    activeDragMarker_ = DragMarker::Start;
+                } else if (std::abs(px - loopStartLine) <= 8.0f) {
+                    activeDragMarker_ = DragMarker::LoopStart;
+                } else if (std::abs(px - loopEndLine) <= 8.0f) {
+                    activeDragMarker_ = DragMarker::LoopEnd;
+                } else {
+                    activeDragMarker_ = DragMarker::Start;
+                    const float normX = std::clamp((px - startX) / w, 0.0f, 1.0f);
+                    morphKnob_.getSlider().setValue(normX, juce::sendNotificationSync);
+                }
+                setMouseCursor(juce::MouseCursor::LeftRightResizeCursor);
+                repaint();
+                return;
+            }
+        }
+
         // 8. Model Stepper < und >
         if (modelPrevRect_.contains(pos)) {
             cycleModel(-1);
@@ -725,13 +852,20 @@ public:
             return;
         }
 
-        // 11. Waveform Icon Pills (Analog, Sub, Noise)
+        // 11. Waveform Icon Pills (Analog, Sub, Noise) OR Loop Mode Pills (Sample)
         for (int i = 0; i < 6; ++i) {
             if (wavePillRects_[static_cast<std::size_t>(i)].contains(pos)) {
                 const juce::String prefix = "osc" + juce::String(slotIndex_ + 1) + "_";
-                if (auto* p = proc_.getAPVTS().getParameter(prefix + "model")) {
-                    p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(i)));
-                    proc_.syncParametersFromAPVTS();
+                if (isSample) {
+                    if (auto* p = proc_.getAPVTS().getParameter(prefix + "loopMode")) {
+                        p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(i)));
+                        proc_.syncParametersFromAPVTS();
+                    }
+                } else {
+                    if (auto* p = proc_.getAPVTS().getParameter(prefix + "model")) {
+                        p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(i)));
+                        proc_.syncParametersFromAPVTS();
+                    }
                 }
                 repaint();
                 return;
@@ -941,6 +1075,7 @@ private:
         const bool isAnalog   = (slot.engine == ET::WarmAnalog && slot.sourceType == 0);
         const bool isSub      = (slot.sourceType == 1 || slot.engine == ET::SubOscillator);
         const bool isNoise    = (slot.sourceType == 3 || slot.engine == ET::NoiseTransient);
+        const bool isSample   = (slot.sourceType == 4 || slot.engine == ET::SamplePlayback);
 
         if (isGranular) {
             // KeyTrk Button
@@ -1018,14 +1153,34 @@ private:
                 const auto iconCol = isActive ? slotCol.brighter(0.35f) : (isHov ? juce::Colours::white : theme_.textMuted);
                 drawWaveformIcon(g, r.toFloat(), slot.engine, slot.sourceType, i, iconCol, isActive);
             }
+        } else if (isSample) {
+            static const char* kLoopPillLabels[] = { "ONE-SHOT", "FORWARD", "PING-PONG", "REVERSE" };
+            for (int i = 0; i < 4; ++i) {
+                const auto r = wavePillRects_[static_cast<std::size_t>(i)];
+                if (r.isEmpty()) continue;
+                const bool isActive = (slot.sampleLoopMode == i);
+                const bool isHov = (hoveredWavePill_ == i);
+
+                g.setColour(isActive ? slotCol.withAlpha(0.24f) : (isHov ? theme_.bgControl.brighter(0.12f) : theme_.bgElevated));
+                g.fillRoundedRectangle(r.toFloat(), 3.0f);
+                g.setColour(isActive ? slotCol : (isHov ? theme_.borderFocus : theme_.borderSubtle));
+                g.drawRoundedRectangle(r.toFloat(), 3.0f, isActive ? 1.2f : 0.8f);
+
+                g.setFont(theme_.getValueFont(8.5f));
+                g.setColour(isActive ? juce::Colours::white : (isHov ? theme_.textPrimary : theme_.textMuted));
+                g.drawText(kLoopPillLabels[i], r, juce::Justification::centred, false);
+            }
         }
 
         // Floating HUD Tooltip Badge
         if (hoveredWavePill_ >= 0) {
-            const int maxPills = isAnalog ? 6 : ((isSub || isNoise) ? 4 : 0);
+            static const char* kLoopTooltips[] = { "ONE-SHOT", "FORWARD", "PING-PONG", "REVERSE" };
+            const int maxPills = isAnalog ? 6 : ((isSub || isNoise || isSample) ? 4 : 0);
             if (hoveredWavePill_ < maxPills) {
                 const auto targetRect = wavePillRects_[static_cast<std::size_t>(hoveredWavePill_)];
-                const auto tooltipName = juce::String(nova::dsp::MultiEngineOscillator::getModelName(slot.engine, slot.sourceType, hoveredWavePill_));
+                const auto tooltipName = isSample
+                    ? juce::String(kLoopTooltips[hoveredWavePill_])
+                    : juce::String(nova::dsp::MultiEngineOscillator::getModelName(slot.engine, slot.sourceType, hoveredWavePill_));
 
                 const auto font = theme_.getValueFont(8.5f);
                 juce::GlyphArrangement ga;
@@ -1411,8 +1566,13 @@ private:
                 const int step = std::max(1, z.numSamples / numPts);
                 juce::Path waveTop, waveBot;
                 const float currentMorph = static_cast<float>(morphKnob_.getSlider().getValue());
-                const float startOffsetNorm = std::clamp(currentMorph * 0.60f, 0.0f, 0.60f);
+                const float startOffsetNorm = std::clamp(currentMorph, 0.0f, 1.0f);
                 const float startLineX = startX + startOffsetNorm * w;
+
+                const float loopStartNorm = std::clamp(static_cast<float>(loopStartKnob_.getSlider().getValue()), 0.0f, 0.98f);
+                const float loopEndNorm = std::clamp(static_cast<float>(loopEndKnob_.getSlider().getValue()), 0.02f, 1.0f);
+                const float loopStartX = startX + loopStartNorm * w;
+                const float loopEndX = startX + loopEndNorm * w;
 
                 for (int i = 0; i <= numPts; ++i) {
                     const float normX = static_cast<float>(i) / static_cast<float>(numPts);
@@ -1446,6 +1606,81 @@ private:
                 g.strokePath(waveTop, juce::PathStrokeType(1.4f));
                 g.strokePath(waveBot, juce::PathStrokeType(1.1f));
 
+                // Shaded Loop Region & Direction Indicators (when loopMode > 0)
+                if (slot.sampleLoopMode > 0 && loopEndX > loopStartX) {
+                    const auto loopBox = juce::Rectangle<float>(loopStartX, bF.getY() + 3.0f, loopEndX - loopStartX, bF.getHeight() - 6.0f);
+                    g.setColour(juce::Colour(0xff38bdf8).withAlpha(0.12f));
+                    g.fillRoundedRectangle(loopBox, 2.0f);
+                    g.setColour(juce::Colour(0xff38bdf8).withAlpha(0.35f));
+                    g.drawRoundedRectangle(loopBox, 2.0f, 0.8f);
+
+                    // Procedural vector loop direction arrow
+                    const float arrowMidX = loopBox.getCentreX();
+                    const float arrowY = bF.getBottom() - 14.0f;
+                    juce::Path arrowP;
+                    if (slot.sampleLoopMode == 1) {
+                        // Forward ->
+                        arrowP.startNewSubPath(arrowMidX - 6.0f, arrowY);
+                        arrowP.lineTo(arrowMidX + 4.0f, arrowY);
+                        arrowP.startNewSubPath(arrowMidX + 1.0f, arrowY - 3.5f);
+                        arrowP.lineTo(arrowMidX + 5.0f, arrowY);
+                        arrowP.lineTo(arrowMidX + 1.0f, arrowY + 3.5f);
+                    } else if (slot.sampleLoopMode == 2) {
+                        // Ping-Pong <->
+                        arrowP.startNewSubPath(arrowMidX - 7.0f, arrowY);
+                        arrowP.lineTo(arrowMidX + 7.0f, arrowY);
+                        // Left head
+                        arrowP.startNewSubPath(arrowMidX - 4.0f, arrowY - 3.0f);
+                        arrowP.lineTo(arrowMidX - 8.0f, arrowY);
+                        arrowP.lineTo(arrowMidX - 4.0f, arrowY + 3.0f);
+                        // Right head
+                        arrowP.startNewSubPath(arrowMidX + 4.0f, arrowY - 3.0f);
+                        arrowP.lineTo(arrowMidX + 8.0f, arrowY);
+                        arrowP.lineTo(arrowMidX + 4.0f, arrowY + 3.0f);
+                    } else if (slot.sampleLoopMode == 3) {
+                        // Reverse <-
+                        arrowP.startNewSubPath(arrowMidX + 6.0f, arrowY);
+                        arrowP.lineTo(arrowMidX - 4.0f, arrowY);
+                        arrowP.startNewSubPath(arrowMidX - 1.0f, arrowY - 3.5f);
+                        arrowP.lineTo(arrowMidX - 5.0f, arrowY);
+                        arrowP.lineTo(arrowMidX - 1.0f, arrowY + 3.5f);
+                    }
+                    g.setColour(juce::Colour(0xff38bdf8).withAlpha(0.75f));
+                    g.strokePath(arrowP, juce::PathStrokeType(1.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+
+                    // LOOP START laser marker with handle
+                    const float clampedLoopStartX = std::clamp(loopStartX, startX, startX + w);
+                    g.setColour(juce::Colour(0xff38bdf8).withAlpha(0.85f));
+                    g.drawVerticalLine(static_cast<int>(clampedLoopStartX), bF.getY() + 4.0f, bF.getBottom() - 4.0f);
+
+                    juce::Path lsHandle;
+                    lsHandle.startNewSubPath(clampedLoopStartX - 3.5f, bF.getY() + 4.0f);
+                    lsHandle.lineTo(clampedLoopStartX + 3.5f, bF.getY() + 4.0f);
+                    lsHandle.lineTo(clampedLoopStartX, bF.getY() + 9.0f);
+                    lsHandle.closeSubPath();
+                    g.fillPath(lsHandle);
+
+                    g.setFont(theme_.getValueFont(8.0f));
+                    g.setColour(juce::Colour(0xff38bdf8));
+                    const int lsTextX = (clampedLoopStartX + 32.0f < startX + w) ? static_cast<int>(clampedLoopStartX + 3.0f) : static_cast<int>(clampedLoopStartX - 30.0f);
+                    g.drawText("L1", lsTextX, static_cast<int>(bF.getY() + 4.0f), 28, 10, juce::Justification::centredLeft);
+
+                    // LOOP END laser marker with handle
+                    const float clampedLoopEndX = std::clamp(loopEndX, startX, startX + w);
+                    g.setColour(juce::Colour(0xff38bdf8).withAlpha(0.85f));
+                    g.drawVerticalLine(static_cast<int>(clampedLoopEndX), bF.getY() + 4.0f, bF.getBottom() - 4.0f);
+
+                    juce::Path leHandle;
+                    leHandle.startNewSubPath(clampedLoopEndX - 3.5f, bF.getY() + 4.0f);
+                    leHandle.lineTo(clampedLoopEndX + 3.5f, bF.getY() + 4.0f);
+                    leHandle.lineTo(clampedLoopEndX, bF.getY() + 9.0f);
+                    leHandle.closeSubPath();
+                    g.fillPath(leHandle);
+
+                    const int leTextX = (clampedLoopEndX - 30.0f > startX) ? static_cast<int>(clampedLoopEndX - 30.0f) : static_cast<int>(clampedLoopEndX + 3.0f);
+                    g.drawText("L2", leTextX, static_cast<int>(bF.getY() + 4.0f), 28, 10, juce::Justification::centredLeft);
+                }
+
                 // Sample START offset laser marker with handle
                 const float clampedLineX = std::clamp(startLineX, startX, startX + w);
                 g.setColour(juce::Colours::white.withAlpha(0.95f));
@@ -1456,7 +1691,7 @@ private:
                 markerHandle.lineTo(clampedLineX + 4.0f, bF.getY() + 4.0f);
                 markerHandle.lineTo(clampedLineX, bF.getY() + 10.0f);
                 markerHandle.closeSubPath();
-                g.setColour(juce::Colour(0xff38bdf8));
+                g.setColour(juce::Colours::white);
                 g.fillPath(markerHandle);
 
                 g.setFont(theme_.getValueFont(8.5f));
@@ -1848,6 +2083,12 @@ private:
     nova::ui::ArcKnob scatterKnob_;
     nova::ui::ArcKnob durKnob_;
     nova::ui::ArcKnob warpKnob_;
+    nova::ui::ArcKnob loopStartKnob_;
+    nova::ui::ArcKnob loopEndKnob_;
+    nova::ui::ArcKnob loopXfadeKnob_;
+
+    enum class DragMarker { None, Start, LoopStart, LoopEnd };
+    DragMarker activeDragMarker_ = DragMarker::None;
 
     SleekHorizontalSlider compactVolSlider_;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> compactVolAttachment_;

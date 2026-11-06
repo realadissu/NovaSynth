@@ -100,6 +100,22 @@ juce::AudioProcessorValueTreeState::ParameterLayout NovaSynthProcessor::createPa
         params.push_back(std::make_unique<juce::AudioParameterChoice>(
             juce::ParameterID{prefix + "ampEnvSource", 1}, namePrefix + "Amp Env Source",
             juce::StringArray{"Amp Env 1", "Filter Env 2", "Mod Env 3", "Aux Env 4"}, 0));
+
+        params.push_back(std::make_unique<juce::AudioParameterChoice>(
+            juce::ParameterID{prefix + "loopMode", 1}, namePrefix + "Loop Mode",
+            juce::StringArray{"One-Shot", "Forward", "Ping-Pong", "Reverse"}, 1));
+
+        params.push_back(std::make_unique<juce::AudioParameterFloat>(
+            juce::ParameterID{prefix + "loopStart", 1}, namePrefix + "Loop Start",
+            juce::NormalisableRange<float>(0.0f, 1.0f, 0.001f), 0.20f));
+
+        params.push_back(std::make_unique<juce::AudioParameterFloat>(
+            juce::ParameterID{prefix + "loopEnd", 1}, namePrefix + "Loop End",
+            juce::NormalisableRange<float>(0.0f, 1.0f, 0.001f), 0.90f));
+
+        params.push_back(std::make_unique<juce::AudioParameterFloat>(
+            juce::ParameterID{prefix + "loopXfade", 1}, namePrefix + "Loop Crossfade",
+            juce::NormalisableRange<float>(0.0f, 0.25f, 0.001f), 0.05f));
     }
 
     // Dual Filters & Vocal Carve
@@ -1427,6 +1443,10 @@ void NovaSynthProcessor::syncParametersFromAPVTS() noexcept {
         if (auto* pW = apvts_.getRawParameterValue(prefix + "warp")) slot.warp = pW->load();
         if (auto* pL = apvts_.getRawParameterValue(prefix + "lowestNoteOnly")) slot.lowestNoteOnly = pL->load() > 0.5f;
         if (auto* pEnv = apvts_.getRawParameterValue(prefix + "ampEnvSource")) slot.ampEnvSource = static_cast<int>(pEnv->load());
+        if (auto* pLm = apvts_.getRawParameterValue(prefix + "loopMode")) slot.sampleLoopMode = static_cast<int>(pLm->load());
+        if (auto* pLs = apvts_.getRawParameterValue(prefix + "loopStart")) slot.sampleLoopStart = pLs->load();
+        if (auto* pLe = apvts_.getRawParameterValue(prefix + "loopEnd")) slot.sampleLoopEnd = pLe->load();
+        if (auto* pLx = apvts_.getRawParameterValue(prefix + "loopXfade")) slot.sampleCrossfade = pLx->load();
     }
 
     p.filter1Enabled   = apvts_.getRawParameterValue("filter1Enabled")->load() > 0.5f;

@@ -286,6 +286,24 @@ const SharedWavetableBank& getWavetableBank() {
 constexpr std::array<float, 5> kUnisonDetuneFactors = { 0.0f, -0.42f, 0.42f, -0.88f, 0.88f };
 constexpr std::array<float, 5> kUnisonPanPositions  = { 0.0f, -0.55f, 0.55f, -0.90f, 0.90f };
 
+inline float readSampleHermite(const int16_t* pcm, int numSamples, double playhead) noexcept {
+    if (pcm == nullptr || numSamples <= 0) return 0.0f;
+    const double clampedPos = std::clamp(playhead, 0.0, static_cast<double>(numSamples - 1));
+    const int i = static_cast<int>(clampedPos);
+    const float frac = static_cast<float>(clampedPos - static_cast<double>(i));
+
+    const float y0 = static_cast<float>(i > 0 ? pcm[i - 1] : pcm[i]) * (1.0f / 32768.0f);
+    const float y1 = static_cast<float>(pcm[i]) * (1.0f / 32768.0f);
+    const float y2 = static_cast<float>(i + 1 < numSamples ? pcm[i + 1] : pcm[i]) * (1.0f / 32768.0f);
+    const float y3 = static_cast<float>(i + 2 < numSamples ? pcm[i + 2] : (i + 1 < numSamples ? pcm[i + 1] : pcm[i])) * (1.0f / 32768.0f);
+
+    const float c0 = y1;
+    const float c1 = 0.5f * (y2 - y0);
+    const float c2 = y0 - 2.5f * y1 + 2.0f * y2 - 0.5f * y3;
+    const float c3 = 0.5f * (y3 - y0) + 1.5f * (y1 - y2);
+    return ((c3 * frac + c2) * frac + c1) * frac + c0;
+}
+
 } // namespace
 
 float MultiEngineOscillator::polyBlep(float phase, float phaseInc) noexcept {
@@ -357,6 +375,7 @@ void MultiEngineOscillator::reset() noexcept {
     modalAmplitudes_.fill(0.0f);
     modalDecays_.fill(0.999f);
     samplePlayhead_ = 0.0;
+    sampleDirection_ = 1.0;
     sampleFinished_ = false;
     lastPitchModSemitones_ = -999.0f;
     cachedPitchModRatio_ = 1.0f;
@@ -401,11 +420,29 @@ void MultiEngineOscillator::triggerNote(float baseFrequencyHz, float velocity, u
                 }
             }
             activeSampleZone_ = &smp.zones[bestIdx];
-            const double maxOffset = static_cast<double>(activeSampleZone_->numSamples) * 0.60;
-            const double startOffset = static_cast<double>(params_.shapeMorph) * maxOffset;
-            samplePlayhead_ = startOffset;
+            const int numS = activeSampleZone_->numSamples;
+            const double sMorph = static_cast<double>(std::clamp(params_.shapeMorph, 0.0f, 1.0f));
+            const double lStart = static_cast<double>(std::clamp(params_.sampleLoopStart, 0.0f, 0.98f)) * (numS - 4);
+            const double lEnd = static_cast<double>(std::clamp(params_.sampleLoopEnd, 0.02f, 1.0f)) * (numS - 4);
+            const double effectiveEnd = std::max(lStart + 100.0, lEnd);
+
+            if (params_.sampleLoopMode == 3) {
+                // Reverse loop mode: playhead travels backward
+                sampleDirection_ = -1.0;
+                if (sMorph > 0.001) {
+                    const double range = effectiveEnd - lStart;
+                    samplePlayhead_ = std::clamp(effectiveEnd - sMorph * range, lStart, effectiveEnd);
+                } else {
+                    samplePlayhead_ = effectiveEnd;
+                }
+            } else {
+                // Forward, Ping-Pong, or One-Shot
+                sampleDirection_ = 1.0;
+                samplePlayhead_ = sMorph * static_cast<double>(numS - 4);
+            }
         } else {
             samplePlayhead_ = 0.0;
+            sampleDirection_ = 1.0;
         }
         sampleFinished_ = false;
     }
@@ -1022,68 +1059,125 @@ void MultiEngineOscillator::processSample(float baseFrequencyHz,
             if (sampleFinished_ || activeSampleZone_ == nullptr) break;
             const auto& smp = SampleBank::getSample(params_.modelIndex);
             const auto* zone = activeSampleZone_;
-            if (zone->pcmL == nullptr || zone->numSamples <= 4) break;
+            if (zone->pcmL == nullptr || zone->numSamples <= 8) break;
 
             const float detuneCents = (std::clamp(params_.scatter, 0.0f, 1.0f) - 0.5f) * 100.0f;
             const float detuneRatio = std::pow(2.0f, detuneCents / 1200.0f);
             const double playbackRate = (static_cast<double>(slotFreq) * static_cast<double>(detuneRatio) / static_cast<double>(zone->rootFrequencyHz)) * (smp.sampleRate / sampleRate_);
-            const int idx = static_cast<int>(samplePlayhead_);
+            const double step = playbackRate * sampleDirection_;
 
-            if (idx >= zone->numSamples - 3) {
-                if (smp.isLooping && zone->numSamples > 1000) {
-                    const int loopStart = static_cast<int>(zone->numSamples * 0.25);
-                    const int loopLen = zone->numSamples - loopStart - 4;
-                    if (loopLen > 100) {
-                        samplePlayhead_ = loopStart + std::fmod(samplePlayhead_ - loopStart, static_cast<double>(loopLen));
-                    } else {
+            const int numS = zone->numSamples;
+            const double lStart = std::clamp(static_cast<double>(params_.sampleLoopStart), 0.0, 0.98) * static_cast<double>(numS - 4);
+            double lEnd = std::clamp(static_cast<double>(params_.sampleLoopEnd), 0.02, 1.0) * static_cast<double>(numS - 4);
+            if (lEnd < lStart + 100.0) lEnd = std::min(static_cast<double>(numS - 4), lStart + 100.0);
+            const double loopLen = lEnd - lStart;
+
+            const double xfadeUser = static_cast<double>(std::clamp(params_.sampleCrossfade, 0.0f, 0.25f));
+            const double xfadeLen = std::max(16.0, std::min(loopLen * 0.25, xfadeUser * loopLen));
+
+            const int16_t* pcmL = zone->pcmL;
+            const int16_t* pcmR = (zone->pcmR != nullptr) ? zone->pcmR : zone->pcmL;
+            const float spreadAmt = std::clamp(params_.detune, 0.0f, 1.0f);
+            const double rightDelay = static_cast<double>(spreadAmt * 0.015f * sampleRate_);
+
+            float rawL = 0.0f;
+            float rawR = 0.0f;
+
+            switch (params_.sampleLoopMode) {
+                case 0: { // One-Shot (No Looping)
+                    if (samplePlayhead_ >= numS - 4 || samplePlayhead_ < 0.0) {
                         sampleFinished_ = true;
                         break;
                     }
-                } else {
-                    sampleFinished_ = true;
+                    rawL = readSampleHermite(pcmL, numS, samplePlayhead_);
+                    rawR = readSampleHermite(pcmR, numS, std::max(0.0, samplePlayhead_ - rightDelay));
+                    samplePlayhead_ += step;
+                    break;
+                }
+
+                case 1: { // Forward Loop with Equal-Power Crossfade
+                    if (samplePlayhead_ < lStart) {
+                        rawL = readSampleHermite(pcmL, numS, samplePlayhead_);
+                        rawR = readSampleHermite(pcmR, numS, std::max(0.0, samplePlayhead_ - rightDelay));
+                    } else if (samplePlayhead_ < lEnd - xfadeLen) {
+                        rawL = readSampleHermite(pcmL, numS, samplePlayhead_);
+                        rawR = readSampleHermite(pcmR, numS, std::max(0.0, samplePlayhead_ - rightDelay));
+                    } else if (samplePlayhead_ < lEnd) {
+                        const double t = (samplePlayhead_ - (lEnd - xfadeLen)) / xfadeLen;
+                        const float angle = static_cast<float>(t * (std::numbers::pi * 0.5));
+                        const float g1 = std::cos(angle);
+                        const float g2 = std::sin(angle);
+
+                        const double secPlayhead = lStart + (samplePlayhead_ - (lEnd - xfadeLen));
+                        const float p1L = readSampleHermite(pcmL, numS, samplePlayhead_);
+                        const float p1R = readSampleHermite(pcmR, numS, std::max(0.0, samplePlayhead_ - rightDelay));
+                        const float p2L = readSampleHermite(pcmL, numS, secPlayhead);
+                        const float p2R = readSampleHermite(pcmR, numS, std::max(0.0, secPlayhead - rightDelay));
+
+                        rawL = p1L * g1 + p2L * g2;
+                        rawR = p1R * g1 + p2R * g2;
+                    } else {
+                        samplePlayhead_ = (lStart + xfadeLen) + std::fmod(samplePlayhead_ - lEnd, loopLen);
+                        rawL = readSampleHermite(pcmL, numS, samplePlayhead_);
+                        rawR = readSampleHermite(pcmR, numS, std::max(0.0, samplePlayhead_ - rightDelay));
+                    }
+                    samplePlayhead_ += step;
+                    break;
+                }
+
+                case 2: { // Ping-Pong Loop (<->)
+                    if (sampleDirection_ > 0.0) {
+                        if (samplePlayhead_ >= lEnd) {
+                            sampleDirection_ = -1.0;
+                            samplePlayhead_ = lEnd - (samplePlayhead_ - lEnd);
+                        }
+                    } else {
+                        if (samplePlayhead_ <= lStart) {
+                            sampleDirection_ = 1.0;
+                            samplePlayhead_ = lStart + (lStart - samplePlayhead_);
+                        }
+                    }
+                    rawL = readSampleHermite(pcmL, numS, samplePlayhead_);
+                    rawR = readSampleHermite(pcmR, numS, std::max(0.0, samplePlayhead_ - rightDelay));
+                    samplePlayhead_ += playbackRate * sampleDirection_;
+                    break;
+                }
+
+                case 3: { // Reverse Loop (<-) with Equal-Power Crossfade
+                    if (samplePlayhead_ > lEnd) {
+                        rawL = readSampleHermite(pcmL, numS, samplePlayhead_);
+                        rawR = readSampleHermite(pcmR, numS, std::max(0.0, samplePlayhead_ - rightDelay));
+                    } else if (samplePlayhead_ > lStart + xfadeLen) {
+                        rawL = readSampleHermite(pcmL, numS, samplePlayhead_);
+                        rawR = readSampleHermite(pcmR, numS, std::max(0.0, samplePlayhead_ - rightDelay));
+                    } else if (samplePlayhead_ > lStart) {
+                        const double t = ((lStart + xfadeLen) - samplePlayhead_) / xfadeLen;
+                        const float angle = static_cast<float>(t * (std::numbers::pi * 0.5));
+                        const float g1 = std::cos(angle);
+                        const float g2 = std::sin(angle);
+
+                        const double secPlayhead = lEnd - ((lStart + xfadeLen) - samplePlayhead_);
+                        const float p1L = readSampleHermite(pcmL, numS, samplePlayhead_);
+                        const float p1R = readSampleHermite(pcmR, numS, std::max(0.0, samplePlayhead_ - rightDelay));
+                        const float p2L = readSampleHermite(pcmL, numS, secPlayhead);
+                        const float p2R = readSampleHermite(pcmR, numS, std::max(0.0, secPlayhead - rightDelay));
+
+                        rawL = p1L * g1 + p2L * g2;
+                        rawR = p1R * g1 + p2R * g2;
+                    } else {
+                        samplePlayhead_ = (lEnd - xfadeLen) - std::fmod(lStart - samplePlayhead_, loopLen);
+                        rawL = readSampleHermite(pcmL, numS, samplePlayhead_);
+                        rawR = readSampleHermite(pcmR, numS, std::max(0.0, samplePlayhead_ - rightDelay));
+                    }
+                    samplePlayhead_ += step;
                     break;
                 }
             }
-
-            const int i = static_cast<int>(samplePlayhead_);
-            const float frac = static_cast<float>(samplePlayhead_ - static_cast<double>(i));
-
-            // Hermite cubic interpolation for Left channel
-            const float y0L = static_cast<float>(i > 0 ? zone->pcmL[i - 1] : zone->pcmL[i]) * (1.0f / 32768.0f);
-            const float y1L = static_cast<float>(zone->pcmL[i]) * (1.0f / 32768.0f);
-            const float y2L = static_cast<float>(zone->pcmL[i + 1]) * (1.0f / 32768.0f);
-            const float y3L = static_cast<float>(i + 2 < zone->numSamples ? zone->pcmL[i + 2] : zone->pcmL[i + 1]) * (1.0f / 32768.0f);
-
-            const float c0L = y1L;
-            const float c1L = 0.5f * (y2L - y0L);
-            const float c2L = y0L - 2.5f * y1L + 2.0f * y2L - 0.5f * y3L;
-            const float c3L = 0.5f * (y3L - y0L) + 1.5f * (y1L - y2L);
-            const float rawL = ((c3L * frac + c2L) * frac + c1L) * frac + c0L;
-
-            // Stereo width & detune spray spread (true Haas stereo time-delay decorrelation on sample)
-            const float spreadAmt = std::clamp(params_.detune, 0.0f, 1.0f);
-            const double rightPlayhead = std::max(0.0, samplePlayhead_ - static_cast<double>(spreadAmt * 0.015f * sampleRate_));
-            const int iR = static_cast<int>(rightPlayhead);
-            const float fracR = static_cast<float>(rightPlayhead - static_cast<double>(iR));
-            const int16_t* pcmR = (zone->pcmR != nullptr) ? zone->pcmR : zone->pcmL;
-
-            const float y0R = static_cast<float>(iR > 0 ? pcmR[iR - 1] : pcmR[iR]) * (1.0f / 32768.0f);
-            const float y1R = static_cast<float>(pcmR[iR]) * (1.0f / 32768.0f);
-            const float y2R = static_cast<float>(iR + 1 < zone->numSamples ? pcmR[iR + 1] : pcmR[iR]) * (1.0f / 32768.0f);
-            const float y3R = static_cast<float>(iR + 2 < zone->numSamples ? pcmR[iR + 2] : pcmR[iR + 1]) * (1.0f / 32768.0f);
-
-            const float c0R = y1R;
-            const float c1R = 0.5f * (y2R - y0R);
-            const float c2R = y0R - 2.5f * y1R + 2.0f * y2R - 0.5f * y3R;
-            const float c3R = 0.5f * (y3R - y0R) + 1.5f * (y1R - y2R);
-            const float rawR = ((c3R * fracR + c2R) * fracR + c1R) * fracR + c0R;
 
             const float mid = 0.5f * (rawL + rawR);
             const float side = 0.5f * (rawL - rawR);
             sigL = mid + spreadAmt * side;
             sigR = mid - spreadAmt * side;
-
-            samplePlayhead_ += playbackRate;
             break;
         }
     }

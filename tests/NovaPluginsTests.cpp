@@ -4292,6 +4292,231 @@ TEST(AllFourEnvelopesTests, HoldAndDecayPreservedDuringArpeggioPlayback) {
     EXPECT_EQ(proc.getEngine().getActiveVoiceCount(), 0);
 }
 
+// ==============================================================================
+// Sample Looping System Tests (One-Shot, Forward, Ping-Pong, Reverse & UI)
+// ==============================================================================
+
+TEST(SampleLoopingSystemTests, SampleLoopForwardSustainsWithoutEnding) {
+    nova::dsp::MultiEngineOscillator osc;
+    osc.prepare(48000.0);
+
+    nova::dsp::MultiEngineOscillator::Parameters p;
+    p.enabled = true;
+    p.sourceType = 4;
+    p.engine = nova::dsp::MultiEngineOscillator::EngineType::SamplePlayback;
+    p.modelIndex = 7; // Sacred Flute Pipe (sustained true-stereo pipe)
+    p.sampleLoopMode = 1; // Forward loop
+    p.sampleLoopStart = 0.20f;
+    p.sampleLoopEnd = 0.80f;
+    p.sampleCrossfade = 0.05f;
+    p.level = 0.85f;
+    osc.setParameters(p);
+
+    osc.triggerNote(261.63f, 0.90f);
+
+    float sumRms = 0.0f;
+    // Process 5 full seconds (240,000 samples)
+    constexpr int kTotalSamples = 48000 * 5;
+    constexpr int kBlockSize = 256;
+    float blockEnergy = 0.0f;
+    int blockCount = 0;
+
+    for (int i = 0; i < kTotalSamples; ++i) {
+        float outL = 0.0f;
+        float outR = 0.0f;
+        osc.processSample(261.63f, 0.0f, 0.0f, outL, outR);
+
+        EXPECT_FALSE(std::isnan(outL));
+        EXPECT_FALSE(std::isnan(outR));
+        EXPECT_FALSE(std::isinf(outL));
+        EXPECT_FALSE(std::isinf(outR));
+
+        blockEnergy += outL * outL + outR * outR;
+        if ((i + 1) % kBlockSize == 0) {
+            const float blockRms = std::sqrt(blockEnergy / static_cast<float>(kBlockSize * 2));
+            sumRms += blockRms;
+            // Even at second 4 or 5, since loop is active, the sound must remain sustaining!
+            if (i > 48000 * 4) {
+                EXPECT_GT(blockRms, 0.01f) << "Forward loop must sustain infinitely while key is held!";
+            }
+            blockEnergy = 0.0f;
+            blockCount++;
+        }
+    }
+
+    const float avgRms = sumRms / static_cast<float>(blockCount);
+    EXPECT_GT(avgRms, 0.02f) << "Average sustained energy must be strong across multiple loop repetitions!";
+}
+
+TEST(SampleLoopingSystemTests, SampleLoopPingPongBouncesDirections) {
+    nova::dsp::MultiEngineOscillator osc;
+    osc.prepare(48000.0);
+
+    nova::dsp::MultiEngineOscillator::Parameters p;
+    p.enabled = true;
+    p.sourceType = 4;
+    p.engine = nova::dsp::MultiEngineOscillator::EngineType::SamplePlayback;
+    p.modelIndex = 7; // Sacred Flute Pipe
+    p.sampleLoopMode = 2; // Ping-Pong loop (<->)
+    p.sampleLoopStart = 0.20f;
+    p.sampleLoopEnd = 0.80f;
+    p.level = 0.85f;
+    osc.setParameters(p);
+
+    osc.triggerNote(261.63f, 0.90f);
+
+    float sumEnergy = 0.0f;
+    for (int i = 0; i < 48000 * 4; ++i) {
+        float outL = 0.0f;
+        float outR = 0.0f;
+        osc.processSample(261.63f, 0.0f, 0.0f, outL, outR);
+        EXPECT_FALSE(std::isnan(outL));
+        EXPECT_FALSE(std::isnan(outR));
+        sumEnergy += outL * outL;
+    }
+    EXPECT_GT(sumEnergy, 10.0f) << "Ping-Pong loop must keep bouncing and producing sustained signal!";
+}
+
+TEST(SampleLoopingSystemTests, SampleLoopReversePlaysBackwardsAndLoops) {
+    nova::dsp::MultiEngineOscillator osc;
+    osc.prepare(48000.0);
+
+    nova::dsp::MultiEngineOscillator::Parameters p;
+    p.enabled = true;
+    p.sourceType = 4;
+    p.engine = nova::dsp::MultiEngineOscillator::EngineType::SamplePlayback;
+    p.modelIndex = 7; // Sacred Flute Pipe
+    p.sampleLoopMode = 3; // Reverse loop (<-)
+    p.sampleLoopStart = 0.20f;
+    p.sampleLoopEnd = 0.80f;
+    p.sampleCrossfade = 0.05f;
+    p.level = 0.85f;
+    osc.setParameters(p);
+
+    osc.triggerNote(261.63f, 0.90f);
+
+    float reverseEnergy = 0.0f;
+    for (int i = 0; i < 48000 * 3; ++i) {
+        float outL = 0.0f;
+        float outR = 0.0f;
+        osc.processSample(261.63f, 0.0f, 0.0f, outL, outR);
+        EXPECT_FALSE(std::isnan(outL));
+        EXPECT_FALSE(std::isnan(outR));
+        reverseEnergy += outL * outL;
+    }
+    EXPECT_GT(reverseEnergy, 10.0f) << "Reverse loop must play and loop backward smoothly!";
+}
+
+TEST(SampleLoopingSystemTests, SampleLoopOneShotFinishesAtEndOfSample) {
+    nova::dsp::MultiEngineOscillator osc;
+    osc.prepare(48000.0);
+
+    nova::dsp::MultiEngineOscillator::Parameters p;
+    p.enabled = true;
+    p.sourceType = 4;
+    p.engine = nova::dsp::MultiEngineOscillator::EngineType::SamplePlayback;
+    p.modelIndex = 2; // Upright Felt Thump (short sample ~0.35s = 15435 samples)
+    p.sampleLoopMode = 0; // One-Shot (Off)
+    p.level = 0.90f;
+    osc.setParameters(p);
+
+    osc.triggerNote(261.63f, 1.0f);
+
+    // Initial attack has audio
+    float initialEnergy = 0.0f;
+    for (int i = 0; i < 8000; ++i) {
+        float outL = 0.0f;
+        float outR = 0.0f;
+        osc.processSample(261.63f, 0.0f, 0.0f, outL, outR);
+        initialEnergy += outL * outL + outR * outR;
+    }
+    EXPECT_GT(initialEnergy, 1.0f) << "One-shot sample must play initial transient!";
+
+    // Past 1.0s (48000 samples), one-shot has finished and must be completely silent
+    float lateEnergy = 0.0f;
+    for (int i = 8000; i < 48000 * 2; ++i) {
+        float outL = 0.0f;
+        float outR = 0.0f;
+        osc.processSample(261.63f, 0.0f, 0.0f, outL, outR);
+        lateEnergy += std::abs(outL) + std::abs(outR);
+    }
+    EXPECT_EQ(lateEnergy, 0.0f) << "One-shot sample must finish cleanly after playing through once!";
+}
+
+TEST(SampleLoopingSystemTests, SampleLoopUiPillsAndMarkersInteraction) {
+    nova::synth::NovaSynthProcessor proc;
+    auto theme = nova::ui::NovaTheme::create(nova::ui::NovaTheme::AccentPreset::SpaceCyan);
+    nova::synth::SourceDeck sourceDeck(proc, theme);
+    sourceDeck.setBounds(0, 0, 900, 200);
+
+    auto& apvts = proc.getAPVTS();
+    // Configure OSC 1 as Sample mode
+    if (auto* p = apvts.getParameter("osc1_sourceType")) {
+        p->setValueNotifyingHost(p->convertTo0to1(4.0f));
+    }
+    proc.syncParametersFromAPVTS();
+
+    const auto& cards = sourceDeck.getCardList();
+    ASSERT_EQ(cards.size(), 8u);
+    auto* card = cards[0].get();
+    ASSERT_NE(card, nullptr);
+
+    // Expand the card with full preferred width
+    card->setExpanded(true);
+    card->setBounds(0, 0, static_cast<int>(card->getPreferredExpandedWidth()), 196);
+    card->resized();
+
+    // Verify dedicated loop knobs are visible when in Sample mode
+    EXPECT_TRUE(card->getLoopStartKnob().isVisible());
+    EXPECT_TRUE(card->getLoopEndKnob().isVisible());
+    EXPECT_TRUE(card->getLoopXfadeKnob().isVisible());
+
+    // Paint to initialize layout coordinates
+    juce::Image dummyImg(juce::Image::ARGB, 900, 200, true);
+    juce::Graphics g(dummyImg);
+    card->paintEntireComponent(g, false);
+
+    const auto dummyMouse = juce::Desktop::getInstance().getMainMouseSource();
+    const auto now = juce::Time::getCurrentTime();
+
+    // Test clicking Loop Mode Pills:
+    // 0: One-Shot, 1: Forward, 2: Ping-Pong, 3: Reverse
+    for (int mode = 0; mode < 4; ++mode) {
+        const auto pillRect = card->getWavePillRect(mode);
+        EXPECT_FALSE(pillRect.isEmpty()) << "Pill " << mode << " rect must not be empty!";
+        const juce::Point<float> pillClick = pillRect.getCentre().toFloat();
+
+        juce::MouseEvent downEv(dummyMouse, pillClick, juce::ModifierKeys(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                card, card, now, pillClick, now, 1, false);
+        card->mouseDown(downEv);
+
+        const int currentMode = static_cast<int>(apvts.getRawParameterValue("osc1_loopMode")->load());
+        EXPECT_EQ(currentMode, mode) << "Clicking loop pill " << mode << " must select loop mode " << mode << "!";
+    }
+
+    // Test dragging on the waveform visualizer to set START marker
+    const auto visBox = card->getVisualizerRect();
+    EXPECT_FALSE(visBox.isEmpty()) << "Visualizer rect must not be empty!";
+    const float startX = static_cast<float>(visBox.getX()) + 4.0f;
+    const float w = static_cast<float>(visBox.getWidth()) - 8.0f;
+    EXPECT_GT(w, 20.0f);
+
+    const juce::Point<float> waveClick(startX + 0.10f * w, visBox.getCentreY());
+    juce::MouseEvent dragStartEv(dummyMouse, waveClick, juce::ModifierKeys(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                                 card, card, now, waveClick, now, 1, false);
+    card->mouseDown(dragStartEv);
+
+    // Drag to new X position (55% of waveform)
+    const juce::Point<float> dragTo(startX + 0.55f * w, visBox.getCentreY());
+    juce::MouseEvent dragEv(dummyMouse, dragTo, juce::ModifierKeys(), 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
+                            card, card, now, dragTo, now, 1, false);
+    card->mouseDrag(dragEv);
+    card->mouseUp(dragEv);
+
+    const float updatedStart = apvts.getRawParameterValue("osc1_shape")->load();
+    EXPECT_NEAR(updatedStart, 0.55f, 0.05f) << "Dragging on waveform must interactively update START parameter!";
+}
+
 } // namespace
 
 int main(int argc, char** argv) {

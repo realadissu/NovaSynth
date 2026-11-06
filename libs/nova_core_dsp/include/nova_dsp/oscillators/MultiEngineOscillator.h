@@ -49,6 +49,10 @@ public:
         float warp = 0.0f;          // 0.0 .. 1.0 (Wavetable warp mode/amount)
         bool lowestNoteOnly = false; // Sub lowest note priority
         int ampEnvSource = 0;        // 0: Main Amp Env 1, 1: Filter Env 2, 2: Mod Env 3, 3: Aux Env 4
+        int sampleLoopMode = 1;      // 0: One-Shot, 1: Forward, 2: Ping-Pong, 3: Reverse
+        float sampleLoopStart = 0.20f; // 0.0 .. 1.0 (Loop start fraction)
+        float sampleLoopEnd = 0.90f;   // 0.0 .. 1.0 (Loop end fraction)
+        float sampleCrossfade = 0.05f; // 0.0 .. 0.25 (Equal-power crossfade length fraction)
     };
 
     [[nodiscard]] static std::vector<const char*> getModelsForEngine(EngineType engine, int sourceType);
@@ -132,6 +136,7 @@ private:
     // Acoustic / Hybrid Sample Playback states
     const SampleZone* activeSampleZone_ = nullptr;
     double samplePlayhead_ = 0.0;
+    double sampleDirection_ = 1.0;
     bool sampleFinished_ = false;
 };
 
