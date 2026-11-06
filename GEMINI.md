@@ -32,3 +32,13 @@ All code inside `libs/nova_core_dsp/` and any `processBlock()` path **MUST** be 
 2. **Pre-Commit Verification:** Every commit must compile cleanly with zero errors/warnings and pass all unit tests (`ctest --test-dir build --output-on-failure`).
 3. **Meaningful Commit Messages:** Use descriptive Conventional Commit style messages (`feat:`, `fix:`, `refactor:`, `perf:`, `test:`, `docs:`) clearly detailing the changes and musical/DSP rationale.
 4. **Synchronized Remote State:** Push verified commits regularly to the remote tracking branch so the working state remains safe, reproducible, and transparent.
+
+---
+
+## 4. UI Typography & Character Encoding Mandate (No 'â' Glyphs)
+
+- **Zero Raw Multi-Byte Unicode Literals in UI Text:** Never embed raw multi-byte UTF-8 glyphs (such as `▾`, `▼`, `►`, `◄`, `•`, `✓`, etc.) directly into C++ string literals or button labels. In JUCE / C++, raw string literals are prone to code page mismatch (MacRoman / ISO-8859), resulting in corrupted glyph artifacts such as `â`, `â`, or unexpected characters.
+- **Enforced Standards:**
+  1. **Procedural Vector Drawing (Preferred):** Draw arrows, triangles, chevrons, icons, and status dots using `juce::Graphics::fillPath()`, `juce::Graphics::fillTriangle()`, or custom look-and-feel methods.
+  2. **Standard ASCII (Safe Alternative):** Use clean ASCII symbols such as `<`, `>`, `v`, `^`, `*`.
+  3. **Explicit UTF-8:** If Unicode symbols are unavoidable, strictly wrap them using `juce::String::fromUTF8(...)` or `juce::CharPointer_UTF8`.

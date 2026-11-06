@@ -8,6 +8,236 @@
 
 namespace nova::synth::ui {
 
+class ArpeggiatorHubPanel;
+
+/**
+ * @brief Modal Save / Overwrite Dialog Overlay for Arp Rhythm Presets
+ *
+ * Implements a Look'n'Feel-conformant modal popup for saving rhythm matrix patterns:
+ * - In InputName mode: user can input a preset name and click SAVE or CANCEL.
+ * - If the entered name exists: transitions to ConfirmOverwrite mode asking whether to overwrite.
+ * - In ConfirmOverwrite mode:
+ *   - Overwrite confirms and saves to UserArpRhythmPresets.json.
+ *   - Cancel returns to InputName mode with the name preserved so the user can modify it.
+ */
+class ArpPatternSaveOverlay : public juce::Component {
+public:
+    enum class Mode {
+        InputName,
+        ConfirmOverwrite
+    };
+
+    ArpPatternSaveOverlay(ArpeggiatorHubPanel& owner, NovaSynthProcessor& proc, const nova::ui::NovaTheme& theme)
+        : owner_(owner), proc_(proc), theme_(theme) {
+
+        titleLabel_.setFont(theme_.getSectionFont(12.0f));
+        titleLabel_.setJustificationType(juce::Justification::centred);
+        titleLabel_.setColour(juce::Label::textColourId, theme_.accentPrimary);
+        addAndMakeVisible(titleLabel_);
+
+        promptLabel_.setFont(theme_.getLabelFont(11.0f));
+        promptLabel_.setJustificationType(juce::Justification::centred);
+        promptLabel_.setColour(juce::Label::textColourId, theme_.textPrimary);
+        addAndMakeVisible(promptLabel_);
+
+        nameEditor_.setMultiLine(false);
+        nameEditor_.setReturnKeyStartsNewLine(false);
+        nameEditor_.setFont(theme_.getValueFont(12.0f));
+        nameEditor_.setColour(juce::TextEditor::backgroundColourId, juce::Colour(0xff090d16));
+        nameEditor_.setColour(juce::TextEditor::textColourId, juce::Colours::white);
+        nameEditor_.setColour(juce::TextEditor::outlineColourId, theme_.accentPrimary.withAlpha(0.6f));
+        nameEditor_.setColour(juce::TextEditor::focusedOutlineColourId, theme_.accentPrimary);
+        nameEditor_.setColour(juce::TextEditor::highlightColourId, theme_.accentPrimary.withAlpha(0.35f));
+        nameEditor_.onReturnKey = [this]() { handleSaveAttempt(); };
+        nameEditor_.onEscapeKey = [this]() { handleCancel(); };
+        addAndMakeVisible(nameEditor_);
+
+        cancelBtn_.setButtonText("CANCEL");
+        cancelBtn_.setColour(juce::TextButton::buttonColourId, juce::Colour(0xff1e293b));
+        cancelBtn_.setColour(juce::TextButton::textColourOffId, juce::Colour(0xffcbd5e1));
+        cancelBtn_.onClick = [this]() { handleCancel(); };
+        addAndMakeVisible(cancelBtn_);
+
+        saveBtn_.setButtonText("SAVE");
+        saveBtn_.setColour(juce::TextButton::buttonColourId, theme_.accentPrimary);
+        saveBtn_.setColour(juce::TextButton::textColourOffId, juce::Colour(0xff090d16));
+        saveBtn_.onClick = [this]() { handleSaveAttempt(); };
+        addAndMakeVisible(saveBtn_);
+
+        overwriteBtn_.setButtonText("OVERWRITE");
+        overwriteBtn_.setColour(juce::TextButton::buttonColourId, juce::Colour(0xfff59e0b));
+        overwriteBtn_.setColour(juce::TextButton::textColourOffId, juce::Colour(0xff090d16));
+        overwriteBtn_.onClick = [this]() { performSave(pendingName_); };
+        addChildComponent(overwriteBtn_);
+    }
+
+    void startSave(const juce::String& defaultName) {
+        mode_ = Mode::InputName;
+        pendingName_ = defaultName;
+        titleLabel_.setText("SAVE RHYTHM PRESET", juce::dontSendNotification);
+        promptLabel_.setText("Enter a name for this rhythm matrix pattern:", juce::dontSendNotification);
+        nameEditor_.setText(defaultName, false);
+        nameEditor_.selectAll();
+        nameEditor_.setVisible(true);
+        saveBtn_.setVisible(true);
+        overwriteBtn_.setVisible(false);
+        cancelBtn_.setVisible(true);
+        resized();
+        repaint();
+        nameEditor_.grabKeyboardFocus();
+    }
+
+    void paint(juce::Graphics& g) override {
+        // Semi-transparent backdrop
+        g.fillAll(juce::Colour(0xd0000000));
+
+        // Dialog box card
+        const auto r = dialogBoxRect_.toFloat();
+        const auto grad = juce::ColourGradient::vertical(
+            juce::Colour(0xff141c2c), r.getY(),
+            juce::Colour(0xff090e18), r.getBottom());
+        g.setGradientFill(grad);
+        g.fillRoundedRectangle(r, 8.0f);
+
+        // Border glow
+        g.setColour(mode_ == Mode::ConfirmOverwrite ? juce::Colour(0xfff59e0b).withAlpha(0.85f)
+                                                    : theme_.accentPrimary.withAlpha(0.85f));
+        g.drawRoundedRectangle(r, 8.0f, 1.5f);
+    }
+
+    void resized() override {
+        const int boxW = 380;
+        const int boxH = (mode_ == Mode::ConfirmOverwrite) ? 170 : 160;
+        dialogBoxRect_ = juce::Rectangle<int>(
+            (getWidth() - boxW) / 2,
+            std::max(10, (getHeight() - boxH) / 2),
+            boxW,
+            boxH);
+
+        auto inner = dialogBoxRect_.reduced(16, 14);
+        titleLabel_.setBounds(inner.removeFromTop(20));
+        inner.removeFromTop(8);
+
+        if (mode_ == Mode::InputName) {
+            promptLabel_.setBounds(inner.removeFromTop(18));
+            inner.removeFromTop(8);
+            nameEditor_.setBounds(inner.removeFromTop(26).reduced(24, 0));
+            inner.removeFromTop(12);
+
+            auto btnRow = inner.removeFromTop(26).reduced(40, 0);
+            const int btnW = (btnRow.getWidth() - 12) / 2;
+            cancelBtn_.setBounds(btnRow.removeFromLeft(btnW));
+            saveBtn_.setBounds(btnRow.removeFromRight(btnW));
+        } else {
+            promptLabel_.setBounds(inner.removeFromTop(44));
+            inner.removeFromTop(12);
+
+            auto btnRow = inner.removeFromTop(26).reduced(30, 0);
+            const int btnW = (btnRow.getWidth() - 12) / 2;
+            cancelBtn_.setBounds(btnRow.removeFromLeft(btnW));
+            overwriteBtn_.setBounds(btnRow.removeFromRight(btnW));
+        }
+    }
+
+    void mouseDown(const juce::MouseEvent& event) override {
+        if (!dialogBoxRect_.contains(event.getPosition())) {
+            if (mode_ == Mode::ConfirmOverwrite) {
+                switchToInputMode();
+            } else {
+                handleCancel();
+            }
+        }
+    }
+
+    bool keyPressed(const juce::KeyPress& key) override {
+        if (key == juce::KeyPress::escapeKey) {
+            handleCancel();
+            return true;
+        }
+        if (key == juce::KeyPress::returnKey) {
+            if (mode_ == Mode::ConfirmOverwrite) {
+                performSave(pendingName_);
+            } else {
+                handleSaveAttempt();
+            }
+            return true;
+        }
+        return false;
+    }
+
+private:
+    void handleSaveAttempt() {
+        const juce::String entered = nameEditor_.getText().trim();
+        if (entered.isEmpty()) {
+            return;
+        }
+        pendingName_ = entered;
+
+        const auto presets = proc_.getAvailableArpRhythmPresets();
+        bool exists = false;
+        for (const auto& p : presets) {
+            if (p.name.equalsIgnoreCase(pendingName_)) {
+                exists = true;
+                break;
+            }
+        }
+
+        if (exists) {
+            mode_ = Mode::ConfirmOverwrite;
+            titleLabel_.setText("OVERWRITE PRESET?", juce::dontSendNotification);
+            promptLabel_.setText("A preset named \"" + pendingName_ + "\" already exists.\nDo you want to overwrite it?",
+                                 juce::dontSendNotification);
+            nameEditor_.setVisible(false);
+            saveBtn_.setVisible(false);
+            overwriteBtn_.setVisible(true);
+            cancelBtn_.setVisible(true);
+            resized();
+            repaint();
+        } else {
+            performSave(pendingName_);
+        }
+    }
+
+    void handleCancel() {
+        if (mode_ == Mode::ConfirmOverwrite) {
+            switchToInputMode();
+        } else {
+            setVisible(false);
+        }
+    }
+
+    void switchToInputMode() {
+        mode_ = Mode::InputName;
+        titleLabel_.setText("SAVE RHYTHM PRESET", juce::dontSendNotification);
+        promptLabel_.setText("Enter a name for this rhythm matrix pattern:", juce::dontSendNotification);
+        nameEditor_.setText(pendingName_, false);
+        nameEditor_.selectAll();
+        nameEditor_.setVisible(true);
+        saveBtn_.setVisible(true);
+        overwriteBtn_.setVisible(false);
+        cancelBtn_.setVisible(true);
+        resized();
+        repaint();
+        nameEditor_.grabKeyboardFocus();
+    }
+
+    void performSave(const juce::String& name);
+
+    ArpeggiatorHubPanel& owner_;
+    NovaSynthProcessor& proc_;
+    const nova::ui::NovaTheme& theme_;
+    Mode mode_ = Mode::InputName;
+    juce::String pendingName_;
+    juce::Rectangle<int> dialogBoxRect_;
+
+    juce::Label titleLabel_;
+    juce::Label promptLabel_;
+    juce::TextEditor nameEditor_;
+    juce::TextButton cancelBtn_;
+    juce::TextButton saveBtn_;
+    juce::TextButton overwriteBtn_;
+};
+
 /**
  * @brief Dedicated Worship Arpeggiator & 16/32/64-Step Rhythm Sequencer Hub Panel (Tab 4)
  *
@@ -19,10 +249,14 @@ namespace nova::synth::ui {
  */
 class ArpeggiatorHubPanel : public juce::Component, public juce::TooltipClient, private juce::Timer {
 public:
+    friend class ArpPatternSaveOverlay;
+
     class StepMatrixComponent : public juce::Component {
     public:
         StepMatrixComponent(NovaSynthProcessor& proc, const nova::ui::NovaTheme& theme)
             : proc_(proc), theme_(theme) {}
+
+        std::function<void()> onModified;
 
         void paint(juce::Graphics& g) override {
             const int numSteps = proc_.getArpPatternLength();
@@ -99,6 +333,7 @@ public:
                             proc_.setArpStepGate(s, true);
                         }
                     }
+                    if (onModified) onModified();
                     repaint();
                     return;
                 }
@@ -171,25 +406,67 @@ public:
             addAndMakeVisible(octaveBtns_[static_cast<std::size_t>(o)]);
         }
 
-        // 5. Pattern Length & Rhythm Preset Dropdown (16, 32, 64 steps)
-        rhythmPresetsBtn_.setButtonText("RHYTHM TEMPLATES ▾");
-        rhythmPresetsBtn_.setTooltip("Choose a musical rhythm matrix preset for 16, 32 or 64 steps");
-        rhythmPresetsBtn_.onClick = [this]() { showRhythmPresetsMenu(); };
-        addAndMakeVisible(rhythmPresetsBtn_);
+        // 5. Rhythm Preset Navigation & Saving
+        prevPresetBtn_.setButtonText("<");
+        prevPresetBtn_.setTooltip("Previous rhythm preset");
+        prevPresetBtn_.onClick = [this]() { selectPreviousPreset(); };
+        addAndMakeVisible(prevPresetBtn_);
 
+        presetNameBtn_.setTooltip("Choose a musical rhythm matrix preset");
+        presetNameBtn_.onClick = [this]() { showRhythmPresetsMenu(); };
+        addAndMakeVisible(presetNameBtn_);
+
+        nextPresetBtn_.setButtonText(">");
+        nextPresetBtn_.setTooltip("Next rhythm preset");
+        nextPresetBtn_.onClick = [this]() { selectNextPreset(); };
+        addAndMakeVisible(nextPresetBtn_);
+
+        savePresetBtn_.setButtonText("SAVE");
+        savePresetBtn_.setTooltip("Save current rhythm matrix as user preset");
+        savePresetBtn_.setColour(juce::TextButton::buttonColourId, theme_.accentPrimary.withAlpha(0.25f));
+        savePresetBtn_.setColour(juce::TextButton::textColourOffId, theme_.accentPrimary);
+        savePresetBtn_.onClick = [this]() { openSavePresetDialog(); };
+        addAndMakeVisible(savePresetBtn_);
+
+        updatePresetDisplay();
+
+        // 6. Pattern Length Selectors
         len16Btn_.setButtonText("16");
         len32Btn_.setButtonText("32");
         len64Btn_.setButtonText("64");
 
-        len16Btn_.onClick = [this]() { proc_.setArpPatternLength(16); updateMatrixLayout(); };
-        len32Btn_.onClick = [this]() { proc_.setArpPatternLength(32); updateMatrixLayout(); };
-        len64Btn_.onClick = [this]() { proc_.setArpPatternLength(64); updateMatrixLayout(); };
+        len16Btn_.onClick = [this]() {
+            if (proc_.getArpPatternLength() != 16) {
+                proc_.setArpPatternLength(16);
+                markModified();
+                updateMatrixLayout();
+            }
+        };
+        len32Btn_.onClick = [this]() {
+            if (proc_.getArpPatternLength() != 32) {
+                proc_.setArpPatternLength(32);
+                markModified();
+                updateMatrixLayout();
+            }
+        };
+        len64Btn_.onClick = [this]() {
+            if (proc_.getArpPatternLength() != 64) {
+                proc_.setArpPatternLength(64);
+                markModified();
+                updateMatrixLayout();
+            }
+        };
 
         addAndMakeVisible(len16Btn_);
         addAndMakeVisible(len32Btn_);
         addAndMakeVisible(len64Btn_);
 
-        // 6. Viewport with inner Step Matrix component
+        // Matrix component modification hook
+        stepMatrixComp_.onModified = [this]() {
+            markModified();
+        };
+
+        // 7. Viewport with inner Step Matrix component
         matrixViewport_.setViewedComponent(&stepMatrixComp_, false);
         addAndMakeVisible(matrixViewport_);
 
@@ -336,7 +613,7 @@ public:
         }
 
         // Header length buttons in cardMatrixRect_
-        const int lenBtnW = 30;
+        const int lenBtnW = 28;
         const int lenBtnH = 17;
         const int lenBtnY = cardMatrixRect_.getY() + 5;
         const int rightX = cardMatrixRect_.getRight() - 10;
@@ -344,12 +621,31 @@ public:
         len32Btn_.setBounds(rightX - lenBtnW * 2 - 3, lenBtnY, lenBtnW, lenBtnH);
         len16Btn_.setBounds(rightX - lenBtnW * 3 - 6, lenBtnY, lenBtnW, lenBtnH);
 
-        const int stepsLabelLeft = len16Btn_.getX() - 52;
-        const int presetBtnW = std::clamp(stepsLabelLeft - (cardMatrixRect_.getX() + 175), 115, 155);
-        const int presetBtnX = stepsLabelLeft - presetBtnW - 8;
-        rhythmPresetsBtn_.setBounds(presetBtnX, lenBtnY, presetBtnW, lenBtnH + 1);
+        const int stepsLabelLeft = len16Btn_.getX() - 48;
+        const int presetAreaLeft = cardMatrixRect_.getX() + 175;
+        const int presetAreaRight = stepsLabelLeft - 8;
+        const int availPresetsW = std::max(120, presetAreaRight - presetAreaLeft);
+
+        const int arrowW = 18;
+        const int saveW = 42;
+        const int hGap = 3;
+        const int nameW = std::clamp(availPresetsW - (arrowW * 2 + saveW + hGap * 3), 90, 200);
+        const int totalPresetW = arrowW + hGap + nameW + hGap + arrowW + hGap + saveW;
+        int curX = presetAreaRight - totalPresetW;
+
+        prevPresetBtn_.setBounds(curX, lenBtnY, arrowW, lenBtnH);
+        curX += arrowW + hGap;
+        presetNameBtn_.setBounds(curX, lenBtnY, nameW, lenBtnH);
+        curX += nameW + hGap;
+        nextPresetBtn_.setBounds(curX, lenBtnY, arrowW, lenBtnH);
+        curX += arrowW + hGap;
+        savePresetBtn_.setBounds(curX, lenBtnY, saveW, lenBtnH);
 
         updateMatrixLayout();
+
+        if (saveOverlay_ != nullptr) {
+            saveOverlay_->setBounds(getLocalBounds());
+        }
     }
 
     void mouseMove(const juce::MouseEvent& event) override {
@@ -375,6 +671,163 @@ public:
         if (syncBtnRect_.contains(pos)) {
             toggleArpSync();
         }
+    }
+
+    [[nodiscard]] juce::String getCurrentPresetName() const noexcept { return currentPresetName_; }
+    [[nodiscard]] bool isPatternModified() const noexcept { return isModified_; }
+
+    void markModified() {
+        if (!isModified_) {
+            isModified_ = true;
+            updatePresetDisplay();
+        }
+    }
+
+    void updatePresetDisplay() {
+        const juce::String prefix = isModified_ ? "* " : "";
+        presetNameBtn_.setButtonText(prefix + currentPresetName_);
+    }
+
+    void selectPreviousPreset() {
+        const auto presets = proc_.getAvailableArpRhythmPresets();
+        if (presets.empty()) return;
+        int idx = 0;
+        for (int i = 0; i < static_cast<int>(presets.size()); ++i) {
+            if (presets[static_cast<std::size_t>(i)].name == currentPresetName_) {
+                idx = i;
+                break;
+            }
+        }
+        const int count = static_cast<int>(presets.size());
+        const int newIdx = (idx - 1 + count) % count;
+        const auto& p = presets[static_cast<std::size_t>(newIdx)];
+        proc_.applyArpRhythmPattern(p.length, p.gates, p.velocities);
+        currentPresetName_ = p.name;
+        isModified_ = false;
+        updatePresetDisplay();
+        updateMatrixLayout();
+        stepMatrixComp_.repaint();
+        repaint(cardMatrixRect_);
+    }
+
+    void selectNextPreset() {
+        const auto presets = proc_.getAvailableArpRhythmPresets();
+        if (presets.empty()) return;
+        int idx = 0;
+        for (int i = 0; i < static_cast<int>(presets.size()); ++i) {
+            if (presets[static_cast<std::size_t>(i)].name == currentPresetName_) {
+                idx = i;
+                break;
+            }
+        }
+        const int count = static_cast<int>(presets.size());
+        const int newIdx = (idx + 1) % count;
+        const auto& p = presets[static_cast<std::size_t>(newIdx)];
+        proc_.applyArpRhythmPattern(p.length, p.gates, p.velocities);
+        currentPresetName_ = p.name;
+        isModified_ = false;
+        updatePresetDisplay();
+        updateMatrixLayout();
+        stepMatrixComp_.repaint();
+        repaint(cardMatrixRect_);
+    }
+
+    void openSavePresetDialog() {
+        if (saveOverlay_ == nullptr) {
+            saveOverlay_ = std::make_unique<ArpPatternSaveOverlay>(*this, proc_, theme_);
+            addAndMakeVisible(*saveOverlay_);
+        }
+        saveOverlay_->setBounds(getLocalBounds());
+        saveOverlay_->startSave(currentPresetName_);
+        saveOverlay_->setVisible(true);
+        saveOverlay_->toFront(true);
+    }
+
+    void onPresetSaved(const juce::String& name) {
+        currentPresetName_ = name;
+        isModified_ = false;
+        updatePresetDisplay();
+        stepMatrixComp_.repaint();
+        repaint(cardMatrixRect_);
+    }
+
+    void showRhythmPresetsMenu() {
+        juce::PopupMenu m;
+        const auto presets = proc_.getAvailableArpRhythmPresets();
+
+        juce::PopupMenu m16;
+        juce::PopupMenu m32;
+        juce::PopupMenu m64;
+        juce::PopupMenu mUser;
+
+        for (std::size_t i = 0; i < presets.size(); ++i) {
+            const int id = static_cast<int>(i + 1);
+            const auto& p = presets[i];
+            const bool isCurrent = (p.name == currentPresetName_);
+            if (p.isUser) {
+                mUser.addItem(id, p.name, true, isCurrent);
+            } else if (p.length == 16) {
+                m16.addItem(id, p.name, true, isCurrent);
+            } else if (p.length == 32) {
+                m32.addItem(id, p.name, true, isCurrent);
+            } else if (p.length == 64) {
+                m64.addItem(id, p.name, true, isCurrent);
+            }
+        }
+
+        m.addSubMenu("16 Steps (1 Bar)", m16);
+        m.addSubMenu("32 Steps (2 Bars)", m32);
+        m.addSubMenu("64 Steps (4 Bars)", m64);
+        if (mUser.getNumItems() > 0) {
+            m.addSubMenu("User Presets", mUser);
+        }
+
+        m.addSeparator();
+
+        juce::PopupMenu mUtil;
+        mUtil.addItem(100, "All Steps ON (16 Steps)");
+        mUtil.addItem(101, "All Steps ON (32 Steps)");
+        mUtil.addItem(102, "All Steps ON (64 Steps)");
+        mUtil.addItem(103, "Clear All Gates (Mute Pattern)");
+        m.addSubMenu("Utilities & Tools", mUtil);
+
+        m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&presetNameBtn_),
+            [this, presets](int res) {
+                if (res <= 0) return;
+
+                if (res >= 1 && res <= static_cast<int>(presets.size())) {
+                    const auto& p = presets[static_cast<std::size_t>(res - 1)];
+                    proc_.applyArpRhythmPattern(p.length, p.gates, p.velocities);
+                    currentPresetName_ = p.name;
+                    isModified_ = false;
+                } else if (res == 100) {
+                    std::vector<bool> g(16, true);
+                    std::vector<float> v(16, 0.85f);
+                    proc_.applyArpRhythmPattern(16, g, v);
+                    isModified_ = true;
+                } else if (res == 101) {
+                    std::vector<bool> g(32, true);
+                    std::vector<float> v(32, 0.85f);
+                    proc_.applyArpRhythmPattern(32, g, v);
+                    isModified_ = true;
+                } else if (res == 102) {
+                    std::vector<bool> g(64, true);
+                    std::vector<float> v(64, 0.85f);
+                    proc_.applyArpRhythmPattern(64, g, v);
+                    isModified_ = true;
+                } else if (res == 103) {
+                    const int len = proc_.getArpPatternLength();
+                    std::vector<bool> g(static_cast<std::size_t>(len), false);
+                    std::vector<float> v(static_cast<std::size_t>(len), 0.5f);
+                    proc_.applyArpRhythmPattern(len, g, v);
+                    isModified_ = true;
+                }
+
+                updatePresetDisplay();
+                updateMatrixLayout();
+                stepMatrixComp_.repaint();
+                repaint(cardMatrixRect_);
+            });
     }
 
 private:
@@ -557,290 +1010,6 @@ private:
         len64Btn_.setToggleState(numSteps == 64, juce::dontSendNotification);
     }
 
-    struct RhythmPatternPreset {
-        juce::String name;
-        int length = 16;
-        std::vector<bool> gates;
-        std::vector<float> velocities;
-    };
-
-    static std::vector<RhythmPatternPreset> getAvailableRhythmPresets() {
-        std::vector<RhythmPatternPreset> presets;
-
-        // ---------------- 16 STEPS (1 Bar) ----------------
-        // 1. Straight 16 (Full Drive)
-        {
-            RhythmPatternPreset p;
-            p.name = "Straight 16 (Full Drive)";
-            p.length = 16;
-            p.gates.assign(16, true);
-            p.velocities = { 1.0f, 0.70f, 0.85f, 0.70f,
-                             0.95f, 0.70f, 0.85f, 0.70f,
-                             1.0f,  0.70f, 0.85f, 0.70f,
-                             0.95f, 0.70f, 0.85f, 0.75f };
-            presets.push_back(std::move(p));
-        }
-
-        // 2. Dotted 8th Worship Pulse (Hillsong / Bethel)
-        {
-            RhythmPatternPreset p;
-            p.name = "Dotted 8th Worship Pulse";
-            p.length = 16;
-            p.gates.assign(16, false);
-            p.velocities.assign(16, 0.50f);
-            const int hits[] = { 0, 3, 6, 9, 12, 15 };
-            const float vels[] = { 1.0f, 0.85f, 0.90f, 0.85f, 0.95f, 0.80f };
-            for (int i = 0; i < 6; ++i) {
-                p.gates[static_cast<std::size_t>(hits[i])] = true;
-                p.velocities[static_cast<std::size_t>(hits[i])] = vels[i];
-            }
-            presets.push_back(std::move(p));
-        }
-
-        // 3. Offbeat Syncopation (Gospel / Funk)
-        {
-            RhythmPatternPreset p;
-            p.name = "Offbeat Syncopation";
-            p.length = 16;
-            p.gates.assign(16, false);
-            p.velocities.assign(16, 0.50f);
-            const int hits[] = { 0, 2, 5, 6, 8, 10, 13, 14 };
-            const float vels[] = { 0.65f, 0.95f, 0.60f, 0.90f, 0.70f, 0.95f, 0.60f, 0.90f };
-            for (int i = 0; i < 8; ++i) {
-                p.gates[static_cast<std::size_t>(hits[i])] = true;
-                p.velocities[static_cast<std::size_t>(hits[i])] = vels[i];
-            }
-            presets.push_back(std::move(p));
-        }
-
-        // 4. Four-on-the-Floor Groove
-        {
-            RhythmPatternPreset p;
-            p.name = "Four-on-the-Floor Groove";
-            p.length = 16;
-            p.gates.assign(16, false);
-            p.velocities.assign(16, 0.50f);
-            const int hits[] = { 0, 2, 4, 6, 8, 10, 12, 14, 15 };
-            const float vels[] = { 1.0f, 0.65f, 0.95f, 0.65f, 1.0f, 0.65f, 0.95f, 0.70f, 0.80f };
-            for (int i = 0; i < 9; ++i) {
-                p.gates[static_cast<std::size_t>(hits[i])] = true;
-                p.velocities[static_cast<std::size_t>(hits[i])] = vels[i];
-            }
-            presets.push_back(std::move(p));
-        }
-
-        // 5. Euphoric Build
-        {
-            RhythmPatternPreset p;
-            p.name = "Euphoric Build";
-            p.length = 16;
-            p.gates.assign(16, false);
-            p.velocities.assign(16, 0.50f);
-            const int hits[] = { 0, 4, 8, 10, 12, 13, 14, 15 };
-            const float vels[] = { 0.45f, 0.55f, 0.65f, 0.75f, 0.85f, 0.90f, 0.95f, 1.0f };
-            for (int i = 0; i < 8; ++i) {
-                p.gates[static_cast<std::size_t>(hits[i])] = true;
-                p.velocities[static_cast<std::size_t>(hits[i])] = vels[i];
-            }
-            presets.push_back(std::move(p));
-        }
-
-        // 6. Ambient Sparse Chime
-        {
-            RhythmPatternPreset p;
-            p.name = "Ambient Sparse Chime";
-            p.length = 16;
-            p.gates.assign(16, false);
-            p.velocities.assign(16, 0.50f);
-            const int hits[] = { 0, 3, 8, 11 };
-            const float vels[] = { 0.85f, 0.65f, 0.80f, 0.60f };
-            for (int i = 0; i < 4; ++i) {
-                p.gates[static_cast<std::size_t>(hits[i])] = true;
-                p.velocities[static_cast<std::size_t>(hits[i])] = vels[i];
-            }
-            presets.push_back(std::move(p));
-        }
-
-        // ---------------- 32 STEPS (2 Bars) ----------------
-        // 7. Bethel 2-Bar Anthem
-        {
-            RhythmPatternPreset p;
-            p.name = "Bethel 2-Bar Anthem";
-            p.length = 32;
-            p.gates.assign(32, false);
-            p.velocities.assign(32, 0.60f);
-            const int b1[] = { 0, 3, 6, 9, 12, 15 };
-            for (int h : b1) { p.gates[static_cast<std::size_t>(h)] = true; p.velocities[static_cast<std::size_t>(h)] = 0.90f; }
-            const int b2[] = { 16, 18, 20, 22, 24, 26, 27, 28, 29, 30, 31 };
-            const float b2v[] = { 0.95f, 0.70f, 0.90f, 0.70f, 1.0f, 0.80f, 0.85f, 0.90f, 0.95f, 0.98f, 1.0f };
-            for (int i = 0; i < 11; ++i) {
-                p.gates[static_cast<std::size_t>(b2[i])] = true;
-                p.velocities[static_cast<std::size_t>(b2[i])] = b2v[i];
-            }
-            presets.push_back(std::move(p));
-        }
-
-        // 8. Call & Response 32
-        {
-            RhythmPatternPreset p;
-            p.name = "Call & Response 32";
-            p.length = 32;
-            p.gates.assign(32, false);
-            p.velocities.assign(32, 0.60f);
-            const int hits[] = { 0, 2, 4, 6, 8, 10, 12, 14, 16, 20, 24, 28 };
-            const float vels[] = { 0.95f, 0.70f, 0.90f, 0.70f, 0.95f, 0.70f, 0.85f, 0.65f, 1.0f, 0.80f, 0.90f, 0.75f };
-            for (int i = 0; i < 12; ++i) {
-                p.gates[static_cast<std::size_t>(hits[i])] = true;
-                p.velocities[static_cast<std::size_t>(hits[i])] = vels[i];
-            }
-            presets.push_back(std::move(p));
-        }
-
-        // 9. Polyrhythmic 3+3+2 Flow
-        {
-            RhythmPatternPreset p;
-            p.name = "Polyrhythmic 3+3+2 Flow";
-            p.length = 32;
-            p.gates.assign(32, false);
-            p.velocities.assign(32, 0.50f);
-            const int hits[] = { 0, 3, 6, 8, 11, 14, 16, 19, 22, 24, 27, 30 };
-            for (int h : hits) {
-                p.gates[static_cast<std::size_t>(h)] = true;
-                p.velocities[static_cast<std::size_t>(h)] = (h % 8 == 0) ? 1.0f : 0.82f;
-            }
-            presets.push_back(std::move(p));
-        }
-
-        // 10. Progressive Velocity Swell (32)
-        {
-            RhythmPatternPreset p;
-            p.name = "Progressive Velocity Swell";
-            p.length = 32;
-            p.gates.assign(32, true);
-            p.velocities.resize(32);
-            for (int s = 0; s < 32; ++s) {
-                p.velocities[static_cast<std::size_t>(s)] = 0.35f + 0.65f * (static_cast<float>(s) / 31.0f);
-            }
-            presets.push_back(std::move(p));
-        }
-
-        // ---------------- 64 STEPS (4 Bars) ----------------
-        // 11. 4-Bar Worship Journey
-        {
-            RhythmPatternPreset p;
-            p.name = "4-Bar Worship Journey";
-            p.length = 64;
-            p.gates.assign(64, false);
-            p.velocities.assign(64, 0.60f);
-            for (int h : { 0, 4, 8, 12 }) { p.gates[static_cast<std::size_t>(h)] = true; p.velocities[static_cast<std::size_t>(h)] = 0.75f; }
-            for (int h : { 16, 19, 22, 25, 28, 31 }) { p.gates[static_cast<std::size_t>(h)] = true; p.velocities[static_cast<std::size_t>(h)] = 0.85f; }
-            for (int h : { 32, 34, 36, 38, 40, 42, 44, 46, 47 }) { p.gates[static_cast<std::size_t>(h)] = true; p.velocities[static_cast<std::size_t>(h)] = 0.90f; }
-            const int b4[] = { 48, 50, 52, 54, 56, 58, 59, 60, 61, 62, 63 };
-            const float b4v[] = { 1.0f, 0.80f, 0.95f, 0.80f, 1.0f, 0.85f, 0.90f, 0.92f, 0.95f, 0.98f, 1.0f };
-            for (int i = 0; i < 11; ++i) {
-                p.gates[static_cast<std::size_t>(b4[i])] = true;
-                p.velocities[static_cast<std::size_t>(b4[i])] = b4v[i];
-            }
-            presets.push_back(std::move(p));
-        }
-
-        // 12. Ambient Texture Wave
-        {
-            RhythmPatternPreset p;
-            p.name = "Ambient Texture Wave";
-            p.length = 64;
-            p.gates.assign(64, false);
-            p.velocities.resize(64);
-            for (int s = 0; s < 64; ++s) {
-                const float wave = 0.5f + 0.5f * std::sin(static_cast<float>(s) * 0.3927f);
-                p.gates[static_cast<std::size_t>(s)] = (s % 4 != 3);
-                p.velocities[static_cast<std::size_t>(s)] = 0.40f + 0.55f * wave;
-            }
-            presets.push_back(std::move(p));
-        }
-
-        // 13. Epic Cinematic Ostinato
-        {
-            RhythmPatternPreset p;
-            p.name = "Epic Cinematic Ostinato";
-            p.length = 64;
-            p.gates.assign(64, true);
-            p.velocities.resize(64);
-            for (int s = 0; s < 64; ++s) {
-                if (s % 16 == 0) p.velocities[static_cast<std::size_t>(s)] = 1.0f;
-                else if (s % 4 == 0) p.velocities[static_cast<std::size_t>(s)] = 0.85f;
-                else if (s % 2 == 0) p.velocities[static_cast<std::size_t>(s)] = 0.70f;
-                else p.velocities[static_cast<std::size_t>(s)] = 0.55f;
-            }
-            presets.push_back(std::move(p));
-        }
-
-        return presets;
-    }
-
-    void showRhythmPresetsMenu() {
-        juce::PopupMenu m;
-        const auto presets = getAvailableRhythmPresets();
-
-        juce::PopupMenu m16;
-        for (std::size_t i = 0; i < 6; ++i) {
-            m16.addItem(static_cast<int>(i + 1), presets[i].name);
-        }
-        m.addSubMenu("16 Steps (1 Bar)", m16);
-
-        juce::PopupMenu m32;
-        for (std::size_t i = 6; i < 10; ++i) {
-            m32.addItem(static_cast<int>(i + 1), presets[i].name);
-        }
-        m.addSubMenu("32 Steps (2 Bars)", m32);
-
-        juce::PopupMenu m64;
-        for (std::size_t i = 10; i < 13; ++i) {
-            m64.addItem(static_cast<int>(i + 1), presets[i].name);
-        }
-        m.addSubMenu("64 Steps (4 Bars)", m64);
-
-        m.addSeparator();
-
-        juce::PopupMenu mUtil;
-        mUtil.addItem(100, "All Steps ON (16 Steps)");
-        mUtil.addItem(101, "All Steps ON (32 Steps)");
-        mUtil.addItem(102, "All Steps ON (64 Steps)");
-        mUtil.addItem(103, "Clear All Gates (Mute Pattern)");
-        m.addSubMenu("Utilities & Tools", mUtil);
-
-        m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&rhythmPresetsBtn_),
-            [this, presets](int res) {
-                if (res <= 0) return;
-
-                if (res >= 1 && res <= static_cast<int>(presets.size())) {
-                    const auto& p = presets[static_cast<std::size_t>(res - 1)];
-                    proc_.applyArpRhythmPattern(p.length, p.gates, p.velocities);
-                } else if (res == 100) {
-                    std::vector<bool> g(16, true);
-                    std::vector<float> v(16, 0.85f);
-                    proc_.applyArpRhythmPattern(16, g, v);
-                } else if (res == 101) {
-                    std::vector<bool> g(32, true);
-                    std::vector<float> v(32, 0.85f);
-                    proc_.applyArpRhythmPattern(32, g, v);
-                } else if (res == 102) {
-                    std::vector<bool> g(64, true);
-                    std::vector<float> v(64, 0.85f);
-                    proc_.applyArpRhythmPattern(64, g, v);
-                } else if (res == 103) {
-                    const int len = proc_.getArpPatternLength();
-                    std::vector<bool> g(static_cast<std::size_t>(len), false);
-                    std::vector<float> v(static_cast<std::size_t>(len), 0.5f);
-                    proc_.applyArpRhythmPattern(len, g, v);
-                }
-
-                updateMatrixLayout();
-                stepMatrixComp_.repaint();
-                repaint(cardMatrixRect_);
-            });
-    }
-
     NovaSynthProcessor& proc_;
     const nova::ui::NovaTheme& theme_;
 
@@ -870,13 +1039,36 @@ private:
     juce::TextButton len16Btn_;
     juce::TextButton len32Btn_;
     juce::TextButton len64Btn_;
-    juce::TextButton rhythmPresetsBtn_;
+
+    // Rhythm Preset Navigation & Saving
+    juce::TextButton prevPresetBtn_;
+    juce::TextButton presetNameBtn_;
+    juce::TextButton nextPresetBtn_;
+    juce::TextButton savePresetBtn_;
+
+    juce::String currentPresetName_{ "Straight 16 (Full Drive)" };
+    bool isModified_{ false };
 
     // Horizontal Viewport & Step Matrix
     HorizontalViewport matrixViewport_;
     StepMatrixComponent stepMatrixComp_;
 
+    std::unique_ptr<ArpPatternSaveOverlay> saveOverlay_;
+
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(ArpeggiatorHubPanel)
 };
+
+inline void ArpPatternSaveOverlay::performSave(const juce::String& name) {
+    const int len = proc_.getArpPatternLength();
+    std::vector<bool> gates(static_cast<std::size_t>(len));
+    std::vector<float> vels(static_cast<std::size_t>(len));
+    for (int i = 0; i < len; ++i) {
+        gates[static_cast<std::size_t>(i)] = proc_.isArpStepGateActive(i);
+        vels[static_cast<std::size_t>(i)] = proc_.getArpStepVelocity(i);
+    }
+    proc_.saveUserArpRhythmPreset(name, len, gates, vels);
+    owner_.onPresetSaved(name);
+    setVisible(false);
+}
 
 } // namespace nova::synth::ui

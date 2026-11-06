@@ -904,7 +904,7 @@ private:
             const auto delF = row.delRect.toFloat();
             g.setFont(theme_.getLabelFont(11.0f));
             g.setColour(theme_.textMuted);
-            g.drawText("×", delF, juce::Justification::centred);
+            g.drawText("x", delF, juce::Justification::centred);
         }
     }
 

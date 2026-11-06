@@ -1144,7 +1144,7 @@ private:
                 for (int i = 0; i <= numPts; ++i) {
                     const float normX = static_cast<float>(i) / static_cast<float>(numPts);
                     const float x = l + normX * r.getWidth();
-                    const int sIdx = std::clamp(static_cast<int>(normX * (z.numSamples - 1)), 0, z.numSamples - 1);
+                    const int sIdx = std::clamp(static_cast<int>(normX * static_cast<float>(z.numSamples - 1)), 0, z.numSamples - 1);
                     float maxV = 0.0f;
                     for (int k = 0; k < step && (sIdx + k) < z.numSamples; k += 8) {
                         maxV = std::max(maxV, std::abs(static_cast<float>(z.pcmL[sIdx + k]) * (1.0f / 32768.0f)));
@@ -1417,7 +1417,7 @@ private:
                 for (int i = 0; i <= numPts; ++i) {
                     const float normX = static_cast<float>(i) / static_cast<float>(numPts);
                     const float x = startX + normX * w;
-                    const int sIdx = std::clamp(static_cast<int>(normX * (z.numSamples - 1)), 0, z.numSamples - 1);
+                    const int sIdx = std::clamp(static_cast<int>(normX * static_cast<float>(z.numSamples - 1)), 0, z.numSamples - 1);
                     float maxV = 0.0f;
                     for (int k = 0; k < step && (sIdx + k) < z.numSamples; k += 4) {
                         maxV = std::max(maxV, std::abs(static_cast<float>(z.pcmL[sIdx + k]) * (1.0f / 32768.0f)));

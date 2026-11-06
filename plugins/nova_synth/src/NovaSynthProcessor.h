@@ -118,7 +118,15 @@ public:
         syncParametersFromAPVTS();
     }
 
-    // Arpeggiator Step Sequencer Accessors
+    // Arpeggiator Step Sequencer Accessors & Presets
+    struct ArpRhythmPreset {
+        juce::String name;
+        int length = 16;
+        std::vector<bool> gates;
+        std::vector<float> velocities;
+        bool isUser = false;
+    };
+
     [[nodiscard]] int getArpPatternLength() const noexcept;
     void setArpPatternLength(int length);
     void applyArpRhythmPattern(int length, const std::vector<bool>& gates, const std::vector<float>& velocities);
@@ -127,6 +135,11 @@ public:
     void toggleArpStepGate(int step);
     [[nodiscard]] float getArpStepVelocity(int step) const noexcept;
     void setArpStepVelocity(int step, float velocity);
+
+    [[nodiscard]] std::vector<ArpRhythmPreset> getAvailableArpRhythmPresets() const;
+    bool saveUserArpRhythmPreset(const juce::String& name, int length, const std::vector<bool>& gates, const std::vector<float>& velocities);
+    bool deleteUserArpRhythmPreset(const juce::String& name);
+    [[nodiscard]] juce::File getUserArpRhythmPresetsFile() const;
 
     // Audio Engine Panic (Reset Sound & Hang Free)
     void triggerPanic() noexcept override;

@@ -4049,6 +4049,90 @@ TEST(NovaSynthArpAndPanicTests, ArpPreservesLongEnvelopeReleaseAndOverlapsVoices
     EXPECT_GT(buffer.getRMSLevel(0, 0, 512), 0.01f);
 }
 
+// 5.9: User Arp Rhythm Presets: Save, Load from Disk, Overwrite, and Delete
+TEST(NovaSynthArpAndPanicTests, SaveAndLoadUserArpRhythmPresetWithOverwrite) {
+    nova::synth::NovaSynthProcessor proc;
+    const juce::String testPresetName = "Test Custom Anthem 16";
+
+    // Clean up if already exists from a prior test run
+    proc.deleteUserArpRhythmPreset(testPresetName);
+
+    // Initial check: factory presets available (13 factory presets)
+    const auto initialPresets = proc.getAvailableArpRhythmPresets();
+    EXPECT_GE(initialPresets.size(), 13u);
+    for (const auto& p : initialPresets) {
+        EXPECT_FALSE(p.isUser);
+    }
+
+    // Prepare custom rhythm pattern
+    std::vector<bool> gates = { true, false, true, false, true, true, false, false,
+                                true, false, true, false, true, true, true, true };
+    std::vector<float> vels = { 1.0f, 0.0f, 0.85f, 0.0f, 0.90f, 0.75f, 0.0f, 0.0f,
+                                1.0f, 0.0f, 0.85f, 0.0f, 0.90f, 0.80f, 0.70f, 0.65f };
+
+    // 1. Save new user preset
+    const bool saved = proc.saveUserArpRhythmPreset(testPresetName, 16, gates, vels);
+    EXPECT_TRUE(saved);
+
+    // 2. Verify it is loaded and returned by getAvailableArpRhythmPresets
+    auto presetsAfterSave = proc.getAvailableArpRhythmPresets();
+    EXPECT_EQ(presetsAfterSave.size(), initialPresets.size() + 1);
+
+    bool found = false;
+    for (const auto& p : presetsAfterSave) {
+        if (p.name == testPresetName) {
+            found = true;
+            EXPECT_TRUE(p.isUser);
+            EXPECT_EQ(p.length, 16);
+            ASSERT_EQ(p.gates.size(), 16u);
+            ASSERT_EQ(p.velocities.size(), 16u);
+            EXPECT_TRUE(p.gates[0]);
+            EXPECT_FALSE(p.gates[1]);
+            EXPECT_TRUE(p.gates[4]);
+            EXPECT_NEAR(p.velocities[0], 1.0f, 1e-4f);
+            EXPECT_NEAR(p.velocities[4], 0.90f, 1e-4f);
+            break;
+        }
+    }
+    EXPECT_TRUE(found);
+
+    // 3. Test Overwrite: change step 1 to active with 0.50f velocity and save again
+    gates[1] = true;
+    vels[1] = 0.50f;
+    const bool overwritten = proc.saveUserArpRhythmPreset(testPresetName, 16, gates, vels);
+    EXPECT_TRUE(overwritten);
+
+    auto presetsAfterOverwrite = proc.getAvailableArpRhythmPresets();
+    // Overwriting must not duplicate the preset
+    EXPECT_EQ(presetsAfterOverwrite.size(), initialPresets.size() + 1);
+
+    bool foundUpdated = false;
+    for (const auto& p : presetsAfterOverwrite) {
+        if (p.name == testPresetName) {
+            foundUpdated = true;
+            EXPECT_TRUE(p.isUser);
+            EXPECT_TRUE(p.gates[1]);
+            EXPECT_NEAR(p.velocities[1], 0.50f, 1e-4f);
+            break;
+        }
+    }
+    EXPECT_TRUE(foundUpdated);
+
+    // 4. Test UI Component instantiation with presets
+    nova::ui::NovaTheme theme;
+    nova::synth::ui::ArpeggiatorHubPanel panel(proc, theme);
+    // Cycle presets forward and backward
+    panel.selectNextPreset();
+    panel.selectPreviousPreset();
+
+    // 5. Cleanup test preset
+    const bool deleted = proc.deleteUserArpRhythmPreset(testPresetName);
+    EXPECT_TRUE(deleted);
+
+    const auto presetsAfterDelete = proc.getAvailableArpRhythmPresets();
+    EXPECT_EQ(presetsAfterDelete.size(), initialPresets.size());
+}
+
 } // namespace
 
 int main(int argc, char** argv) {

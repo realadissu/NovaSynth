@@ -1277,7 +1277,7 @@ public:
             const auto tel = proc_.getSynthTelemetry();
             g.setFont(theme_.getLabelFont(11.0f));
             g.setColour(theme_.textMuted);
-            g.drawText("CLICK LAYER BADGE TO EDIT  •  DRAG: WARMTH & CUTOFF", static_cast<int>(stageRect.getX() + 14), pillY, 340, 20, juce::Justification::centredLeft);
+            g.drawText("CLICK LAYER BADGE TO EDIT  |  DRAG: WARMTH & CUTOFF", static_cast<int>(stageRect.getX() + 14), pillY, 340, 20, juce::Justification::centredLeft);
 
             g.setFont(theme_.getValueFont(12.0f));
             g.setColour(juce::Colour(0xff2dd4bf));
@@ -4493,7 +4493,7 @@ void NovaSynthEditor::configureParentWindow() {
                     btn->setVisible(false);
                     btn->setBounds(0, 0, 0, 0);
 
-                    shell_.setAudioSettingsCallback([this, docWin, btn]() {
+                    shell_.setAudioSettingsCallback([docWin, btn]() {
                         if (btn != nullptr && docWin != nullptr) {
                             btn->setBounds(0, 0, 1, 1);
                             btn->triggerClick();

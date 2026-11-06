@@ -122,7 +122,7 @@ public:
             } else {
                 g.setFont(theme_.getSectionFont(11.0f));
                 g.setColour(isEnabled ? (isSel ? juce::Colours::white : slotCol) : theme_.textMuted);
-                const juce::String combined = getSlotShortName(slot, i) + " · " + getEngineShortName(slot);
+                const juce::String combined = getSlotShortName(slot, i) + " - " + getEngineShortName(slot);
                 g.drawFittedText(combined, textRect, juce::Justification::centredLeft, 1, 0.85f);
             }
         }
