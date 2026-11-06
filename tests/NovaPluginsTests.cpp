@@ -4646,6 +4646,137 @@ TEST(AudioGainStagingTests, PresetGainStagingAndClipperHeadroom) {
     }
 }
 
+TEST(FilterRoutingAndIndependenceTests, DisablingSubOnFilter2DoesNotAlterFilter1Oscillators) {
+    constexpr double sr = 48000.0;
+    constexpr int blockSize = 512;
+
+    nova::dsp::WorshipSynthEngine engine;
+    engine.prepare(sr, blockSize);
+
+    auto p = engine.getParameters();
+    p.activeOscCount = 3;
+
+    // Osc 1: Pluck (Engine 3), routed to Filter 1 (route 0)
+    p.oscSlots[0].enabled = true;
+    p.oscSlots[0].engine = nova::dsp::MultiEngineOscillator::EngineType::PhysicalPluckModal;
+    p.oscSlots[0].modelIndex = 1; // Nylon Harp
+    p.oscSlots[0].filterRouting = 0; // FLT 1
+    p.oscSlots[0].level = 0.85f;
+
+    // Osc 2: Wavetable (Engine 1), routed to Filter 1 (route 0)
+    p.oscSlots[1].enabled = true;
+    p.oscSlots[1].engine = nova::dsp::MultiEngineOscillator::EngineType::EvolvingWavetable;
+    p.oscSlots[1].modelIndex = 0;
+    p.oscSlots[1].filterRouting = 0; // FLT 1
+    p.oscSlots[1].level = 0.70f;
+
+    // Osc 3: Sub (Engine 4), routed to Filter 2 (route 1)
+    p.oscSlots[2].enabled = true;
+    p.oscSlots[2].engine = nova::dsp::MultiEngineOscillator::EngineType::SubOscillator;
+    p.oscSlots[2].sourceType = 1;
+    p.oscSlots[2].modelIndex = 0;
+    p.oscSlots[2].filterRouting = 1; // FLT 2
+    p.oscSlots[2].level = 0.80f;
+
+    // Filter 1: LowPass 24dB at 2500 Hz
+    p.filter1Enabled = true;
+    p.filterType = 0;
+    p.filterCutoffHz = 2500.0f;
+    p.filterResonance = 0.7071f;
+
+    // Filter 2: LowPass 12dB at 180 Hz for the Sub (or Highpass at 400 Hz)
+    p.filter2Enabled = true;
+    p.filter2Type = 0;
+    p.filter2CutoffHz = 180.0f;
+    p.filter2Resonance = 0.7071f;
+
+    // First measure with SUB DISABLED from the start (only Osc 1 & Osc 2 playing into Filter 1)
+    p.oscSlots[2].enabled = false;
+    engine.setParameters(p);
+    engine.noteOn(60, 0.85f); // Middle C
+
+    float subOffRms = 0.0f;
+    float subOffHighFreqEnergy = 0.0f;
+    juce::AudioBuffer<float> buf(2, blockSize);
+    for (int b = 0; b < 20; ++b) {
+        buf.clear();
+        engine.processBlock(buf.getWritePointer(0), buf.getWritePointer(1), blockSize);
+        if (b > 5) {
+            subOffRms = std::max(subOffRms, buf.getRMSLevel(0, 0, blockSize));
+            const float* ch = buf.getReadPointer(0);
+            for (int i = 1; i < blockSize; ++i) {
+                // High frequency delta energy (above 1 kHz)
+                const float diff = ch[i] - ch[i - 1];
+                subOffHighFreqEnergy += diff * diff;
+            }
+        }
+    }
+    engine.allNotesOff();
+    engine.reset();
+
+    // Now measure with SUB ENABLED, but check the high-frequency portion (which comes ONLY from Osc 1 & 2 via Filter 1)
+    p.oscSlots[2].enabled = true;
+    engine.setParameters(p);
+    engine.noteOn(60, 0.85f);
+
+    float subOnHighFreqEnergy = 0.0f;
+    for (int b = 0; b < 20; ++b) {
+        buf.clear();
+        engine.processBlock(buf.getWritePointer(0), buf.getWritePointer(1), blockSize);
+        if (b > 5) {
+            const float* ch = buf.getReadPointer(0);
+            for (int i = 1; i < blockSize; ++i) {
+                const float diff = ch[i] - ch[i - 1];
+                subOnHighFreqEnergy += diff * diff;
+            }
+        }
+    }
+
+    std::cout << "[ROUTING TEST] Sub ON High-Freq Energy: " << subOnHighFreqEnergy
+              << ", Sub OFF High-Freq Energy: " << subOffHighFreqEnergy
+              << ", Sub OFF Total RMS: " << subOffRms << "\n";
+
+    // When Sub is turned OFF, Osc 1 & Osc 2 on Filter 1 MUST NOT have their highs decimated by Filter 2!
+    // With the bug, subOffHighFreqEnergy collapses to near zero (< 10% of normal) because Filter 2 (180 Hz LP) cuts all highs!
+    EXPECT_GT(subOffHighFreqEnergy, subOnHighFreqEnergy * 0.70f)
+        << "Turning off Sub caused Filter 1's oscillators to be filtered by Filter 2 (became thin/muffled)!";
+}
+
+TEST(FilterRoutingAndIndependenceTests, PluckOscillatorMaintainsSubstantialAcousticPresenceAndDecay) {
+    nova::dsp::MultiEngineOscillator osc;
+    osc.prepare(48000.0);
+
+    for (int m = 0; m < 2; ++m) {
+        nova::dsp::MultiEngineOscillator::Parameters p;
+        p.enabled = true;
+        p.engine = nova::dsp::MultiEngineOscillator::EngineType::PhysicalPluckModal;
+        p.modelIndex = m;
+        p.shapeMorph = 0.5f;
+        p.level = 0.85f;
+        osc.setParameters(p);
+        osc.triggerNote(261.63f, 0.9f, 100u);
+
+        float peakInitial = 0.0f;
+        for (int i = 0; i < 480; ++i) { // first 10ms
+            float l = 0.0f, r = 0.0f;
+            osc.processSample(261.63f, 0.0f, 0.0f, l, r);
+            peakInitial = std::max(peakInitial, std::max(std::abs(l), std::abs(r)));
+        }
+        EXPECT_GT(peakInitial, 0.45f) << "Pluck model " << m << " initial transient must have punch!";
+
+        // Process up to 200ms (9600 samples)
+        float peakAt200ms = 0.0f;
+        for (int i = 480; i < 9600; ++i) {
+            float l = 0.0f, r = 0.0f;
+            osc.processSample(261.63f, 0.0f, 0.0f, l, r);
+            if (i > 9000) {
+                peakAt200ms = std::max(peakAt200ms, std::max(std::abs(l), std::abs(r)));
+            }
+        }
+        EXPECT_GT(peakAt200ms, 0.08f) << "Pluck model " << m << " should have audible acoustic body at 200ms!";
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv) {

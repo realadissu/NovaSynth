@@ -461,9 +461,9 @@ void MultiEngineOscillator::triggerNote(float baseFrequencyHz, float velocity, u
                 rng_ = rng_ * 1664525u + 1013904223u;
                 const float nL = ((static_cast<float>(rng_ & 0xFFFFu) / 32767.5f) - 1.0f);
                 const float win = std::sin(std::numbers::pi_v<float> * static_cast<float>(i) / static_cast<float>(periodSamples));
-                smoothExcL += (0.25f + 0.70f * pluckHardness) * (nL - smoothExcL);
+                smoothExcL += (0.35f + 0.55f * pluckHardness) * (nL - smoothExcL);
                 const float body = std::sin(2.0f * std::numbers::pi_v<float> * static_cast<float>(i) / static_cast<float>(periodSamples));
-                stringDelayL_[static_cast<std::size_t>(i)] = (smoothExcL * 0.85f + body * 0.35f) * win * velScale;
+                stringDelayL_[static_cast<std::size_t>(i)] = (smoothExcL * 1.5f + body * 0.70f) * win * velScale;
                 stringDelayR_[static_cast<std::size_t>(i)] = stringDelayL_[static_cast<std::size_t>(i)];
             }
             break;
@@ -473,9 +473,9 @@ void MultiEngineOscillator::triggerNote(float baseFrequencyHz, float velocity, u
                 rng_ = rng_ * 1664525u + 1013904223u;
                 const float nL = ((static_cast<float>(rng_ & 0xFFFFu) / 32767.5f) - 1.0f);
                 const float win = std::pow(std::sin(std::numbers::pi_v<float> * static_cast<float>(i) / static_cast<float>(periodSamples)), 1.8f);
-                smoothExcL += (0.08f + 0.32f * pluckHardness) * (nL - smoothExcL);
+                smoothExcL += (0.16f + 0.45f * pluckHardness) * (nL - smoothExcL);
                 const float body = std::sin(std::numbers::pi_v<float> * static_cast<float>(i) / static_cast<float>(periodSamples));
-                stringDelayL_[static_cast<std::size_t>(i)] = (smoothExcL * 0.45f + body * 0.80f) * win * velScale;
+                stringDelayL_[static_cast<std::size_t>(i)] = (smoothExcL * 0.85f + body * 1.35f) * win * velScale;
                 stringDelayR_[static_cast<std::size_t>(i)] = stringDelayL_[static_cast<std::size_t>(i)];
             }
             break;

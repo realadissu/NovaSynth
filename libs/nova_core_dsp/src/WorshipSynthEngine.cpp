@@ -1279,14 +1279,22 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
                 flt1InR *= v.flt1ResComp;
             }
 
-            const bool hasBoth = (voiceBothL != 0.0f || voiceBothR != 0.0f);
-            const bool hasDedicatedFlt2 = (voiceFlt2L != 0.0f || voiceFlt2R != 0.0f);
-            // When Filter 2 is enabled and no oscillators are routed exclusively to FLT 2,
-            // route Filter 1 in series into Filter 2 so Filter 2 always shapes the voice!
-            const bool seriesFlt1IntoFlt2 = params_.filter2Enabled && !hasDedicatedFlt2 && !hasBoth;
+            // Calculate the fraction of Filter 1's audio that belongs to FLT 1+2 (Dual Series):
+            const float inBothMag = std::abs(voiceBothL) + std::abs(voiceBothR);
+            const float inFlt1Mag = std::abs(voiceFlt1L) + std::abs(voiceFlt1R);
+            const float bothFraction = (inBothMag + inFlt1Mag > 1e-7f)
+                ? (inBothMag / (inBothMag + inFlt1Mag))
+                : 0.0f;
 
-            float flt2InL = seriesFlt1IntoFlt2 ? flt1InL : (voiceFlt2L + (hasBoth ? (flt1InL * 0.5f) : 0.0f));
-            float flt2InR = seriesFlt1IntoFlt2 ? flt1InR : (voiceFlt2R + (hasBoth ? (flt1InR * 0.5f) : 0.0f));
+            // Only the FLT 1+2 series portion of Filter 1's output continues into Filter 2.
+            // The FLT 1 parallel portion goes directly to the master mix and is NEVER touched by Filter 2!
+            const float flt1DirectL = flt1InL * (1.0f - bothFraction);
+            const float flt1DirectR = flt1InR * (1.0f - bothFraction);
+            const float flt1ToFlt2L = flt1InL * bothFraction;
+            const float flt1ToFlt2R = flt1InR * bothFraction;
+
+            float flt2InL = voiceFlt2L + flt1ToFlt2L;
+            float flt2InR = voiceFlt2R + flt1ToFlt2R;
 
             if (params_.filter2Enabled) {
                 const float voiceResoMod2 = voiceOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::Filter2Resonance)] * 0.5f;
@@ -1332,18 +1340,8 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
             const float droneScale = v.isDroneVoice ? (params_.droneLevel * 0.70f) : polyHeadroom;
             const float gain = velGain * droneScale * 0.82f;
 
-            float vOutL = 0.0f;
-            float vOutR = 0.0f;
-            if (seriesFlt1IntoFlt2) {
-                vOutL = (flt2InL + voiceDirL) * gain;
-                vOutR = (flt2InR + voiceDirR) * gain;
-            } else if (hasBoth) {
-                vOutL = (flt1InL * 0.5f + flt2InL + voiceDirL) * gain;
-                vOutR = (flt1InR * 0.5f + flt2InR + voiceDirR) * gain;
-            } else {
-                vOutL = (flt1InL + flt2InL + voiceDirL) * gain;
-                vOutR = (flt1InR + flt2InR + voiceDirR) * gain;
-            }
+            const float vOutL = (flt1DirectL + flt2InL + voiceDirL) * gain;
+            const float vOutR = (flt1DirectR + flt2InR + voiceDirR) * gain;
 
             if (v.isDroneVoice) {
                 droneL += vOutL;
