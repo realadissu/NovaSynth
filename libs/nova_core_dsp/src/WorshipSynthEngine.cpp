@@ -125,6 +125,8 @@ void WorshipSynthEngine::reset() noexcept {
         v.sustainedByPedal = false;
         v.isDroneVoice = false;
         v.heldByDrone = false;
+        v.isArpVoice = false;
+        v.heldByArp = false;
         v.midiNote = -1;
         for (auto& o : v.oscs) o.reset();
         v.ampEnv.reset();
@@ -372,7 +374,7 @@ void WorshipSynthEngine::noteOff(int midiNote) noexcept {
     }
 
     for (auto& v : voices_) {
-        if (v.active && !v.isDroneVoice && v.midiNote == midiNote) {
+        if (v.active && !v.isDroneVoice && !v.isArpVoice && v.midiNote == midiNote) {
             v.heldByKey = false;
             if (sustainPedalDown_) {
                 v.sustainedByPedal = true;
@@ -427,6 +429,7 @@ void WorshipSynthEngine::allNotesOff() noexcept {
         if (v.active && !v.isDroneVoice) {
             v.heldByKey = false;
             v.sustainedByPedal = false;
+            v.heldByArp = false;
             v.ampEnv.noteOff();
             v.filterEnv.noteOff();
             v.modEnv.noteOff();
@@ -439,7 +442,8 @@ void WorshipSynthEngine::stopActiveArpVoices() noexcept {
     for (auto& v : voices_) {
         if (v.active && !v.isDroneVoice && v.isArpVoice) {
             v.heldByKey = false;
-            constexpr float kStepEndRelease = 0.008f;
+            v.heldByArp = false;
+            constexpr float kStepEndRelease = 0.015f;
             auto ampParams = v.ampEnv.getParameters();
             ampParams.releaseSec = std::min(ampParams.releaseSec, kStepEndRelease);
             v.ampEnv.setParameters(ampParams);
@@ -478,11 +482,11 @@ void WorshipSynthEngine::startVoice(int midiNote, float velocity, bool isDrone, 
         }
     }
 
-    // 2. If all voices are active, steal a released voice (not held by key or pedal) with the quietest envelope level
+    // 2. If all voices are active, steal a released voice (not held by key, pedal, or arp) with the quietest envelope level
     if (chosen == nullptr) {
         float lowestLevel = 1e9f;
         for (auto& v : voices_) {
-            if (!v.isDroneVoice && !v.heldByKey && !v.sustainedByPedal) {
+            if (!v.isDroneVoice && !v.heldByKey && !v.sustainedByPedal && !v.heldByArp) {
                 const float lvl = v.ampEnv.getCurrentLevel();
                 if (lvl < lowestLevel) {
                     lowestLevel = lvl;
@@ -496,7 +500,7 @@ void WorshipSynthEngine::startVoice(int midiNote, float velocity, bool isDrone, 
     if (chosen == nullptr) {
         uint64_t oldestAge = UINT64_MAX;
         for (auto& v : voices_) {
-            if (!v.isDroneVoice && !v.heldByKey && v.ageCounter < oldestAge) {
+            if (!v.isDroneVoice && !v.heldByKey && !v.sustainedByPedal && !v.heldByArp && v.ageCounter < oldestAge) {
                 oldestAge = v.ageCounter;
                 chosen = &v;
             }
@@ -533,6 +537,7 @@ void WorshipSynthEngine::startVoice(int midiNote, float velocity, bool isDrone, 
     chosen->isDroneVoice = isDrone;
     chosen->heldByDrone = isDrone;
     chosen->isArpVoice = isArp;
+    chosen->heldByArp = isArp;
     chosen->midiNote = midiNote;
     chosen->baseFreqHz = midiNoteToHz(midiNote);
     chosen->velocity = std::clamp(velocity, 0.05f, 1.0f);
@@ -749,8 +754,8 @@ void WorshipSynthEngine::stepArpeggiator(int numSamples) noexcept {
     if (!params_.arpEnabled) {
         if (currentArpNote_ >= 0) {
             for (auto& v : voices_) {
-                if (v.active && !v.isDroneVoice && v.isArpVoice) {
-                    v.heldByKey = false;
+                if (v.active && !v.isDroneVoice && v.isArpVoice && v.heldByArp) {
+                    v.heldByArp = false;
                     v.ampEnv.noteOff();
                     v.filterEnv.noteOff();
                     v.modEnv.noteOff();
@@ -781,8 +786,8 @@ void WorshipSynthEngine::stepArpeggiator(int numSamples) noexcept {
     if (heldCount == 0) {
         if (currentArpNote_ >= 0) {
             for (auto& v : voices_) {
-                if (v.active && !v.isDroneVoice && v.isArpVoice) {
-                    v.heldByKey = false;
+                if (v.active && !v.isDroneVoice && v.isArpVoice && v.heldByArp) {
+                    v.heldByArp = false;
                     v.ampEnv.noteOff();
                     v.filterEnv.noteOff();
                     v.modEnv.noteOff();
@@ -830,34 +835,15 @@ void WorshipSynthEngine::stepArpeggiator(int numSamples) noexcept {
         const double prevPhase = arpPhaseSamples_;
         arpPhaseSamples_ += static_cast<double>(numSamples);
 
-        // GATE CUTOFF: When phase passes gateThreshold, end the note with a crisp, click-free release!
+        // GATE CUTOFF: When phase passes gateThreshold, end the gate for the currently held arp note.
+        // Voices release naturally according to their full envelope parameters, enabling lush overlap and wash!
         const double gateRatio = std::clamp(static_cast<double>(params_.arpGate), 0.05, 1.0);
         const double gateThreshold = stepSamples * gateRatio;
 
         if (prevPhase < gateThreshold && arpPhaseSamples_ >= gateThreshold) {
             for (auto& v : voices_) {
-                if (v.active && !v.isDroneVoice && v.isArpVoice) {
-                    v.heldByKey = false;
-                    // Fast release tailored to remaining time before next step (staccato duration)
-                    const double remainingSec = std::max(0.005, (stepSamples - arpPhaseSamples_) / sampleRate_);
-                    const float arpRel = std::clamp(static_cast<float>(remainingSec * 0.5), 0.008f, 0.050f);
-
-                    auto ampParams = v.ampEnv.getParameters();
-                    ampParams.releaseSec = std::min(ampParams.releaseSec, arpRel);
-                    v.ampEnv.setParameters(ampParams);
-
-                    auto fltParams = v.filterEnv.getParameters();
-                    fltParams.releaseSec = std::min(fltParams.releaseSec, arpRel);
-                    v.filterEnv.setParameters(fltParams);
-
-                    auto modParams = v.modEnv.getParameters();
-                    modParams.releaseSec = std::min(modParams.releaseSec, arpRel);
-                    v.modEnv.setParameters(modParams);
-
-                    auto auxParams = v.auxEnv.getParameters();
-                    auxParams.releaseSec = std::min(auxParams.releaseSec, arpRel);
-                    v.auxEnv.setParameters(auxParams);
-
+                if (v.active && !v.isDroneVoice && v.isArpVoice && v.heldByArp) {
+                    v.heldByArp = false;
                     v.ampEnv.noteOff();
                     v.filterEnv.noteOff();
                     v.modEnv.noteOff();
@@ -879,27 +865,10 @@ void WorshipSynthEngine::stepArpeggiator(int numSamples) noexcept {
         const bool stepGate = params_.arpStepGates[static_cast<std::size_t>(currentArpStep_)];
         const float stepVel = std::clamp(params_.arpStepVelocities[static_cast<std::size_t>(currentArpStep_)], 0.05f, 1.0f);
 
-        // Terminate any previous arp notes cleanly on step boundaries
+        // End gate on any voice still held (e.g. gateRatio == 1.0 or legato), leaving releasing notes to decay naturally!
         for (auto& v : voices_) {
-            if (v.active && !v.isDroneVoice && v.isArpVoice) {
-                v.heldByKey = false;
-                constexpr float kStepEndRelease = 0.008f;
-                auto ampParams = v.ampEnv.getParameters();
-                ampParams.releaseSec = std::min(ampParams.releaseSec, kStepEndRelease);
-                v.ampEnv.setParameters(ampParams);
-
-                auto fltParams = v.filterEnv.getParameters();
-                fltParams.releaseSec = std::min(fltParams.releaseSec, kStepEndRelease);
-                v.filterEnv.setParameters(fltParams);
-
-                auto modParams = v.modEnv.getParameters();
-                modParams.releaseSec = std::min(modParams.releaseSec, kStepEndRelease);
-                v.modEnv.setParameters(modParams);
-
-                auto auxParams = v.auxEnv.getParameters();
-                auxParams.releaseSec = std::min(auxParams.releaseSec, kStepEndRelease);
-                v.auxEnv.setParameters(auxParams);
-
+            if (v.active && !v.isDroneVoice && v.isArpVoice && v.heldByArp) {
+                v.heldByArp = false;
                 v.ampEnv.noteOff();
                 v.filterEnv.noteOff();
                 v.modEnv.noteOff();
@@ -1022,7 +991,7 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
     // Separately track keyboard-played notes and drone voices so crossfades don't delay or cut the sub!
     int lowestKeyNote = 128;
     for (const auto& v : voices_) {
-        if (v.active && !v.isDroneVoice && (v.heldByKey || v.sustainedByPedal)) {
+        if (v.active && !v.isDroneVoice && (v.heldByKey || v.sustainedByPedal || v.heldByArp)) {
             lowestKeyNote = std::min(lowestKeyNote, v.midiNote);
         }
     }
@@ -1176,10 +1145,12 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
                 maxEnv = std::max(maxEnv, auxEnvVal);
             }
 
-            if (!anyEnvActive || (!v.heldByKey && !v.sustainedByPedal && !v.heldByDrone && maxEnv < 1e-4f)) {
+            if (!anyEnvActive || (!v.heldByKey && !v.sustainedByPedal && !v.heldByDrone && !v.heldByArp && maxEnv < 1e-4f)) {
                 v.active = false;
                 v.isDroneVoice = false;
                 v.heldByDrone = false;
+                v.isArpVoice = false;
+                v.heldByArp = false;
                 continue;
             }
 

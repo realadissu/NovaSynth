@@ -271,6 +271,7 @@ private:
         bool isDroneVoice = false;
         bool heldByDrone = false;
         bool isArpVoice = false;
+        bool heldByArp = false;
         int midiNote = -1;
         float baseFreqHz = 440.0f;
         float velocity = 0.8f;

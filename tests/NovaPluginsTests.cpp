@@ -2828,6 +2828,7 @@ TEST(ArpeggiatorHubPanelTests, ArpeggiatorStepMatrixRestVelocityGateAndPatternLe
     if (auto* pR = apvts.getParameter("arpRateHz")) pR->setValueNotifyingHost(pR->convertTo0to1(8.0f));
     if (auto* pG = apvts.getParameter("arpGate")) pG->setValueNotifyingHost(pG->convertTo0to1(0.20f)); // 20% Gate = 25ms gate
     if (auto* pA = apvts.getParameter("ampAttack")) pA->setValueNotifyingHost(pA->convertTo0to1(0.005f));
+    if (auto* pRel = apvts.getParameter("ampRelease")) pRel->setValueNotifyingHost(pRel->convertTo0to1(0.02f)); // 20ms Release for crisp staccato test
     if (auto* pDel = apvts.getParameter("delayEnabled")) pDel->setValueNotifyingHost(0.0f);
     if (auto* pRev = apvts.getParameter("reverbMix")) pRev->setValueNotifyingHost(pRev->convertTo0to1(0.0f));
 
@@ -3932,6 +3933,10 @@ TEST(NovaSynthArpAndPanicTests, SwitchingRhythmPatternsDuringArpPlaybackPrevents
     if (auto* p = proc.getAPVTS().getParameter("delayMix")) {
         p->setValueNotifyingHost(0.0f);
     }
+    // Set fast release so voices decay within 100 blocks
+    if (auto* p = proc.getAPVTS().getParameter("ampRelease")) {
+        p->setValueNotifyingHost(p->convertTo0to1(0.05f));
+    }
 
     // Set 16-step pattern initially
     std::vector<bool> g16(16, true);
@@ -3976,6 +3981,72 @@ TEST(NovaSynthArpAndPanicTests, SwitchingRhythmPatternsDuringArpPlaybackPrevents
     // All voices should be released cleanly with no hung notes
     EXPECT_EQ(proc.getEngine().getActiveVoiceCount(), 0);
     EXPECT_NEAR(buffer.getRMSLevel(0, 0, 512), 0.0f, 1e-4f);
+}
+
+// 5.8: Arp Preserves Long Envelope Release And Overlaps Voices
+TEST(NovaSynthArpAndPanicTests, ArpPreservesLongEnvelopeReleaseAndOverlapsVoices) {
+    nova::synth::NovaSynthProcessor proc;
+    proc.prepareToPlay(48000.0, 512);
+
+    auto& apvts = proc.getAPVTS();
+
+    // Configure Amp Envelope matching user setting:
+    // Attack: 0.04s, Hold: 1.0s, Decay: 5.0s, Sustain: 1.0, Release: 6.0s
+    if (auto* p = apvts.getParameter("ampAttack"))   p->setValueNotifyingHost(p->convertTo0to1(0.04f));
+    if (auto* p = apvts.getParameter("ampHold"))     p->setValueNotifyingHost(p->convertTo0to1(1.0f));
+    if (auto* p = apvts.getParameter("ampDecay"))    p->setValueNotifyingHost(p->convertTo0to1(5.0f));
+    if (auto* p = apvts.getParameter("ampSustain"))  p->setValueNotifyingHost(1.0f);
+    if (auto* p = apvts.getParameter("ampRelease"))  p->setValueNotifyingHost(p->convertTo0to1(6.0f));
+
+    // Turn on Arpeggiator: 16th notes at 120 BPM (~125 ms per step), 65% gate
+    if (auto* p = apvts.getParameter("arpEnabled"))  p->setValueNotifyingHost(1.0f);
+    if (auto* p = apvts.getParameter("arpGate"))     p->setValueNotifyingHost(p->convertTo0to1(0.65f));
+
+    // Dry signal for exact voice energy evaluation
+    if (auto* p = apvts.getParameter("reverbMix"))   p->setValueNotifyingHost(0.0f);
+    if (auto* p = apvts.getParameter("delayMix"))    p->setValueNotifyingHost(0.0f);
+
+    juce::AudioBuffer<float> buffer(2, 512);
+    juce::MidiBuffer midi;
+
+    // Play a 3-note chord (C, E, G: notes 60, 64, 67)
+    midi.addEvent(juce::MidiMessage::noteOn(1, 60, (juce::uint8)100), 0);
+    midi.addEvent(juce::MidiMessage::noteOn(1, 64, (juce::uint8)100), 0);
+    midi.addEvent(juce::MidiMessage::noteOn(1, 67, (juce::uint8)100), 0);
+
+    // Process blocks over ~1.2 seconds (~110 blocks of 512 samples at 48kHz = 56320 samples)
+    // At 125ms per step, ~9 arpeggio steps will be triggered.
+    for (int b = 0; b < 110; ++b) {
+        buffer.clear();
+        proc.processBlock(buffer, midi);
+        midi.clear();
+    }
+
+    // Since releaseSec is 6.0 seconds, previous notes must NOT have been killed at step ends!
+    // They must accumulate and overlap polyphonically.
+    const int activeVoices = proc.getEngine().getActiveVoiceCount();
+    EXPECT_GE(activeVoices, 3) << "Expected polyphonic voice overlap from long release tail, but got only " << activeVoices;
+
+    // Buffer must have rich sustained audio energy (not cut off between steps)
+    const float rms = buffer.getRMSLevel(0, 0, 512);
+    EXPECT_GT(rms, 0.05f) << "Expected rich sustaining audio energy, but got RMS: " << rms;
+    EXPECT_FALSE(std::isnan(buffer.getSample(0, 0)));
+
+    // Release keys
+    midi.addEvent(juce::MidiMessage::noteOff(1, 60, (juce::uint8)0), 0);
+    midi.addEvent(juce::MidiMessage::noteOff(1, 64, (juce::uint8)0), 0);
+    midi.addEvent(juce::MidiMessage::noteOff(1, 67, (juce::uint8)0), 0);
+
+    // Process a few blocks (~100 ms) immediately after key release
+    for (int b = 0; b < 10; ++b) {
+        buffer.clear();
+        proc.processBlock(buffer, midi);
+        midi.clear();
+    }
+
+    // Because releaseSec is 6.0 seconds, voices must STILL be ringing out smoothly, NOT cut off abruptly!
+    EXPECT_GE(proc.getEngine().getActiveVoiceCount(), 1);
+    EXPECT_GT(buffer.getRMSLevel(0, 0, 512), 0.01f);
 }
 
 } // namespace
