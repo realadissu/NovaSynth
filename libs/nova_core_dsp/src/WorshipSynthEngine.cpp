@@ -435,6 +435,37 @@ void WorshipSynthEngine::allNotesOff() noexcept {
     }
 }
 
+void WorshipSynthEngine::stopActiveArpVoices() noexcept {
+    for (auto& v : voices_) {
+        if (v.active && !v.isDroneVoice && v.isArpVoice) {
+            v.heldByKey = false;
+            constexpr float kStepEndRelease = 0.008f;
+            auto ampParams = v.ampEnv.getParameters();
+            ampParams.releaseSec = std::min(ampParams.releaseSec, kStepEndRelease);
+            v.ampEnv.setParameters(ampParams);
+
+            auto fltParams = v.filterEnv.getParameters();
+            fltParams.releaseSec = std::min(fltParams.releaseSec, kStepEndRelease);
+            v.filterEnv.setParameters(fltParams);
+
+            auto modParams = v.modEnv.getParameters();
+            modParams.releaseSec = std::min(modParams.releaseSec, kStepEndRelease);
+            v.modEnv.setParameters(modParams);
+
+            auto auxParams = v.auxEnv.getParameters();
+            auxParams.releaseSec = std::min(auxParams.releaseSec, kStepEndRelease);
+            v.auxEnv.setParameters(auxParams);
+
+            v.ampEnv.noteOff();
+            v.filterEnv.noteOff();
+            v.modEnv.noteOff();
+            v.auxEnv.noteOff();
+        }
+    }
+    arpPhaseSamples_ = 0.0;
+    arpTriggerPending_ = true;
+}
+
 void WorshipSynthEngine::startVoice(int midiNote, float velocity, bool isDrone, bool isArp) noexcept {
     Voice* chosen = nullptr;
 

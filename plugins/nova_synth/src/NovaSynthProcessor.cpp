@@ -1601,6 +1601,21 @@ void NovaSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mi
         }
     }
 
+    const bool isPanic = panicPending_.exchange(false, std::memory_order_acq_rel);
+    if (isPanic) {
+        synthEngine_.allNotesOff();
+        synthEngine_.reset();
+        synthEngine_.snapSmoothersToTarget();
+        PendingNoteEvent ev{};
+        while (uiNoteQueue_.pop(ev)) {}
+        inputPeak_.store(0.0f, std::memory_order_relaxed);
+        outputPeak_.store(0.0f, std::memory_order_relaxed);
+    }
+
+    if (arpPatternResetPending_.exchange(false, std::memory_order_acq_rel)) {
+        synthEngine_.stopActiveArpVoices();
+    }
+
     const bool isPresetChange = presetChangePending_.exchange(false, std::memory_order_acq_rel);
     if (isPresetChange) {
         synthEngine_.reset();
@@ -1728,6 +1743,22 @@ void NovaSynthProcessor::setArpPatternLength(int length) {
     if (auto* p = apvts_.getParameter("arpPatternLength")) {
         p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(idx)));
     }
+    arpPatternResetPending_.store(true, std::memory_order_release);
+}
+
+void NovaSynthProcessor::applyArpRhythmPattern(int length, const std::vector<bool>& gates, const std::vector<float>& velocities) {
+    setArpPatternLength(length);
+    for (int s = 0; s < 64; ++s) {
+        const bool active = (s < static_cast<int>(gates.size())) ? gates[static_cast<std::size_t>(s)] : (s < length);
+        const float vel   = (s < static_cast<int>(velocities.size())) ? velocities[static_cast<std::size_t>(s)] : 0.8f;
+        setArpStepGate(s, active);
+        setArpStepVelocity(s, vel);
+    }
+    arpPatternResetPending_.store(true, std::memory_order_release);
+}
+
+void NovaSynthProcessor::triggerPanic() noexcept {
+    panicPending_.store(true, std::memory_order_release);
 }
 
 bool NovaSynthProcessor::isArpStepGateActive(int step) const noexcept {

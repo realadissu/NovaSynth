@@ -121,11 +121,15 @@ public:
     // Arpeggiator Step Sequencer Accessors
     [[nodiscard]] int getArpPatternLength() const noexcept;
     void setArpPatternLength(int length);
+    void applyArpRhythmPattern(int length, const std::vector<bool>& gates, const std::vector<float>& velocities);
     [[nodiscard]] bool isArpStepGateActive(int step) const noexcept;
     void setArpStepGate(int step, bool active);
     void toggleArpStepGate(int step);
     [[nodiscard]] float getArpStepVelocity(int step) const noexcept;
     void setArpStepVelocity(int step, float velocity);
+
+    // Audio Engine Panic (Reset Sound & Hang Free)
+    void triggerPanic() noexcept override;
 
     // Mixer Peak Metering Accessors
     [[nodiscard]] float getMasterPeakL() const noexcept { return masterPeakL_.load(std::memory_order_relaxed); }
@@ -147,6 +151,8 @@ private:
     std::atomic<uint8_t> soloMask_{0};
     std::atomic<uint8_t> muteMask_{0};
     std::atomic<bool> presetChangePending_{false};
+    std::atomic<bool> panicPending_{false};
+    std::atomic<bool> arpPatternResetPending_{false};
     double currentSampleRate_ = 48000.0;
     double currentBpm_ = 120.0;
     bool isHostBpmSynced_ = false;

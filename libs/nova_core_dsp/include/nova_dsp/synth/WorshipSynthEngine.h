@@ -245,6 +245,7 @@ public:
     void setModWheel(float normVal) noexcept { modWheel_ = std::clamp(normVal, 0.0f, 1.0f); }
     void allNotesOff() noexcept;
     void allSoundOff() noexcept { reset(); }
+    void stopActiveArpVoices() noexcept;
     void snapSmoothersToTarget() noexcept;
 
     void triggerDrone(bool triggered = true) noexcept;
@@ -253,6 +254,7 @@ public:
     void processBlock(float* outLeft, float* outRight, int numSamples) noexcept;
 
     [[nodiscard]] Telemetry getTelemetry() const noexcept;
+    [[nodiscard]] int getActiveVoiceCount() const noexcept { return telemetryActiveVoices_.load(std::memory_order_relaxed); }
 
     // Pop recent output audio samples for the real-time SPECTRUM / WAVE display
     std::size_t popVisualizerSamples(float* dest, std::size_t maxCount) noexcept {

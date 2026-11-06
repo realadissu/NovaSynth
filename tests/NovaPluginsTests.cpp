@@ -3841,6 +3841,143 @@ TEST(NovaSynthComprehensiveSuite5, ModulationMatrixDynamicAdaptersAndAudioEffect
     EXPECT_FALSE(std::isnan(buffer.getSample(0, 0)));
 }
 
+// 5.5: Panic Button Silences Audio Engine And Clears State
+TEST(NovaSynthArpAndPanicTests, PanicButtonSilencesAudioEngineAndClearsState) {
+    nova::synth::NovaSynthProcessor proc;
+    proc.prepareToPlay(48000.0, 512);
+
+    juce::AudioBuffer<float> buffer(2, 512);
+    juce::MidiBuffer midi;
+
+    // Send chord note-ons
+    midi.addEvent(juce::MidiMessage::noteOn(1, 60, (juce::uint8)100), 0);
+    midi.addEvent(juce::MidiMessage::noteOn(1, 64, (juce::uint8)100), 0);
+    midi.addEvent(juce::MidiMessage::noteOn(1, 67, (juce::uint8)100), 0);
+
+    for (int b = 0; b < 6; ++b) {
+        buffer.clear();
+        proc.processBlock(buffer, midi);
+        midi.clear();
+    }
+
+    EXPECT_GT(buffer.getRMSLevel(0, 0, 512), 0.01f);
+    EXPECT_GT(proc.getEngine().getActiveVoiceCount(), 0);
+
+    // Trigger panic
+    proc.triggerPanic();
+
+    // Next process block executes panic reset
+    buffer.clear();
+    proc.processBlock(buffer, midi);
+
+    // Verify voices and buffers are silenced
+    EXPECT_EQ(proc.getEngine().getActiveVoiceCount(), 0);
+    EXPECT_NEAR(buffer.getRMSLevel(0, 0, 512), 0.0f, 1e-4f);
+    EXPECT_FALSE(std::isnan(buffer.getSample(0, 0)));
+}
+
+// 5.6: Arp Rhythm Presets Apply Correct Lengths And Patterns
+TEST(NovaSynthArpAndPanicTests, ArpRhythmPresetsApplyCorrectLengthsAndPatterns) {
+    nova::synth::NovaSynthProcessor proc;
+    proc.prepareToPlay(48000.0, 512);
+
+    // Apply 16-step pattern (e.g. 4 on the floor / worship driving 16ths)
+    std::vector<bool> gates16(16, false);
+    std::vector<float> vels16(16, 0.5f);
+    gates16[0] = true; gates16[4] = true; gates16[8] = true; gates16[12] = true;
+    vels16[0] = 0.95f; vels16[4] = 0.90f; vels16[8] = 0.85f; vels16[12] = 0.80f;
+
+    proc.applyArpRhythmPattern(16, gates16, vels16);
+    EXPECT_EQ(proc.getArpPatternLength(), 16);
+    EXPECT_TRUE(proc.isArpStepGateActive(0));
+    EXPECT_FALSE(proc.isArpStepGateActive(1));
+    EXPECT_TRUE(proc.isArpStepGateActive(4));
+    EXPECT_NEAR(proc.getArpStepVelocity(0), 0.95f, 0.02f);
+    EXPECT_NEAR(proc.getArpStepVelocity(4), 0.90f, 0.02f);
+
+    // Apply 32-step pattern
+    std::vector<bool> gates32(32, true);
+    std::vector<float> vels32(32, 0.75f);
+    gates32[15] = false;
+    gates32[31] = false;
+    proc.applyArpRhythmPattern(32, gates32, vels32);
+    EXPECT_EQ(proc.getArpPatternLength(), 32);
+    EXPECT_TRUE(proc.isArpStepGateActive(0));
+    EXPECT_FALSE(proc.isArpStepGateActive(15));
+    EXPECT_FALSE(proc.isArpStepGateActive(31));
+
+    // Apply 64-step pattern
+    std::vector<bool> gates64(64, true);
+    std::vector<float> vels64(64, 0.65f);
+    proc.applyArpRhythmPattern(64, gates64, vels64);
+    EXPECT_EQ(proc.getArpPatternLength(), 64);
+    EXPECT_TRUE(proc.isArpStepGateActive(63));
+}
+
+// 5.7: Switching Rhythm Patterns During Arp Playback Prevents Hanging Notes
+TEST(NovaSynthArpAndPanicTests, SwitchingRhythmPatternsDuringArpPlaybackPreventsHangingNotes) {
+    nova::synth::NovaSynthProcessor proc;
+    proc.prepareToPlay(48000.0, 512);
+
+    // Enable arpeggiator and bypass reverb/delay tails for exact dry release test
+    if (auto* p = proc.getAPVTS().getParameter("arpEnabled")) {
+        p->setValueNotifyingHost(1.0f);
+    }
+    if (auto* p = proc.getAPVTS().getParameter("arpLatch")) {
+        p->setValueNotifyingHost(0.0f);
+    }
+    if (auto* p = proc.getAPVTS().getParameter("reverbMix")) {
+        p->setValueNotifyingHost(0.0f);
+    }
+    if (auto* p = proc.getAPVTS().getParameter("delayMix")) {
+        p->setValueNotifyingHost(0.0f);
+    }
+
+    // Set 16-step pattern initially
+    std::vector<bool> g16(16, true);
+    std::vector<float> v16(16, 0.8f);
+    proc.applyArpRhythmPattern(16, g16, v16);
+
+    juce::AudioBuffer<float> buffer(2, 512);
+    juce::MidiBuffer midi;
+
+    // Trigger note to start arpeggiator
+    midi.addEvent(juce::MidiMessage::noteOn(1, 60, (juce::uint8)100), 0);
+
+    for (int b = 0; b < 10; ++b) {
+        buffer.clear();
+        proc.processBlock(buffer, midi);
+        midi.clear();
+    }
+    EXPECT_FALSE(std::isnan(buffer.getSample(0, 0)));
+
+    // Mid-playback pattern switch from 16 to 32 steps
+    std::vector<bool> g32(32, false);
+    std::vector<float> v32(32, 0.7f);
+    g32[0] = true; g32[8] = true; g32[16] = true; g32[24] = true;
+    proc.applyArpRhythmPattern(32, g32, v32);
+
+    // Process blocks immediately after switch
+    for (int b = 0; b < 10; ++b) {
+        buffer.clear();
+        proc.processBlock(buffer, midi);
+        EXPECT_FALSE(std::isnan(buffer.getSample(0, 0)));
+        EXPECT_FALSE(std::isnan(buffer.getSample(1, 0)));
+    }
+
+    // Now release note
+    midi.addEvent(juce::MidiMessage::noteOff(1, 60, (juce::uint8)0), 0);
+    for (int b = 0; b < 100; ++b) {
+        buffer.clear();
+        proc.processBlock(buffer, midi);
+        midi.clear();
+    }
+
+    // All voices should be released cleanly with no hung notes
+    EXPECT_EQ(proc.getEngine().getActiveVoiceCount(), 0);
+    EXPECT_NEAR(buffer.getRMSLevel(0, 0, 512), 0.0f, 1e-4f);
+}
+
 } // namespace
 
 int main(int argc, char** argv) {

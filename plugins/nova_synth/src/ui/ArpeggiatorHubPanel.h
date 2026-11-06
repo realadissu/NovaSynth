@@ -171,7 +171,12 @@ public:
             addAndMakeVisible(octaveBtns_[static_cast<std::size_t>(o)]);
         }
 
-        // 5. Pattern Length Buttons (16, 32, 64 steps)
+        // 5. Pattern Length & Rhythm Preset Dropdown (16, 32, 64 steps)
+        rhythmPresetsBtn_.setButtonText("RHYTHM TEMPLATES ▾");
+        rhythmPresetsBtn_.setTooltip("Choose a musical rhythm matrix preset for 16, 32 or 64 steps");
+        rhythmPresetsBtn_.onClick = [this]() { showRhythmPresetsMenu(); };
+        addAndMakeVisible(rhythmPresetsBtn_);
+
         len16Btn_.setButtonText("16");
         len32Btn_.setButtonText("32");
         len64Btn_.setButtonText("64");
@@ -338,6 +343,11 @@ public:
         len64Btn_.setBounds(rightX - lenBtnW, lenBtnY, lenBtnW, lenBtnH);
         len32Btn_.setBounds(rightX - lenBtnW * 2 - 3, lenBtnY, lenBtnW, lenBtnH);
         len16Btn_.setBounds(rightX - lenBtnW * 3 - 6, lenBtnY, lenBtnW, lenBtnH);
+
+        const int stepsLabelLeft = len16Btn_.getX() - 52;
+        const int presetBtnW = std::clamp(stepsLabelLeft - (cardMatrixRect_.getX() + 175), 115, 155);
+        const int presetBtnX = stepsLabelLeft - presetBtnW - 8;
+        rhythmPresetsBtn_.setBounds(presetBtnX, lenBtnY, presetBtnW, lenBtnH + 1);
 
         updateMatrixLayout();
     }
@@ -532,7 +542,7 @@ private:
         g.setFont(theme_.getSectionFont(12.0f));
         g.setColour(juce::Colour(0xff38bdf8));
         g.drawText(juce::String(numSteps) + "-STEP RHYTHM MATRIX",
-                   juce::Rectangle<float>(area.getX() + 10.0f, area.getY() + 6.0f, 200.0f, 16.0f),
+                   juce::Rectangle<float>(area.getX() + 10.0f, area.getY() + 6.0f, 165.0f, 16.0f),
                    juce::Justification::left);
 
         // Steps label before buttons
@@ -545,6 +555,290 @@ private:
         len16Btn_.setToggleState(numSteps == 16, juce::dontSendNotification);
         len32Btn_.setToggleState(numSteps == 32, juce::dontSendNotification);
         len64Btn_.setToggleState(numSteps == 64, juce::dontSendNotification);
+    }
+
+    struct RhythmPatternPreset {
+        juce::String name;
+        int length = 16;
+        std::vector<bool> gates;
+        std::vector<float> velocities;
+    };
+
+    static std::vector<RhythmPatternPreset> getAvailableRhythmPresets() {
+        std::vector<RhythmPatternPreset> presets;
+
+        // ---------------- 16 STEPS (1 Bar) ----------------
+        // 1. Straight 16 (Full Drive)
+        {
+            RhythmPatternPreset p;
+            p.name = "Straight 16 (Full Drive)";
+            p.length = 16;
+            p.gates.assign(16, true);
+            p.velocities = { 1.0f, 0.70f, 0.85f, 0.70f,
+                             0.95f, 0.70f, 0.85f, 0.70f,
+                             1.0f,  0.70f, 0.85f, 0.70f,
+                             0.95f, 0.70f, 0.85f, 0.75f };
+            presets.push_back(std::move(p));
+        }
+
+        // 2. Dotted 8th Worship Pulse (Hillsong / Bethel)
+        {
+            RhythmPatternPreset p;
+            p.name = "Dotted 8th Worship Pulse";
+            p.length = 16;
+            p.gates.assign(16, false);
+            p.velocities.assign(16, 0.50f);
+            const int hits[] = { 0, 3, 6, 9, 12, 15 };
+            const float vels[] = { 1.0f, 0.85f, 0.90f, 0.85f, 0.95f, 0.80f };
+            for (int i = 0; i < 6; ++i) {
+                p.gates[static_cast<std::size_t>(hits[i])] = true;
+                p.velocities[static_cast<std::size_t>(hits[i])] = vels[i];
+            }
+            presets.push_back(std::move(p));
+        }
+
+        // 3. Offbeat Syncopation (Gospel / Funk)
+        {
+            RhythmPatternPreset p;
+            p.name = "Offbeat Syncopation";
+            p.length = 16;
+            p.gates.assign(16, false);
+            p.velocities.assign(16, 0.50f);
+            const int hits[] = { 0, 2, 5, 6, 8, 10, 13, 14 };
+            const float vels[] = { 0.65f, 0.95f, 0.60f, 0.90f, 0.70f, 0.95f, 0.60f, 0.90f };
+            for (int i = 0; i < 8; ++i) {
+                p.gates[static_cast<std::size_t>(hits[i])] = true;
+                p.velocities[static_cast<std::size_t>(hits[i])] = vels[i];
+            }
+            presets.push_back(std::move(p));
+        }
+
+        // 4. Four-on-the-Floor Groove
+        {
+            RhythmPatternPreset p;
+            p.name = "Four-on-the-Floor Groove";
+            p.length = 16;
+            p.gates.assign(16, false);
+            p.velocities.assign(16, 0.50f);
+            const int hits[] = { 0, 2, 4, 6, 8, 10, 12, 14, 15 };
+            const float vels[] = { 1.0f, 0.65f, 0.95f, 0.65f, 1.0f, 0.65f, 0.95f, 0.70f, 0.80f };
+            for (int i = 0; i < 9; ++i) {
+                p.gates[static_cast<std::size_t>(hits[i])] = true;
+                p.velocities[static_cast<std::size_t>(hits[i])] = vels[i];
+            }
+            presets.push_back(std::move(p));
+        }
+
+        // 5. Euphoric Build
+        {
+            RhythmPatternPreset p;
+            p.name = "Euphoric Build";
+            p.length = 16;
+            p.gates.assign(16, false);
+            p.velocities.assign(16, 0.50f);
+            const int hits[] = { 0, 4, 8, 10, 12, 13, 14, 15 };
+            const float vels[] = { 0.45f, 0.55f, 0.65f, 0.75f, 0.85f, 0.90f, 0.95f, 1.0f };
+            for (int i = 0; i < 8; ++i) {
+                p.gates[static_cast<std::size_t>(hits[i])] = true;
+                p.velocities[static_cast<std::size_t>(hits[i])] = vels[i];
+            }
+            presets.push_back(std::move(p));
+        }
+
+        // 6. Ambient Sparse Chime
+        {
+            RhythmPatternPreset p;
+            p.name = "Ambient Sparse Chime";
+            p.length = 16;
+            p.gates.assign(16, false);
+            p.velocities.assign(16, 0.50f);
+            const int hits[] = { 0, 3, 8, 11 };
+            const float vels[] = { 0.85f, 0.65f, 0.80f, 0.60f };
+            for (int i = 0; i < 4; ++i) {
+                p.gates[static_cast<std::size_t>(hits[i])] = true;
+                p.velocities[static_cast<std::size_t>(hits[i])] = vels[i];
+            }
+            presets.push_back(std::move(p));
+        }
+
+        // ---------------- 32 STEPS (2 Bars) ----------------
+        // 7. Bethel 2-Bar Anthem
+        {
+            RhythmPatternPreset p;
+            p.name = "Bethel 2-Bar Anthem";
+            p.length = 32;
+            p.gates.assign(32, false);
+            p.velocities.assign(32, 0.60f);
+            const int b1[] = { 0, 3, 6, 9, 12, 15 };
+            for (int h : b1) { p.gates[static_cast<std::size_t>(h)] = true; p.velocities[static_cast<std::size_t>(h)] = 0.90f; }
+            const int b2[] = { 16, 18, 20, 22, 24, 26, 27, 28, 29, 30, 31 };
+            const float b2v[] = { 0.95f, 0.70f, 0.90f, 0.70f, 1.0f, 0.80f, 0.85f, 0.90f, 0.95f, 0.98f, 1.0f };
+            for (int i = 0; i < 11; ++i) {
+                p.gates[static_cast<std::size_t>(b2[i])] = true;
+                p.velocities[static_cast<std::size_t>(b2[i])] = b2v[i];
+            }
+            presets.push_back(std::move(p));
+        }
+
+        // 8. Call & Response 32
+        {
+            RhythmPatternPreset p;
+            p.name = "Call & Response 32";
+            p.length = 32;
+            p.gates.assign(32, false);
+            p.velocities.assign(32, 0.60f);
+            const int hits[] = { 0, 2, 4, 6, 8, 10, 12, 14, 16, 20, 24, 28 };
+            const float vels[] = { 0.95f, 0.70f, 0.90f, 0.70f, 0.95f, 0.70f, 0.85f, 0.65f, 1.0f, 0.80f, 0.90f, 0.75f };
+            for (int i = 0; i < 12; ++i) {
+                p.gates[static_cast<std::size_t>(hits[i])] = true;
+                p.velocities[static_cast<std::size_t>(hits[i])] = vels[i];
+            }
+            presets.push_back(std::move(p));
+        }
+
+        // 9. Polyrhythmic 3+3+2 Flow
+        {
+            RhythmPatternPreset p;
+            p.name = "Polyrhythmic 3+3+2 Flow";
+            p.length = 32;
+            p.gates.assign(32, false);
+            p.velocities.assign(32, 0.50f);
+            const int hits[] = { 0, 3, 6, 8, 11, 14, 16, 19, 22, 24, 27, 30 };
+            for (int h : hits) {
+                p.gates[static_cast<std::size_t>(h)] = true;
+                p.velocities[static_cast<std::size_t>(h)] = (h % 8 == 0) ? 1.0f : 0.82f;
+            }
+            presets.push_back(std::move(p));
+        }
+
+        // 10. Progressive Velocity Swell (32)
+        {
+            RhythmPatternPreset p;
+            p.name = "Progressive Velocity Swell";
+            p.length = 32;
+            p.gates.assign(32, true);
+            p.velocities.resize(32);
+            for (int s = 0; s < 32; ++s) {
+                p.velocities[static_cast<std::size_t>(s)] = 0.35f + 0.65f * (static_cast<float>(s) / 31.0f);
+            }
+            presets.push_back(std::move(p));
+        }
+
+        // ---------------- 64 STEPS (4 Bars) ----------------
+        // 11. 4-Bar Worship Journey
+        {
+            RhythmPatternPreset p;
+            p.name = "4-Bar Worship Journey";
+            p.length = 64;
+            p.gates.assign(64, false);
+            p.velocities.assign(64, 0.60f);
+            for (int h : { 0, 4, 8, 12 }) { p.gates[static_cast<std::size_t>(h)] = true; p.velocities[static_cast<std::size_t>(h)] = 0.75f; }
+            for (int h : { 16, 19, 22, 25, 28, 31 }) { p.gates[static_cast<std::size_t>(h)] = true; p.velocities[static_cast<std::size_t>(h)] = 0.85f; }
+            for (int h : { 32, 34, 36, 38, 40, 42, 44, 46, 47 }) { p.gates[static_cast<std::size_t>(h)] = true; p.velocities[static_cast<std::size_t>(h)] = 0.90f; }
+            const int b4[] = { 48, 50, 52, 54, 56, 58, 59, 60, 61, 62, 63 };
+            const float b4v[] = { 1.0f, 0.80f, 0.95f, 0.80f, 1.0f, 0.85f, 0.90f, 0.92f, 0.95f, 0.98f, 1.0f };
+            for (int i = 0; i < 11; ++i) {
+                p.gates[static_cast<std::size_t>(b4[i])] = true;
+                p.velocities[static_cast<std::size_t>(b4[i])] = b4v[i];
+            }
+            presets.push_back(std::move(p));
+        }
+
+        // 12. Ambient Texture Wave
+        {
+            RhythmPatternPreset p;
+            p.name = "Ambient Texture Wave";
+            p.length = 64;
+            p.gates.assign(64, false);
+            p.velocities.resize(64);
+            for (int s = 0; s < 64; ++s) {
+                const float wave = 0.5f + 0.5f * std::sin(static_cast<float>(s) * 0.3927f);
+                p.gates[static_cast<std::size_t>(s)] = (s % 4 != 3);
+                p.velocities[static_cast<std::size_t>(s)] = 0.40f + 0.55f * wave;
+            }
+            presets.push_back(std::move(p));
+        }
+
+        // 13. Epic Cinematic Ostinato
+        {
+            RhythmPatternPreset p;
+            p.name = "Epic Cinematic Ostinato";
+            p.length = 64;
+            p.gates.assign(64, true);
+            p.velocities.resize(64);
+            for (int s = 0; s < 64; ++s) {
+                if (s % 16 == 0) p.velocities[static_cast<std::size_t>(s)] = 1.0f;
+                else if (s % 4 == 0) p.velocities[static_cast<std::size_t>(s)] = 0.85f;
+                else if (s % 2 == 0) p.velocities[static_cast<std::size_t>(s)] = 0.70f;
+                else p.velocities[static_cast<std::size_t>(s)] = 0.55f;
+            }
+            presets.push_back(std::move(p));
+        }
+
+        return presets;
+    }
+
+    void showRhythmPresetsMenu() {
+        juce::PopupMenu m;
+        const auto presets = getAvailableRhythmPresets();
+
+        juce::PopupMenu m16;
+        for (std::size_t i = 0; i < 6; ++i) {
+            m16.addItem(static_cast<int>(i + 1), presets[i].name);
+        }
+        m.addSubMenu("16 Steps (1 Bar)", m16);
+
+        juce::PopupMenu m32;
+        for (std::size_t i = 6; i < 10; ++i) {
+            m32.addItem(static_cast<int>(i + 1), presets[i].name);
+        }
+        m.addSubMenu("32 Steps (2 Bars)", m32);
+
+        juce::PopupMenu m64;
+        for (std::size_t i = 10; i < 13; ++i) {
+            m64.addItem(static_cast<int>(i + 1), presets[i].name);
+        }
+        m.addSubMenu("64 Steps (4 Bars)", m64);
+
+        m.addSeparator();
+
+        juce::PopupMenu mUtil;
+        mUtil.addItem(100, "All Steps ON (16 Steps)");
+        mUtil.addItem(101, "All Steps ON (32 Steps)");
+        mUtil.addItem(102, "All Steps ON (64 Steps)");
+        mUtil.addItem(103, "Clear All Gates (Mute Pattern)");
+        m.addSubMenu("Utilities & Tools", mUtil);
+
+        m.showMenuAsync(juce::PopupMenu::Options().withTargetComponent(&rhythmPresetsBtn_),
+            [this, presets](int res) {
+                if (res <= 0) return;
+
+                if (res >= 1 && res <= static_cast<int>(presets.size())) {
+                    const auto& p = presets[static_cast<std::size_t>(res - 1)];
+                    proc_.applyArpRhythmPattern(p.length, p.gates, p.velocities);
+                } else if (res == 100) {
+                    std::vector<bool> g(16, true);
+                    std::vector<float> v(16, 0.85f);
+                    proc_.applyArpRhythmPattern(16, g, v);
+                } else if (res == 101) {
+                    std::vector<bool> g(32, true);
+                    std::vector<float> v(32, 0.85f);
+                    proc_.applyArpRhythmPattern(32, g, v);
+                } else if (res == 102) {
+                    std::vector<bool> g(64, true);
+                    std::vector<float> v(64, 0.85f);
+                    proc_.applyArpRhythmPattern(64, g, v);
+                } else if (res == 103) {
+                    const int len = proc_.getArpPatternLength();
+                    std::vector<bool> g(static_cast<std::size_t>(len), false);
+                    std::vector<float> v(static_cast<std::size_t>(len), 0.5f);
+                    proc_.applyArpRhythmPattern(len, g, v);
+                }
+
+                updateMatrixLayout();
+                stepMatrixComp_.repaint();
+                repaint(cardMatrixRect_);
+            });
     }
 
     NovaSynthProcessor& proc_;
@@ -576,6 +870,7 @@ private:
     juce::TextButton len16Btn_;
     juce::TextButton len32Btn_;
     juce::TextButton len64Btn_;
+    juce::TextButton rhythmPresetsBtn_;
 
     // Horizontal Viewport & Step Matrix
     HorizontalViewport matrixViewport_;

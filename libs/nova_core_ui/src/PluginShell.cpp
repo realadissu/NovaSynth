@@ -11,6 +11,7 @@ PluginShell::PluginShell(nova::plugin::NovaProcessorBase& processor,
       pluginTitle_(pluginTitle),
       pluginSubtitle_(pluginSubtitle),
       theme_(theme),
+      panicBtn_(theme_),
       uiSettingsBtn_(theme_) {
     addAndMakeVisible(prevPresetBtn_);
     addAndMakeVisible(nextPresetBtn_);
@@ -23,7 +24,14 @@ PluginShell::PluginShell(nova::plugin::NovaProcessorBase& processor,
     addAndMakeVisible(abCopyBtn_);
     addAndMakeVisible(undoBtn_);
     addAndMakeVisible(redoBtn_);
+    addAndMakeVisible(panicBtn_);
     addAndMakeVisible(uiSettingsBtn_);
+
+    panicBtn_.setTooltip("Panic: Stop all sound & reset audio engine");
+    panicBtn_.onClick = [this]() {
+        panicBtn_.flash();
+        processor_.triggerPanic();
+    };
 
     prevPresetBtn_.onClick = [this]() {
         processor_.getPresetManager().loadPreviousPreset();
@@ -362,7 +370,10 @@ void PluginShell::resized() {
     const int settingsRight = meterLeft - 16;
     uiSettingsBtn_.setBounds(settingsRight - 26, 11, 26, 26);
 
-    const int redoRight = uiSettingsBtn_.getX() - 6;
+    const int panicRight = uiSettingsBtn_.getX() - 6;
+    panicBtn_.setBounds(panicRight - 26, 11, 26, 26);
+
+    const int redoRight = panicBtn_.getX() - 6;
     redoBtn_.setBounds(redoRight - 38, 11, 38, 26);
 
     const int undoRight = redoBtn_.getX() - 4;
@@ -443,6 +454,7 @@ void PluginShell::mouseDown(const juce::MouseEvent& event) {
 
 void PluginShell::timerCallback() {
     refreshPresetDisplay();
+    panicBtn_.updateFlash();
     const bool isSynced = processor_.isHostBpmSynced();
     const double curBpm = processor_.getBpm();
     bpmBtn_.setButtonText(juce::String(curBpm, 1) + (isSynced ? " (DAW)" : " BPM"));

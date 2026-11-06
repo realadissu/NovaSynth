@@ -51,6 +51,8 @@ public:
         hostBpmSynced_.store(syncedToHost, std::memory_order_relaxed);
     }
 
+    virtual void triggerPanic() noexcept {}
+
 protected:
     void updateMetersAndCpu(float inPeak, float outPeak, double blockDurationSec, double elapsedSec) noexcept;
 

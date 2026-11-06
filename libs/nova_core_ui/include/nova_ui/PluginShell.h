@@ -106,6 +106,58 @@ private:
     juce::TextButton undoBtn_{ "Undo" };
     juce::TextButton redoBtn_{ "Redo" };
 
+    class PanicButton : public juce::Button {
+    public:
+        PanicButton(const NovaTheme& theme)
+            : juce::Button("Panic"), theme_(theme) {}
+
+        void flash() {
+            flashing_ = true;
+            flashCount_ = 6;
+            repaint();
+        }
+
+        void updateFlash() {
+            if (flashing_ && --flashCount_ <= 0) {
+                flashing_ = false;
+                repaint();
+            }
+        }
+
+        void paintButton(juce::Graphics& g, bool shouldDrawButtonAsHighlighted, bool shouldDrawButtonAsDown) override {
+            auto bounds = getLocalBounds().toFloat().reduced(1.0f);
+            const juce::Colour alertCol(0xfff43f5e);
+            if (flashing_ || shouldDrawButtonAsDown) {
+                g.setColour(alertCol.withAlpha(0.28f));
+                g.fillRoundedRectangle(bounds, theme_.pillRadius);
+                g.setColour(alertCol);
+                g.drawRoundedRectangle(bounds, theme_.pillRadius, 1.2f);
+            } else if (shouldDrawButtonAsHighlighted) {
+                g.setColour(alertCol.withAlpha(0.12f));
+                g.fillRoundedRectangle(bounds, theme_.pillRadius);
+                g.setColour(alertCol.withAlpha(0.70f));
+                g.drawRoundedRectangle(bounds, theme_.pillRadius, 1.0f);
+            } else {
+                g.setColour(theme_.bgElevated);
+                g.fillRoundedRectangle(bounds, theme_.pillRadius);
+                g.setColour(theme_.borderSubtle);
+                g.drawRoundedRectangle(bounds, theme_.pillRadius, 1.0f);
+            }
+
+            g.setFont(theme_.getSectionFont(11.0f).boldened());
+            const auto textCol = (flashing_ || shouldDrawButtonAsDown || shouldDrawButtonAsHighlighted)
+                ? (flashing_ ? juce::Colours::white : alertCol)
+                : theme_.textMuted;
+            g.setColour(textCol);
+            g.drawText("!", bounds, juce::Justification::centred);
+        }
+
+    private:
+        const NovaTheme& theme_;
+        bool flashing_ = false;
+        int flashCount_ = 0;
+    };
+
     class SettingsGearButton : public juce::Button {
     public:
         SettingsGearButton(const NovaTheme& theme)
@@ -138,6 +190,7 @@ private:
         const NovaTheme& theme_;
     };
 
+    PanicButton panicBtn_;
     SettingsGearButton uiSettingsBtn_;
     std::unique_ptr<SettingsOverlayDialog> settingsDialog_;
 };
