@@ -5247,14 +5247,14 @@ TEST(NovaSynthTuningAndSampleTests, SwellPedalPresetsAndSampleAuditVerification)
 
     // 3. Verify new Swell & Piano Pad presets respond to Expression Pedal (CC 11) and have controlled release/reverb
     const std::vector<juce::String> swellPresets = {
-        "Velvet Piano Underpad Swell",
-        "Airy Worship Swell Carpet",
-        "Felt & Halo Dynamic Swell",
-        "Silk Strings & Breath Swell",
-        "Intimate Prayer Bed Swell",
-        "Golden Hour Horizon Swell",
-        "Warm Cello & Choir Swell",
-        "Midnight Sanctuary Swell"
+        "Bethel Soaking Warm Pad",
+        "ICF Silky High Shimmer",
+        "Beautiful Name Intro Pad",
+        "Holy Forever Anthem Pad",
+        "Promise Velvet Vocal Bed",
+        "Promise Golden Brass Swell",
+        "Ethereal Grains & Bell Cloud",
+        "Sacred Cello & Pipe Swell"
     };
 
     for (const auto& name : swellPresets) {
@@ -5266,8 +5266,8 @@ TEST(NovaSynthTuningAndSampleTests, SwellPedalPresetsAndSampleAuditVerification)
         EXPECT_GE(p.reverbDucking, 0.42f) << "Reverb ducking too low on " << name.toStdString();
     }
 
-    // 4. Measure low-swell vs high-swell via MIDI CC 11 (Expression Pedal) on "Velvet Piano Underpad Swell"
-    ASSERT_TRUE(pm.loadPresetByName("Velvet Piano Underpad Swell"));
+    // 4. Measure low-swell vs high-swell via MIDI CC 11 (Expression Pedal) on "Bethel Soaking Warm Pad"
+    ASSERT_TRUE(pm.loadPresetByName("Bethel Soaking Warm Pad"));
     juce::AudioBuffer<float> buf(2, 512);
     auto measureSwellRms = [&](int cc11Value) {
         proc.triggerPanic();

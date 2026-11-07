@@ -346,10 +346,11 @@ void MultiEngineOscillator::updateCoefficients() noexcept {
 
     for (int u = 0; u < kMaxUnison; ++u) {
         const auto idx = static_cast<std::size_t>(u);
-        const float cents = kUnisonDetuneFactors[idx] * detuneAmt * 34.0f + driftOffsetsCents_[idx];
+        const float cents = kUnisonDetuneFactors[idx] * detuneAmt * 13.5f + driftOffsetsCents_[idx];
         unisonPitchMultipliers_[idx] = std::pow(2.0f, cents / 1200.0f);
 
-        const float uPan = std::clamp(kUnisonPanPositions[idx] * detuneAmt, -1.0f, 1.0f);
+        const float stereoWidth = std::sqrt(detuneAmt);
+        const float uPan = std::clamp(kUnisonPanPositions[idx] * stereoWidth, -1.0f, 1.0f);
         const float panAngle = (uPan + 1.0f) * 0.25f * std::numbers::pi_v<float>;
         unisonPanL_[idx] = std::cos(panAngle);
         unisonPanR_[idx] = std::sin(panAngle);
@@ -397,7 +398,7 @@ void MultiEngineOscillator::triggerNote(float baseFrequencyHz, float velocity, u
 
         rng_ = rng_ * 1664525u + 1013904223u;
         driftOffsetsCents_[static_cast<std::size_t>(u)] =
-            ((static_cast<float>(rng_ & 0xFFFFu) / 32767.5f) - 1.0f) * 4.5f; // +/- 4.5 cents vintage drift
+            ((static_cast<float>(rng_ & 0xFFFFu) / 32767.5f) - 1.0f) * 1.1f; // +/- 1.1 cents subtle studio analog drift
     }
     updateCoefficients();
 
@@ -619,15 +620,14 @@ void MultiEngineOscillator::processSample(float baseFrequencyHz,
                             }
                         }
                         break;
-                    case 4: // Super Saw Multi
+                    case 4: // Super Saw Multi (Smooth phase-dispersed ensemble saw + harmonic chorus without phase-scraping)
                         {
                             const float saw1 = (2.0f * ph - 1.0f) - polyBlep(ph, dt);
-                            const float offset = 0.25f + 0.25f * shape;
-                            const float ph2 = (ph + offset >= 1.0f) ? (ph + offset - 1.0f) : (ph + offset);
+                            const float ph2 = (ph + 0.381966f >= 1.0f) ? (ph + 0.381966f - 1.0f) : (ph + 0.381966f);
                             const float saw2 = (2.0f * ph2 - 1.0f) - polyBlep(ph2, dt);
-                            const float ph3 = (ph + 2.0f * offset >= 1.0f) ? (ph + 2.0f * offset - 1.0f) : (ph + 2.0f * offset);
-                            const float saw3 = (2.0f * ph3 - 1.0f) - polyBlep(ph3, dt);
-                            wave = 0.45f * saw1 + 0.35f * saw2 + 0.20f * saw3;
+                            const float phOct = std::fmod(ph * 2.0f, 1.0f);
+                            const float sawOct = (2.0f * phOct - 1.0f) - polyBlep(phOct, std::min(0.48f, dt * 2.0f));
+                            wave = (0.58f - 0.12f * shape) * saw1 + 0.38f * saw2 + (0.08f + 0.28f * shape) * sawOct;
                         }
                         break;
                     case 5: // Hard Sync Lead
@@ -726,52 +726,47 @@ void MultiEngineOscillator::processSample(float baseFrequencyHz,
                 if (phases_[idx] >= 1.0f) phases_[idx] -= 1.0f;
             }
 
-            // Texture modulation rate from parameters (rate knob + detune)
-            const float grainRate = (0.35f + 2.4f * params_.rate) * (0.75f + 0.85f * detuneAmt);
+            // Calm, slow organic breathing rate (~0.18 Hz) without nervous tremolo pulsing
+            const float grainRate = (0.07f + 0.30f * params_.rate) * (0.80f + 0.40f * detuneAmt);
             texGrainPhase_ += grainRate * invSr;
             if (texGrainPhase_ >= 1.0f) texGrainPhase_ -= 1.0f;
             texGrainPhase2_ += (grainRate * 1.382f) * invSr;
             if (texGrainPhase2_ >= 1.0f) texGrainPhase2_ -= 1.0f;
 
-            rng_ = rng_ * 1664525u + 1013904223u;
-            const float noiseSample = ((static_cast<float>(rng_ & 0xFFFFu) / 32767.5f) - 1.0f);
-
             float texL = 0.0f;
             float texR = 0.0f;
 
             switch (params_.modelIndex) {
-                case 0: // Ambient Choir Breath (5-voice stereo vowel-formant vocal choir + aspirated breath halo)
+                case 0: // Ambient Choir Breath (Silky noise-free Mellotron / Ooh-Aah vowel formant choir)
                     {
-                        const float vowelMorph = std::clamp(shape + 0.22f * std::sin(twoPi * texGrainPhase_), 0.0f, 1.0f);
-                        // Formant harmonic ratios morph between warm "Ohhh" (F1~2x, F2~5x) and open "Ahhh" (F1~3x, F2~7x)
-                        const float form1Ratio = 2.0f + 1.2f * vowelMorph;
-                        const float form2Ratio = 5.0f + 2.4f * vowelMorph;
+                        const float vowelMorph = std::clamp(shape + 0.12f * std::sin(twoPi * texGrainPhase_), 0.0f, 1.0f);
+                        const float form1Ratio = 2.0f + 1.0f * vowelMorph;
+                        const float form2Ratio = 4.0f + 2.0f * vowelMorph;
 
                         for (int u = 0; u < activeUnison; ++u) {
                             const auto idx = static_cast<std::size_t>(u);
                             const float ph = phases_[idx];
-                            const float win = 0.5f * (1.0f - std::cos(twoPi * ph)); // Smooth Hann formant window
+                            const float win = 0.5f * (1.0f - std::cos(twoPi * ph));
                             const float fund = std::sin(twoPi * ph);
+                            const float h2 = std::sin(2.0f * twoPi * ph);
                             const float f1 = std::sin(twoPi * ph * form1Ratio) * win;
                             const float f2 = std::sin(twoPi * ph * form2Ratio) * win;
-                            const float voice = fund * 0.48f + f1 * 0.44f + f2 * (0.20f + 0.16f * vowelMorph);
+                            const float voice = fund * 0.54f + h2 * 0.28f + f1 * 0.36f + f2 * (0.14f + 0.16f * vowelMorph);
 
                             texL += voice * unisonPanL_[idx] * normGain;
                             texR += voice * unisonPanR_[idx] * normGain;
                         }
 
-                        const float breathEnv = 0.78f + 0.22f * std::sin(twoPi * texGrainPhase_);
-                        const float cutoff = std::clamp((850.0f + 2200.0f * shape) * invSr * 2.0f, 0.02f, 0.40f);
-                        texFilterState1_ += cutoff * (noiseSample * 0.25f - texFilterState1_ - 0.32f * texFilterState2_);
+                        const float cutoff = std::clamp((680.0f + 1800.0f * shape) * invSr * 2.0f, 0.02f, 0.42f);
+                        texFilterState1_ += cutoff * (0.5f * (texL + texR) - texFilterState1_ - 0.35f * texFilterState2_);
                         texFilterState2_ += cutoff * texFilterState1_;
 
-                        const float airLvl = 0.06f + 0.14f * shape;
-                        texL = (texL * 0.90f + texFilterState1_ * airLvl) * breathEnv * 3.1f;
-                        texR = (texR * 0.90f - texFilterState1_ * airLvl) * breathEnv * 3.1f;
+                        texL = (texL * 0.78f + texFilterState2_ * 0.32f) * 1.32f;
+                        texR = (texR * 0.78f + texFilterState1_ * 0.28f) * 1.32f;
                     }
                     break;
 
-                case 1: // Bowed Cello Texture (Stereo bowed string section with rosin stick-slip & warm cello body)
+                case 1: // Bowed Cello Texture (Silky stereo bowed cello & viola ensemble without noise hiss)
                     {
                         float ensL = 0.0f;
                         float ensR = 0.0f;
@@ -780,92 +775,78 @@ void MultiEngineOscillator::processSample(float baseFrequencyHz,
                             const float ph = phases_[idx];
                             const float dt = std::min(0.45f, slotFreq * unisonPitchMultipliers_[idx] * invSr);
                             const float saw = (2.0f * ph - 1.0f) - polyBlep(ph, dt);
-                            // Warm asymmetric bowed string stick-slip waveshaping (zero DC offset via odd-symmetric polynomial + sub-octave body)
-                            const float bowed = saw - 0.24f * (saw * saw * saw) + 0.18f * std::sin(twoPi * ph);
+                            const float bowed = saw - 0.24f * (saw * saw * saw) + 0.22f * std::sin(twoPi * ph);
                             ensL += bowed * unisonPanL_[idx] * normGain;
                             ensR += bowed * unisonPanR_[idx] * normGain;
                         }
 
-                        const float bowPressure = 0.80f + 0.20f * std::sin(twoPi * texGrainPhase_);
-                        const float bowRosin = noiseSample * (0.04f + 0.08f * shape);
-
-                        const float bodyCutoff = std::clamp((240.0f + 420.0f * shape) * invSr * 2.0f, 0.01f, 0.35f);
-                        texFilterState1_ += bodyCutoff * ((0.5f * (ensL + ensR) + bowRosin) - texFilterState1_ - 0.48f * texFilterState2_);
+                        const float bodyCutoff = std::clamp((280.0f + 520.0f * shape) * invSr * 2.0f, 0.01f, 0.38f);
+                        texFilterState1_ += bodyCutoff * (0.5f * (ensL + ensR) - texFilterState1_ - 0.45f * texFilterState2_);
                         texFilterState2_ += bodyCutoff * texFilterState1_;
 
-                        texL = (ensL * 0.62f + texFilterState2_ * 0.58f) * bowPressure * 4.2f;
-                        texR = (ensR * 0.62f + texFilterState1_ * 0.52f) * bowPressure * 4.2f;
+                        texL = (ensL * 0.58f + texFilterState2_ * 0.56f) * 1.45f;
+                        texR = (ensR * 0.58f + texFilterState1_ * 0.50f) * 1.45f;
                     }
                     break;
 
-                case 2: // Tape Halo & Flutter (Vintage Mellotron / Tape String-Flute ensemble with wow, flutter & saturation)
+                case 2: // Tape Halo & Flutter (Warm Mellotron / Tape String-Flute ensemble with ultra-subtle chorus)
                     {
-                        flutterPhase_ += 5.4f * invSr;
+                        flutterPhase_ += 3.2f * invSr;
                         if (flutterPhase_ >= 1.0f) flutterPhase_ -= 1.0f;
 
-                        const float wow = std::sin(twoPi * texGrainPhase_) * (0.0028f + 0.0020f * shape);
-                        const float flutter = std::sin(twoPi * flutterPhase_) * 0.0014f;
+                        const float wow = std::sin(twoPi * texGrainPhase_) * (0.0006f + 0.0005f * shape);
+                        const float flutter = std::sin(twoPi * flutterPhase_) * 0.0003f;
 
                         for (int u = 0; u < activeUnison; ++u) {
                             const auto idx = static_cast<std::size_t>(u);
                             const float tapePh = std::fmod(phases_[idx] + wow + flutter * ((u & 1) ? -1.0f : 1.0f) + 1.0f, 1.0f);
-                            const float core = 0.65f * std::sin(twoPi * tapePh)
-                                             + 0.32f * std::sin(2.0f * twoPi * tapePh + 0.8f)
-                                             + 0.18f * std::sin(3.0f * twoPi * tapePh + 1.9f);
+                            const float core = 0.68f * std::sin(twoPi * tapePh)
+                                             + 0.30f * std::sin(2.0f * twoPi * tapePh + 0.8f)
+                                             + 0.16f * std::sin(3.0f * twoPi * tapePh + 1.9f);
                             texL += core * unisonPanL_[idx] * normGain;
                             texR += core * unisonPanR_[idx] * normGain;
                         }
 
-                        const float drive = 1.15f + 1.45f * shape;
-                        const float tapeHiss = noiseSample * (0.018f + 0.020f * shape);
-                        texL = (std::tanh(texL * drive) * 0.78f + tapeHiss) * 1.6f;
-                        texR = (std::tanh(texR * drive) * 0.78f - tapeHiss) * 1.6f;
+                        const float drive = 1.12f + 1.15f * shape;
+                        texL = std::tanh(texL * drive) * 0.92f;
+                        texR = std::tanh(texR * drive) * 0.92f;
                     }
                     break;
 
-                case 3: // Cathedral Rain Cloud (Asynchronous stereo harmonic grain cloud with octave/fifth shimmer particles)
+                case 3: // Cathedral Rain Cloud / Ethereal Grains (Crystalline overlapping octave & fifth harmonic micro-grains)
                     {
-                        constexpr std::array<float, 5> kGrainHarmonics = { 1.0f, 2.0f, 1.5f, 2.0f, 3.0f };
+                        constexpr std::array<float, 5> kGrainHarmonics = { 1.0f, 1.5f, 2.0f, 2.0f, 3.0f };
                         for (int u = 0; u < activeUnison; ++u) {
                             const auto idx = static_cast<std::size_t>(u);
                             const float gPh = std::fmod(texGrainPhase_ + static_cast<float>(u) * 0.20f, 1.0f);
                             const float win = std::sin(std::numbers::pi_v<float> * gPh);
-                            const float env = win * win;
+                            const float env = 0.35f + 0.65f * (win * win);
                             const float harm = kGrainHarmonics[idx];
                             const float carrier = std::sin(twoPi * phases_[idx] * harm)
-                                                + (0.30f * shape) * std::sin(twoPi * phases_[idx] * (harm * 2.0f));
+                                                + (0.32f * shape) * std::sin(twoPi * phases_[idx] * (harm * 2.0f));
                             texL += carrier * env * unisonPanL_[idx] * normGain;
                             texR += carrier * env * unisonPanR_[idx] * normGain;
                         }
-
-                        const float dropletClick = (noiseSample > (0.95f - shape * 0.06f)) ? (noiseSample * 0.45f) : 0.0f;
-                        texL = texL * 0.92f + dropletClick;
-                        texR = texR * 0.92f - dropletClick * 0.8f;
+                        texL *= 1.05f;
+                        texR *= 1.05f;
                     }
                     break;
 
-                case 4: // Warm Wind & Air Swell (Tuned stereo orchestral woodwind/pipe ensemble + resonant breath air)
+                case 4: // Warm Wind & Air Swell (Silky high harmonic flute/fifth sheen without white-noise hiss)
                 default:
                     {
                         for (int u = 0; u < activeUnison; ++u) {
                             const auto idx = static_cast<std::size_t>(u);
                             const float ph = phases_[idx];
-                            const float pipe = 0.72f * std::sin(twoPi * ph)
-                                             + 0.22f * std::sin(2.0f * twoPi * ph + 1.1f)
-                                             + (0.16f + 0.18f * shape) * std::sin(3.0f * twoPi * ph + 2.4f);
+                            const float pipe = 0.66f * std::sin(twoPi * ph)
+                                             + (0.28f + 0.16f * shape) * std::sin(2.0f * twoPi * ph + 1.1f)
+                                             + (0.18f + 0.22f * shape) * std::sin(3.0f * twoPi * ph + 2.4f)
+                                             + (0.12f * shape) * std::sin(4.0f * twoPi * ph + 0.5f);
                             texL += pipe * unisonPanL_[idx] * normGain;
                             texR += pipe * unisonPanR_[idx] * normGain;
                         }
-
-                        const float gust = 0.72f + 0.28f * std::sin(twoPi * texGrainPhase_ * 0.5f);
-                        const float windQ = 0.18f + 0.55f * shape;
-                        const float windCutoff = std::clamp(slotFreq * invSr * 2.0f, 0.01f, 0.42f);
-                        texFilterState1_ += windCutoff * (noiseSample * 0.45f - texFilterState1_ - windQ * texFilterState2_);
-                        texFilterState2_ += windCutoff * texFilterState1_;
-
-                        const float airMix = 0.25f + 0.45f * shape;
-                        texL = (texL * (1.0f - 0.30f * shape) + texFilterState1_ * airMix) * gust * 3.1f;
-                        texR = (texR * (1.0f - 0.30f * shape) - texFilterState1_ * airMix) * gust * 3.1f;
+                        texL *= 1.20f;
+                        texR *= 1.20f;
                     }
                     break;
             }

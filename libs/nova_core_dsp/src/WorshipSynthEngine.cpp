@@ -1122,11 +1122,11 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
 
         const float pitchMod = pitchBendSemitones_
                              + modMatrix_.getModulationOffset(ModMatrix::Destination::OscPitchAll) * 2.0f;
-        const float cutoffModOctaves = modMatrix_.getModulationOffset(ModMatrix::Destination::FilterCutoff) * 1.8f;
+        const float cutoffModOctaves = modMatrix_.getModulationOffset(ModMatrix::Destination::FilterCutoff) * 3.6f;
         const float filterResoMod = modMatrix_.getModulationOffset(ModMatrix::Destination::FilterResonance) * 0.5f;
         const float vocalCarveMod = modMatrix_.getModulationOffset(ModMatrix::Destination::VocalCarve);
         lastCutoffModOct = cutoffModOctaves;
-        lastCutoff2ModOct = modMatrix_.getModulationOffset(ModMatrix::Destination::Filter2Cutoff) * 1.8f;
+        lastCutoff2ModOct = modMatrix_.getModulationOffset(ModMatrix::Destination::Filter2Cutoff) * 3.6f;
         lastResoMod = filterResoMod;
         lastReso2Mod = modMatrix_.getModulationOffset(ModMatrix::Destination::Filter2Resonance) * 0.5f;
 
@@ -1237,7 +1237,7 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
 
             if (params_.filter1Enabled) {
                 const float voiceResoMod = voiceOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::FilterResonance)] * 0.5f;
-                const float voiceCutMod = voiceOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::FilterCutoff)] * 1.8f;
+                const float voiceCutMod = voiceOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::FilterCutoff)] * 3.6f;
                 const float effReso = std::clamp(params_.filterResonance + voiceResoMod, 0.35f, 6.0f);
                 const bool isFourPoleLadder = (params_.filterType == 0 || params_.filterType == 2);
 
@@ -1300,7 +1300,7 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
 
             if (params_.filter2Enabled) {
                 const float voiceResoMod2 = voiceOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::Filter2Resonance)] * 0.5f;
-                const float voiceCutMod2 = voiceOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::Filter2Cutoff)] * 1.8f;
+                const float voiceCutMod2 = voiceOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::Filter2Cutoff)] * 3.6f;
                 const float effReso2 = std::clamp(params_.filter2Resonance + voiceResoMod2, 0.35f, 6.0f);
                 if ((s & 15) == 0) {
                     const float baseCut2 = baseCutoff2;
