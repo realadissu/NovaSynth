@@ -401,6 +401,22 @@ juce::AudioProcessorValueTreeState::ParameterLayout NovaSynthProcessor::createPa
             juce::NormalisableRange<float>(0.05f, 1.0f, 0.01f), defaultVel));
     }
 
+    // Embedded Roland Juno-60 / Solina Stereo BBD Chorus
+    params.push_back(std::make_unique<juce::AudioParameterBool>(
+        juce::ParameterID{"chorusEnabled", 1}, "Chorus Enable", false));
+    params.push_back(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{"chorusMode", 1}, "Chorus Mode",
+        juce::StringArray{"Juno I (Warm)", "Juno II (Shimmer)", "Juno I+II (Rotary)", "Solina (String Ensemble)", "Dimension D (Spatial 3D)"}, 0));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"chorusMix", 1}, "Chorus Mix",
+        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.0f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"chorusRateHz", 1}, "Chorus Rate",
+        juce::NormalisableRange<float>(0.1f, 8.0f, 0.01f, 0.45f), 0.52f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"chorusDepth", 1}, "Chorus Depth",
+        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.65f));
+
     // Embedded Stereo Tape / Ping-Pong Delay
     params.push_back(std::make_unique<juce::AudioParameterBool>(
         juce::ParameterID{"delayEnabled", 1}, "Delay Enable", true));
@@ -1852,6 +1868,12 @@ void NovaSynthProcessor::syncParametersFromAPVTS() noexcept {
             p.arpStepVelocities[static_cast<std::size_t>(s)] = pV->load();
         }
     }
+
+    if (auto* pCE = apvts_.getRawParameterValue("chorusEnabled")) p.chorusEnabled = pCE->load() > 0.5f;
+    if (auto* pCM = apvts_.getRawParameterValue("chorusMode")) p.chorusMode = static_cast<int>(pCM->load());
+    if (auto* pMix = apvts_.getRawParameterValue("chorusMix")) p.chorusMix = pMix->load();
+    if (auto* pRate = apvts_.getRawParameterValue("chorusRateHz")) p.chorusRateHz = pRate->load();
+    if (auto* pDepth = apvts_.getRawParameterValue("chorusDepth")) p.chorusDepth = pDepth->load();
 
     p.delayEnabled  = apvts_.getRawParameterValue("delayEnabled")->load() > 0.5f;
     if (auto* pDs = apvts_.getRawParameterValue("delaySync")) p.delaySync = pDs->load() > 0.5f;

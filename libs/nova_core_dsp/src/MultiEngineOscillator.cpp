@@ -387,8 +387,16 @@ void MultiEngineOscillator::triggerNote(float baseFrequencyHz, float velocity, u
     shapeSmoother_.reset(params_.shapeMorph);
     rng_ ^= (seedOffset * 747796405u + 2891336453u);
 
-    // Main fundamental voice (index 0) starts strictly at zero-crossing to prevent pops/clicks on note triggers
-    phases_[0] = 0.0f;
+    // For free-running analog/wavetable pad polyphony, decorrelate fundamental phase across voices
+    // so chords never phase-lock or cancel out. For transient percussion/plucks, zero phase preserves punch.
+    if (params_.engine == EngineType::WarmAnalog ||
+        params_.engine == EngineType::EvolvingWavetable ||
+        params_.engine == EngineType::OrganicTexture) {
+        rng_ = rng_ * 1664525u + 1013904223u;
+        phases_[0] = static_cast<float>(rng_ & 0xFFFFu) / 65536.0f;
+    } else {
+        phases_[0] = 0.0f;
+    }
     driftOffsetsCents_[0] = 0.0f;
 
     // Remaining unison voices (indices 1..kMaxUnison-1) receive randomized phases for rich ensemble decorrelation

@@ -5359,6 +5359,114 @@ TEST(NovaSynthKeyboardBarTests, PitchAndSwellWheelsAndFixedKeyWidthDynamicKeyCou
     EXPECT_NEAR(proc.getPitchBendSemitones(), 0.0f, 1e-4f);
 }
 
+TEST(StereoBbdChorusTests, AllFiveModesProcessCleanStereoAudio) {
+    using nova::dsp::StereoBbdChorus;
+    StereoBbdChorus chorus;
+    chorus.prepare(48000.0);
+
+    for (int m = 0; m <= 4; ++m) {
+        StereoBbdChorus::Parameters p;
+        p.enabled = true;
+        p.mode = static_cast<StereoBbdChorus::Mode>(m);
+        p.mix = 0.50f;
+        p.rateHz = 0.60f;
+        p.depth = 0.70f;
+        p.warmth = 0.50f;
+        chorus.setParameters(p);
+
+        float sideEnergy = 0.0f;
+        float maxPeak = 0.0f;
+
+        for (int i = 0; i < 2000; ++i) {
+            const float in = std::sin(2.0f * std::numbers::pi_v<float> * 261.63f * static_cast<float>(i) / 48000.0f);
+            float outL = 0.0f, outR = 0.0f;
+            chorus.process(in, in, outL, outR);
+
+            ASSERT_FALSE(std::isnan(outL) || std::isinf(outL));
+            ASSERT_FALSE(std::isnan(outR) || std::isinf(outR));
+
+            if (i > 500) {
+                const float side = 0.5f * (outL - outR);
+                sideEnergy += side * side;
+            }
+            maxPeak = std::max(maxPeak, std::max(std::abs(outL), std::abs(outR)));
+        }
+
+        // Chorus must create active stereo spread from a mono input
+        EXPECT_GT(sideEnergy, 0.5f) << "Mode " << m << " did not produce sufficient stereo decorrelation!";
+        EXPECT_LE(maxPeak, 1.25f) << "Mode " << m << " output clipped excessively!";
+    }
+}
+
+TEST(StereoBbdChorusTests, ZeroMixBypassesCleanly) {
+    using nova::dsp::StereoBbdChorus;
+    StereoBbdChorus chorus;
+    chorus.prepare(48000.0);
+
+    StereoBbdChorus::Parameters p;
+    p.enabled = false;
+    p.mix = 0.0f;
+    chorus.setParameters(p);
+
+    for (int i = 0; i < 500; ++i) {
+        const float inL = 0.42f;
+        const float inR = -0.35f;
+        float outL = 0.0f, outR = 0.0f;
+        chorus.process(inL, inR, outL, outR);
+        EXPECT_NEAR(outL, inL, 1e-3f);
+        EXPECT_NEAR(outR, inR, 1e-3f);
+    }
+}
+
+TEST(WorshipSynthEngineChorusTests, ChorusEnhancesStereoSpreadOnAnalogPad) {
+    using nova::dsp::WorshipSynthEngine;
+    WorshipSynthEngine synth;
+    synth.prepare(48000.0, 512);
+
+    WorshipSynthEngine::Parameters p;
+    p.activeOscCount = 1;
+    p.oscSlots[0].enabled = true;
+    p.oscSlots[0].engine = nova::dsp::MultiEngineOscillator::EngineType::WarmAnalog;
+    p.oscSlots[0].modelIndex = 0; // Classic Saw
+    p.oscSlots[0].detune = 0.0f;
+    p.oscSlots[0].level = 0.8f;
+    p.filter1Enabled = false;
+    p.filter2Enabled = false;
+    p.delayEnabled = false;
+    p.reverbMix = 0.0f;
+    p.macroShimmer = 0.0f;
+    p.macroMotion = 0.0f;
+    p.macroWarmth = 0.5f;
+    p.macroAir = 0.0f;
+
+    auto measureSideEnergy = [&](bool chorusOn) {
+        p.chorusEnabled = chorusOn;
+        p.chorusMix = chorusOn ? 0.60f : 0.0f;
+        synth.setParameters(p);
+        synth.reset();
+        synth.noteOn(60, 0.85f);
+
+        std::array<float, 512> l{}, r{};
+        float sideEnergy = 0.0f;
+        for (int b = 0; b < 10; ++b) {
+            synth.processBlock(l.data(), r.data(), 512);
+            if (b >= 5) {
+                for (int i = 0; i < 512; ++i) {
+                    const float side = 0.5f * (l[static_cast<std::size_t>(i)] - r[static_cast<std::size_t>(i)]);
+                    sideEnergy += side * side;
+                }
+            }
+        }
+        return sideEnergy;
+    };
+
+    const float sideNoChorus = measureSideEnergy(false);
+    const float sideWithChorus = measureSideEnergy(true);
+
+    EXPECT_NEAR(sideNoChorus, 0.0f, 1e-3f) << "Mono analog saw without chorus should have zero side energy!";
+    EXPECT_GT(sideWithChorus, 0.40f) << "Chorus must add substantial stereo width and side energy!";
+}
+
 } // namespace
 
 int main(int argc, char** argv) {

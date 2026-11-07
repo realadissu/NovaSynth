@@ -6,6 +6,7 @@
 #include "nova_dsp/modulation/ModMatrix.h"
 #include "nova_dsp/filters/StateVariableFilter.h"
 #include "nova_dsp/reverb/DualEngineReverb.h"
+#include "nova_dsp/effects/StereoBbdChorus.h"
 #include "nova_dsp/math/OnePoleSmoother.h"
 #include "nova_dsp/math/LockFreeRingBuffer.h"
 #include <array>
@@ -183,6 +184,14 @@ public:
             return arr;
         }();
 
+        // Embedded Roland Juno-60 / Solina Stereo BBD Chorus
+        bool  chorusEnabled      = false;
+        int   chorusMode         = 0;      // 0: Juno I, 1: Juno II, 2: Juno I+II, 3: Solina Ensemble, 4: Dimension D
+        float chorusMix          = 0.0f;   // 0.0 .. 1.0 (wet/dry balance)
+        float chorusRateHz       = 0.52f;  // 0.1 .. 8.0 Hz
+        float chorusDepth        = 0.65f;  // 0.0 .. 1.0
+        float chorusWarmth       = 0.60f;  // 0.0 .. 1.0 BBD lowpass warmth
+
         // Embedded Stereo Delay
         bool delayEnabled   = true;
         bool delaySync      = true;
@@ -350,6 +359,7 @@ private:
     LfoGenerator lfo3_{};
     LfoGenerator lfo4_{};
     ModMatrix modMatrix_{};
+    StereoBbdChorus chorus_{};
     DualEngineReverb reverb_{};
 
     // Stereo Ping-Pong Delay buffer

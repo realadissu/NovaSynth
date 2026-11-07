@@ -90,6 +90,7 @@ void WorshipSynthEngine::prepare(double sampleRate, int maxBlockSize) {
     lfo2_.prepare(sampleRate_);
     lfo3_.prepare(sampleRate_);
     lfo4_.prepare(sampleRate_);
+    chorus_.prepare(sampleRate_);
     reverb_.prepare(sampleRate_, maxBlockSize);
 
     const int maxDelaySamples = static_cast<int>(sampleRate_ * 2.0);
@@ -164,6 +165,7 @@ void WorshipSynthEngine::reset() noexcept {
     std::fill(delayBufferR_.begin(), delayBufferR_.end(), 0.0f);
     delayWritePos_ = 0;
     delayEnergy_ = 0.0f;
+    chorus_.reset();
     reverb_.reset();
 }
 
@@ -211,6 +213,15 @@ void WorshipSynthEngine::setParameters(const Parameters& params) noexcept {
 
     const float targetCutoff2 = std::clamp(params_.filter2CutoffHz, 40.0f, 19000.0f);
     cutoff2Smoother_.setTargetValue(targetCutoff2);
+
+    StereoBbdChorus::Parameters cp;
+    cp.enabled = params_.chorusEnabled;
+    cp.mode = static_cast<StereoBbdChorus::Mode>(std::clamp(params_.chorusMode, 0, 4));
+    cp.mix = std::clamp(params_.chorusMix + params_.macroMotion * 0.35f, 0.0f, 1.0f);
+    cp.rateHz = std::clamp(params_.chorusRateHz * (0.8f + 0.6f * params_.macroMotion), 0.1f, 8.0f);
+    cp.depth = std::clamp(params_.chorusDepth + params_.macroMotion * 0.20f, 0.0f, 1.0f);
+    cp.warmth = std::clamp(params_.chorusWarmth, 0.0f, 1.0f);
+    chorus_.setParameters(cp);
 
     DualEngineReverb::Parameters revParams = reverb_.getParameters();
     revParams.engineMode       = DualEngineReverb::EngineMode::LushCloud;
@@ -1363,6 +1374,9 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
             synthL = mid + side;
             synthR = mid - side;
         }
+
+        // Apply Stereo BBD Chorus / Solina Ensemble to filtered synth voices
+        chorus_.process(synthL, synthR, synthL, synthR);
 
         // Dedicated Drone Warmth Filter
         droneToneSmoother_.setTargetValue(std::clamp(params_.droneTone, 0.0f, 1.0f));
