@@ -2232,6 +2232,7 @@ public:
                     proc_.syncParametersFromAPVTS();
                     refreshCards();
                     handleCardExpand(i, true);
+                    if (onSourceStateChanged) onSourceStateChanged();
                     return;
                 }
             }
@@ -2303,7 +2304,6 @@ public:
             }
         }
         updateDeckLayout();
-        if (onSourceStateChanged) onSourceStateChanged();
     }
 
     void timerCallback() override {
@@ -2325,6 +2325,7 @@ public:
             lastStateHash_ = stateHash;
             lastActiveCount_ = activeCount;
             refreshCards();
+            if (onSourceStateChanged) onSourceStateChanged();
         }
 
         // 60Hz Tweening der Karten-Breiten

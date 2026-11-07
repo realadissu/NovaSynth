@@ -5026,24 +5026,42 @@ TEST(NovaSynthUiSyncTests, SourceAndFilterStateTogglesPropagateToAllViews) {
     auto editor = std::make_unique<nova::synth::NovaSynthEditor>(proc);
     editor->setBounds(0, 0, 1200, 800);
 
+    auto tickAllTimers = [](juce::Component* root, auto& self) -> void {
+        if (auto* t = dynamic_cast<juce::Timer*>(root)) {
+            t->timerCallback();
+        }
+        for (int i = 0; i < root->getNumChildComponents(); ++i) {
+            self(root->getChildComponent(i), self);
+        }
+    };
+
+    // Run editor and child timers (including SourceDeck::timerCallback) to verify zero recursion
+    tickAllTimers(editor.get(), tickAllTimers);
+
     // Initial state: Osc 1 is enabled
     auto* osc1En = proc.getAPVTS().getParameter("osc1_enabled");
     ASSERT_NE(osc1En, nullptr);
     EXPECT_GT(osc1En->getValue(), 0.5f);
 
-    // Toggle Osc 1 off via APVTS
+    // Toggle Osc 1 off via APVTS and trigger UI sync
     osc1En->setValueNotifyingHost(0.0f);
+    proc.syncParametersFromAPVTS();
+    tickAllTimers(editor.get(), tickAllTimers);
     EXPECT_LT(osc1En->getValue(), 0.5f);
 
-    // Toggle Osc 1 back on
+    // Toggle Osc 1 back on and trigger UI sync
     osc1En->setValueNotifyingHost(1.0f);
+    proc.syncParametersFromAPVTS();
+    tickAllTimers(editor.get(), tickAllTimers);
     EXPECT_GT(osc1En->getValue(), 0.5f);
 
-    // Toggle Filter 2 enable
+    // Toggle Filter 2 enable and trigger UI sync
     auto* flt2En = proc.getAPVTS().getParameter("filter2Enabled");
     ASSERT_NE(flt2En, nullptr);
     const float initFlt2 = flt2En->getValue();
     flt2En->setValueNotifyingHost(initFlt2 > 0.5f ? 0.0f : 1.0f);
+    proc.syncParametersFromAPVTS();
+    tickAllTimers(editor.get(), tickAllTimers);
     EXPECT_NE(flt2En->getValue(), initFlt2);
 }
 

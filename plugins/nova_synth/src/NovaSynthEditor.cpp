@@ -4262,9 +4262,12 @@ public:
             workbench_.setSelectedOscIndex(slotIdx);
         };
         auto notifyAllSourceViews = [this]() {
+            if (isSyncingSourceViews_) return;
+            isSyncingSourceViews_ = true;
             sourceList_.repaint();
             sourceDeck_.refreshCards();
             workbench_.repaint();
+            isSyncingSourceViews_ = false;
         };
 
         sourceList_.onSourceStateChanged = notifyAllSourceViews;
@@ -4280,10 +4283,13 @@ public:
     }
 
     void syncSourceStates() {
+        if (isSyncingSourceViews_) return;
+        isSyncingSourceViews_ = true;
         sourceList_.repaint();
         sourceDeck_.refreshCards();
         workbench_.repaint();
         filterDeck_.repaint();
+        isSyncingSourceViews_ = false;
     }
 
     void setInitialWorkbenchTab(int tabIdx) {
@@ -4334,6 +4340,7 @@ private:
     EnvelopeQuadDeck envDeck_;
     JornaLowerWorkbench workbench_;
     StandaloneKeyboardBar keyboardBar_;
+    bool isSyncingSourceViews_ = false;
 };
 
 } // namespace
