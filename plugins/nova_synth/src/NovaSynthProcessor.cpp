@@ -11,6 +11,7 @@ NovaSynthProcessor::NovaSynthProcessor()
           createParameterLayout(),
           "Nova Synth") {
     invertSustainPedalParam_ = apvts_.getRawParameterValue("invertSustainPedal");
+    masterTuningHzParam_ = apvts_.getRawParameterValue("masterTuningHz");
     registerFactoryPresets();
     syncParametersFromAPVTS();
 }
@@ -80,7 +81,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout NovaSynthProcessor::createPa
 
         params.push_back(std::make_unique<juce::AudioParameterFloat>(
             juce::ParameterID{prefix + "scatter", 1}, namePrefix + "Scatter",
-            juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.35f));
+            juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.0f));
 
         params.push_back(std::make_unique<juce::AudioParameterFloat>(
             juce::ParameterID{prefix + "duration", 1}, namePrefix + "Duration",
@@ -451,6 +452,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout NovaSynthProcessor::createPa
 
     params.push_back(std::make_unique<juce::AudioParameterBool>(
         juce::ParameterID{"invertSustainPedal", 1}, "Invert Sustain Pedal", false));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"masterTuningHz", 1}, "Master Tuning (A4 Hz)",
+        juce::NormalisableRange<float>(435.0f, 445.0f, 0.1f), 440.0f));
 
     return { params.begin(), params.end() };
 }
@@ -1206,16 +1211,16 @@ void NovaSynthProcessor::registerFactoryPresets() {
         "Pristine acoustic concert harp pluck layered with worship shimmer cloud and physical modal harmonics.",
         {"Harp", "Pluck", "Worship", "Celestial", "Shimmer"},
         {{"activeOscCount", 3.0f},
-         {"osc1_enabled", 1.0f}, {"osc1_sourceType", 4.0f}, {"osc1_engine", 6.0f}, {"osc1_model", 1.0f}, {"osc1_octave", 0.0f}, {"osc1_shape", 0.0f}, {"osc1_detune", 0.15f}, {"osc1_level", 0.92f},
-         {"osc2_enabled", 1.0f}, {"osc2_sourceType", 2.0f}, {"osc2_engine", 3.0f}, {"osc2_model", 1.0f}, {"osc2_octave", 0.0f}, {"osc2_shape", 0.60f}, {"osc2_detune", 0.20f}, {"osc2_level", 0.65f},
-         {"osc3_enabled", 1.0f}, {"osc3_sourceType", 0.0f}, {"osc3_engine", 1.0f}, {"osc3_model", 7.0f}, {"osc3_octave", 1.0f}, {"osc3_shape", 0.50f}, {"osc3_detune", 0.30f}, {"osc3_level", 0.40f},
+         {"osc1_enabled", 1.0f}, {"osc1_sourceType", 4.0f}, {"osc1_engine", 6.0f}, {"osc1_model", 1.0f}, {"osc1_octave", 0.0f}, {"osc1_shape", 0.0f}, {"osc1_detune", 0.15f}, {"osc1_level", 0.98f},
+         {"osc2_enabled", 1.0f}, {"osc2_sourceType", 2.0f}, {"osc2_engine", 3.0f}, {"osc2_model", 1.0f}, {"osc2_octave", 0.0f}, {"osc2_shape", 0.60f}, {"osc2_detune", 0.20f}, {"osc2_level", 0.78f},
+         {"osc3_enabled", 1.0f}, {"osc3_sourceType", 0.0f}, {"osc3_engine", 1.0f}, {"osc3_model", 7.0f}, {"osc3_octave", 1.0f}, {"osc3_shape", 0.50f}, {"osc3_detune", 0.30f}, {"osc3_level", 0.45f},
          {"filter1Enabled", 1.0f}, {"filterType", 0.0f}, {"filterCutoffHz", 6500.0f}, {"filterResonance", 0.95f}, {"filterEnvAmount", 0.30f}, {"filterDrive", 0.05f},
          {"filter2Enabled", 0.0f},
          {"ampAttack", 0.003f}, {"ampDecay", 2.5f}, {"ampSustain", 0.50f}, {"ampRelease", 2.2f},
          {"fltAttack", 0.005f}, {"fltDecay", 2.0f}, {"fltSustain", 0.45f}, {"fltRelease", 1.8f},
          {"macroWarmth", 0.55f}, {"macroMotion", 0.30f}, {"macroShimmer", 0.55f}, {"macroAir", 0.40f},
          {"delayEnabled", 1.0f}, {"delaySync", 1.0f}, {"delaySyncDiv", 4.0f}, {"delayMix", 0.24f}, {"delayFeedback", 0.35f},
-         {"reverbMix", 0.45f}, {"reverbDry", 1.0f}, {"reverbDecay", 8.0f}, {"reverbShimmer", 0.50f},
+         {"reverbMix", 0.45f}, {"reverbDry", 1.0f}, {"reverbDecay", 8.0f}, {"reverbShimmer", 0.50f}, {"masterGainDb", 1.8f},
          {"droneEnabled", 0.0f}, {"arpEnabled", 0.0f}, {"subLowestOnly", 1.0f}}
     });
 
@@ -1597,6 +1602,13 @@ void NovaSynthProcessor::syncParametersFromAPVTS() noexcept {
     p.reverbDucking = apvts_.getRawParameterValue("reverbDucking")->load();
     p.reverbFreeze  = apvts_.getRawParameterValue("reverbFreeze")->load() > 0.5f;
     p.masterGainDb  = apvts_.getRawParameterValue("masterGainDb")->load();
+    if (masterTuningHzParam_ != nullptr) {
+        const float rawHz = std::clamp(masterTuningHzParam_->load(std::memory_order_relaxed), 435.0f, 445.0f);
+        p.masterTuningHz = std::round(rawHz * 10.0f) * 0.1f;
+    } else if (auto* pTune = apvts_.getRawParameterValue("masterTuningHz")) {
+        const float rawHz = std::clamp(pTune->load(std::memory_order_relaxed), 435.0f, 445.0f);
+        p.masterTuningHz = std::round(rawHz * 10.0f) * 0.1f;
+    }
 
     currentParams_ = p;
     synthEngine_.setParameters(p);
@@ -1672,6 +1684,36 @@ void NovaSynthProcessor::processBlock(juce::AudioBuffer<float>& buffer, juce::Mi
             synthEngine_.setPitchBend(bend * 2.0f);
         } else if (msg.isController() && msg.getControllerNumber() == 1) {
             synthEngine_.setModWheel(static_cast<float>(msg.getControllerValue()) / 127.0f);
+        } else if (msg.isController()) {
+            const int cc = msg.getControllerNumber();
+            const int val = msg.getControllerValue();
+            if (cc == 101) {
+                rpnMsb_ = val;
+            } else if (cc == 100) {
+                rpnLsb_ = val;
+            } else if (cc == 6 && rpnMsb_ == 0 && rpnLsb_ == 1) {
+                // MIDI RPN 0x0001: Master Fine Tuning MSB (coarse, 64 = 440.0 Hz)
+                dataEntryMsb_ = val;
+                const int combined14 = (dataEntryMsb_ << 7);
+                const float cents = (static_cast<float>(combined14 - 8192) / 8192.0f) * 100.0f;
+                applyHostTuningHzFromMidi(440.0f * std::pow(2.0f, cents / 1200.0f));
+            } else if (cc == 38 && rpnMsb_ == 0 && rpnLsb_ == 1) {
+                // MIDI RPN 0x0001: Master Fine Tuning 14-bit (MSB + LSB, 8192 = 440.0 Hz)
+                const int combined14 = (dataEntryMsb_ << 7) | (val & 0x7F);
+                const float cents = (static_cast<float>(combined14 - 8192) / 8192.0f) * 100.0f;
+                applyHostTuningHzFromMidi(440.0f * std::pow(2.0f, cents / 1200.0f));
+            }
+        } else if (msg.isSysEx()) {
+            const uint8_t* syx = msg.getSysExData();
+            const int syxLen = msg.getSysExDataSize();
+            // Universal Real-Time (0x7F) or Non-Real-Time (0x7E) Master Fine Tuning:
+            // [7F/7E, deviceId, 04 (Device Control), 03 (Master Fine Tuning), lsb, msb]
+            if (syx != nullptr && syxLen >= 6 && (syx[0] == 0x7F || syx[0] == 0x7E)
+                && syx[2] == 0x04 && syx[3] == 0x03) {
+                const int combined14 = ((static_cast<int>(syx[5]) & 0x7F) << 7) | (static_cast<int>(syx[4]) & 0x7F);
+                const float cents = (static_cast<float>(combined14 - 8192) / 8192.0f) * 100.0f;
+                applyHostTuningHzFromMidi(440.0f * std::pow(2.0f, cents / 1200.0f));
+            }
         } else if (msg.isAllNotesOff() || msg.isAllSoundOff()) {
             synthEngine_.allNotesOff();
         }
@@ -1836,6 +1878,31 @@ void NovaSynthProcessor::setInvertSustainPedal(bool inverted) {
     if (auto* p = apvts_.getParameter("invertSustainPedal")) {
         p->setValueNotifyingHost(inverted ? 1.0f : 0.0f);
     }
+}
+
+float NovaSynthProcessor::getMasterTuningHz() const noexcept {
+    if (masterTuningHzParam_ != nullptr) {
+        const float rawHz = std::clamp(masterTuningHzParam_->load(std::memory_order_relaxed), 435.0f, 445.0f);
+        return std::round(rawHz * 10.0f) * 0.1f;
+    }
+    return 440.0f;
+}
+
+void NovaSynthProcessor::setMasterTuningHz(float hz) {
+    const float clamped = std::round(std::clamp(hz, 435.0f, 445.0f) * 10.0f) * 0.1f;
+    if (auto* p = apvts_.getParameter("masterTuningHz")) {
+        p->setValueNotifyingHost(p->convertTo0to1(clamped));
+    }
+    syncParametersFromAPVTS();
+}
+
+void NovaSynthProcessor::applyHostTuningHzFromMidi(float tuningHz) noexcept {
+    const float clamped = std::round(std::clamp(tuningHz, 435.0f, 445.0f) * 10.0f) * 0.1f;
+    if (auto* p = apvts_.getParameter("masterTuningHz")) {
+        p->setValueNotifyingHost(p->convertTo0to1(clamped));
+    }
+    currentParams_.masterTuningHz = clamped;
+    synthEngine_.setParameters(currentParams_);
 }
 
 juce::File NovaSynthProcessor::getUserArpRhythmPresetsFile() const {

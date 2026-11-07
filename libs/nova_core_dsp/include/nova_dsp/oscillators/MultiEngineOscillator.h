@@ -43,7 +43,7 @@ public:
         float level = 0.75f;        // 0.0 .. 1.0
         float pan = 0.0f;           // -1.0 .. +1.0
         float rate = 0.50f;         // 0.0 .. 1.0 (Grain rate / LFO rate)
-        float scatter = 0.35f;      // 0.0 .. 1.0 (Grain scatter / random)
+        float scatter = 0.0f;       // 0.0 .. 1.0 (Grain scatter / random / Sample detune)
         float duration = 0.40f;     // 0.0 .. 1.0 (Grain duration / size)
         float spread = 0.85f;       // 0.0 .. 1.0 (Stereo spread)
         float warp = 0.0f;          // 0.0 .. 1.0 (Wavetable warp mode/amount)

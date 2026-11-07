@@ -3,6 +3,7 @@
 #include "nova_ui/NovaTheme.h"
 #include "nova_plugin/NovaProcessorBase.h"
 #include <juce_gui_basics/juce_gui_basics.h>
+#include <cmath>
 
 namespace nova::ui {
 
@@ -40,6 +41,41 @@ public:
         scaleNormalBtn_.onClick = [this]() { setScale(NovaTheme::TextScale::Normal); };
         scaleLargeBtn_.onClick = [this]() { setScale(NovaTheme::TextScale::Large); };
 
+        // Master Reference Tuning (435.0 .. 445.0 Hz in 0.1 Hz steps, default 440.0 Hz)
+        if (processor_.getAPVTS().getParameter("masterTuningHz") != nullptr) {
+            addAndMakeVisible(tuningDecBtn_);
+            addAndMakeVisible(tuningSlider_);
+            addAndMakeVisible(tuningIncBtn_);
+            addAndMakeVisible(tuningResetBtn_);
+
+            tuningSlider_.setSliderStyle(juce::Slider::LinearHorizontal);
+            tuningSlider_.setTextBoxStyle(juce::Slider::TextBoxRight, false, 78, 28);
+            tuningSlider_.setRange(435.0, 445.0, 0.1);
+            tuningSlider_.setTextValueSuffix(" Hz");
+            tuningSlider_.setDoubleClickReturnValue(true, 440.0);
+            tuningSlider_.setColour(juce::Slider::backgroundColourId, juce::Colour(0xff0e1726));
+            tuningSlider_.setColour(juce::Slider::trackColourId, theme_.accentPrimary);
+            tuningSlider_.setColour(juce::Slider::thumbColourId, juce::Colours::white);
+            tuningSlider_.setColour(juce::Slider::textBoxTextColourId, juce::Colour(0xffe2e8f0));
+            tuningSlider_.setColour(juce::Slider::textBoxBackgroundColourId, juce::Colour(0xff0e1726));
+            tuningSlider_.setColour(juce::Slider::textBoxOutlineColourId, juce::Colour(0xff1e2d42));
+
+            tuningSlider_.onValueChange = [this]() {
+                if (!isUpdatingTuningUi_) {
+                    setMasterTuning(static_cast<float>(tuningSlider_.getValue()));
+                }
+            };
+            tuningDecBtn_.onClick = [this]() {
+                setMasterTuning(getCurrentMasterTuning() - 0.1f);
+            };
+            tuningIncBtn_.onClick = [this]() {
+                setMasterTuning(getCurrentMasterTuning() + 0.1f);
+            };
+            tuningResetBtn_.onClick = [this]() {
+                setMasterTuning(440.0f);
+            };
+        }
+
         // Sustain Pedal Polarity Buttons (only if supported by processor)
         if (processor_.getAPVTS().getParameter("invertSustainPedal") != nullptr) {
             addAndMakeVisible(pedalNormalBtn_);
@@ -65,6 +101,16 @@ public:
         styleToggle(scaleSmallBtn_, curScale == NovaTheme::TextScale::Small);
         styleToggle(scaleNormalBtn_, curScale == NovaTheme::TextScale::Normal);
         styleToggle(scaleLargeBtn_, curScale == NovaTheme::TextScale::Large);
+
+        if (processor_.getAPVTS().getParameter("masterTuningHz") != nullptr) {
+            const float hz = getCurrentMasterTuning();
+            isUpdatingTuningUi_ = true;
+            tuningSlider_.setValue(static_cast<double>(hz), juce::dontSendNotification);
+            isUpdatingTuningUi_ = false;
+            styleToggle(tuningDecBtn_, false);
+            styleToggle(tuningIncBtn_, false);
+            styleToggle(tuningResetBtn_, std::abs(hz - 440.0f) < 0.05f);
+        }
 
         if (auto* invPedalParam = processor_.getAPVTS().getParameter("invertSustainPedal")) {
             const bool isInverted = (invPedalParam->getValue() > 0.5f);
@@ -110,10 +156,15 @@ public:
         const int cX = card.getX() + 20;
         g.drawText("UI LABEL & TYPOGRAPHY SCALE", juce::Rectangle<int>(cX, card.getY() + 58, 300, 16), juce::Justification::centredLeft);
 
-        int nextSectionY = card.getY() + 138;
+        int nextSectionY = card.getY() + 132;
+        if (processor_.getAPVTS().getParameter("masterTuningHz") != nullptr) {
+            g.drawText("MASTER TUNING (A4 REFERENCE: 435.0 - 445.0 HZ)", juce::Rectangle<int>(cX, nextSectionY, 400, 16), juce::Justification::centredLeft);
+            nextSectionY += 72;
+        }
+
         if (processor_.getAPVTS().getParameter("invertSustainPedal") != nullptr) {
             g.drawText("SUSTAIN PEDAL POLARITY", juce::Rectangle<int>(cX, nextSectionY, 300, 16), juce::Justification::centredLeft);
-            nextSectionY += 76;
+            nextSectionY += 72;
         }
 
         if (onOpenAudioSettings_ != nullptr) {
@@ -123,7 +174,7 @@ public:
         // Legal & Licensing footer
         g.setFont(theme_.getValueFont(9.0f));
         g.setColour(juce::Colour(0xff64748b));
-        g.drawText("Nova Audio Library: CC0 1.0 Universal / Public Domain (VCSL) • Fonts: SIL OFL 1.1",
+        g.drawText("Nova Audio Library: CC0 1.0 Universal / Public Domain (VCSL) | Fonts: SIL OFL 1.1",
                    juce::Rectangle<int>(cX, card.getBottom() - 36, card.getWidth() - 140, 20), juce::Justification::centredLeft);
     }
 
@@ -138,13 +189,28 @@ public:
         scaleNormalBtn_.setBounds(card.getX() + 20 + sW + 8, sY, sW, 32);
         scaleLargeBtn_.setBounds(card.getX() + 20 + (sW + 8) * 2, sY, sW, 32);
 
-        // Sustain Pedal Polarity Buttons (row at y = 160)
-        int nextRowY = card.getY() + 160;
+        int nextRowY = card.getY() + 154;
+        if (processor_.getAPVTS().getParameter("masterTuningHz") != nullptr) {
+            const int x0 = card.getX() + 20;
+            const int totalW = card.getWidth() - 40;
+            constexpr int stepW = 36;
+            constexpr int resetW = 94;
+            constexpr int gap = 6;
+            const int sliderW = totalW - stepW * 2 - resetW - gap * 3;
+
+            tuningDecBtn_.setBounds(x0, nextRowY, stepW, 32);
+            tuningSlider_.setBounds(x0 + stepW + gap, nextRowY, sliderW, 32);
+            tuningIncBtn_.setBounds(x0 + stepW + gap + sliderW + gap, nextRowY, stepW, 32);
+            tuningResetBtn_.setBounds(x0 + totalW - resetW, nextRowY, resetW, 32);
+            nextRowY += 72;
+        }
+
+        // Sustain Pedal Polarity Buttons
         if (processor_.getAPVTS().getParameter("invertSustainPedal") != nullptr) {
             const int pW = (card.getWidth() - 40 - 10) / 2;
             pedalNormalBtn_.setBounds(card.getX() + 20, nextRowY, pW, 32);
             pedalInvertBtn_.setBounds(card.getX() + 20 + pW + 10, nextRowY, pW, 32);
-            nextRowY += 76;
+            nextRowY += 72;
         }
 
         // Audio Setup Button
@@ -173,13 +239,33 @@ public:
 private:
     [[nodiscard]] juce::Rectangle<int> getCardBounds() const {
         constexpr int cardW = 480;
-        const int cardH = (onOpenAudioSettings_ != nullptr) ? 360 : 285;
+        int cardH = 205;
+        if (processor_.getAPVTS().getParameter("masterTuningHz") != nullptr) cardH += 72;
+        if (processor_.getAPVTS().getParameter("invertSustainPedal") != nullptr) cardH += 72;
+        if (onOpenAudioSettings_ != nullptr) cardH += 72;
         return juce::Rectangle<int>((getWidth() - cardW) / 2, (getHeight() - cardH) / 2, cardW, cardH);
     }
 
     void setScale(NovaTheme::TextScale scale) {
         theme_.setTextScale(scale);
         if (onScaleChanged_) onScaleChanged_(scale);
+        refreshStates();
+    }
+
+    [[nodiscard]] float getCurrentMasterTuning() const noexcept {
+        if (auto* raw = processor_.getAPVTS().getRawParameterValue("masterTuningHz")) {
+            const float v = std::clamp(raw->load(std::memory_order_relaxed), 435.0f, 445.0f);
+            return std::round(v * 10.0f) * 0.1f;
+        }
+        return 440.0f;
+    }
+
+    void setMasterTuning(float hz) {
+        const float clamped = std::round(std::clamp(hz, 435.0f, 445.0f) * 10.0f) * 0.1f;
+        if (auto* p = processor_.getAPVTS().getParameter("masterTuningHz")) {
+            p->setValueNotifyingHost(p->convertTo0to1(clamped));
+        }
+        processor_.getPresetManager().saveGlobalPreferences();
         refreshStates();
     }
 
@@ -207,8 +293,9 @@ private:
     std::function<void(NovaTheme::TextScale)> onScaleChanged_;
     std::function<void()> onOpenAudioSettings_;
     std::function<void()> onClose_;
+    bool isUpdatingTuningUi_ = false;
 
-    // Close button (✕)
+    // Close button (X)
     struct VectorCloseBtn : public juce::Button {
         VectorCloseBtn() : juce::Button("Close") {}
         void paintButton(juce::Graphics& g, bool isHovered, bool) override {
@@ -228,6 +315,11 @@ private:
     juce::TextButton scaleSmallBtn_{ "SMALL (COMPACT)" };
     juce::TextButton scaleNormalBtn_{ "NORMAL (+15%)" };
     juce::TextButton scaleLargeBtn_{ "LARGE (+30%)" };
+
+    juce::TextButton tuningDecBtn_{ "-0.1" };
+    juce::Slider     tuningSlider_;
+    juce::TextButton tuningIncBtn_{ "+0.1" };
+    juce::TextButton tuningResetBtn_{ "440.0 HZ" };
 
     juce::TextButton pedalNormalBtn_{ "NORMAL (POLARITY +)" };
     juce::TextButton pedalInvertBtn_{ "INVERTED (POLARITY -)" };

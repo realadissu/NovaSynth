@@ -5,8 +5,9 @@
 namespace nova::dsp {
 
 namespace {
-[[nodiscard]] inline float midiNoteToHz(int note) noexcept {
-    return 440.0f * std::pow(2.0f, static_cast<float>(note - 69) / 12.0f);
+[[nodiscard]] inline float midiNoteToHz(int note, float masterTuningHz = 440.0f) noexcept {
+    const float refA4 = std::clamp(masterTuningHz, 435.0f, 445.0f);
+    return refA4 * std::pow(2.0f, static_cast<float>(note - 69) / 12.0f);
 }
 
 [[nodiscard]] inline float applyEnvTimeMod(float baseSec, float modOffset, float minSec, float maxSec) noexcept {
@@ -229,6 +230,7 @@ void WorshipSynthEngine::setParameters(const Parameters& params) noexcept {
 
     for (auto& v : voices_) {
         if (v.active) {
+            v.baseFreqHz = midiNoteToHz(v.midiNote, params_.masterTuningHz);
             v.activeOscCountSnapshot = params_.activeOscCount;
             v.filterTypeSnapshot = params_.filterType;
             v.filterResSnapshot = params_.filterResonance;
@@ -545,7 +547,7 @@ void WorshipSynthEngine::startVoice(int midiNote, float velocity, bool isDrone, 
     chosen->isArpVoice = isArp;
     chosen->heldByArp = isArp;
     chosen->midiNote = midiNote;
-    chosen->baseFreqHz = midiNoteToHz(midiNote);
+    chosen->baseFreqHz = midiNoteToHz(midiNote, params_.masterTuningHz);
     chosen->velocity = std::clamp(velocity, 0.05f, 1.0f);
     chosen->ageCounter = ++voiceCounter_;
 

@@ -139299,7 +139299,7 @@ static const SampleZone kZones_GrandPianoHammer[] = {
 
 static const SampleZone kZones_ConcertHarpPluck[] = {
     { kSample_Harp_C3_L, kSample_Harp_C3_R, 176400, 130.8128f },
-    { kSample_Harp_C5_L, kSample_Harp_C5_R, 185220, 523.2511f },
+    { kSample_Harp_C5_L, kSample_Harp_C5_R, 185220, 519.6400f },
 };
 
 static const SampleZone kZones_UprightFeltThump[] = {
@@ -139311,8 +139311,8 @@ static const SampleZone kZones_CelestaSoftBell[] = {
 };
 
 static const SampleZone kZones_GlockenspielChime[] = {
-    { kSample_Glock_C5_L, kSample_Glock_C5_R, 185220, 523.2511f },
-    { kSample_Glock_C6_L, kSample_Glock_C6_R, 154350, 1046.5020f },
+    { kSample_Glock_C5_L, kSample_Glock_C5_R, 185220, 526.7900f },
+    { kSample_Glock_C6_L, kSample_Glock_C6_R, 154350, 1055.4000f },
 };
 
 static const SampleZone kZones_WorshipHandChime[] = {
@@ -139321,7 +139321,7 @@ static const SampleZone kZones_WorshipHandChime[] = {
 };
 
 static const SampleZone kZones_KalimbaMetalTine[] = {
-    { kSample_Kalimba_Cs4_L, kSample_Kalimba_Cs4_R, 134400, 277.1826f },
+    { kSample_Kalimba_Cs4_L, kSample_Kalimba_Cs4_R, 134400, 280.4600f },
 };
 
 static const SampleZone kZones_SacredFlutePipe[] = {

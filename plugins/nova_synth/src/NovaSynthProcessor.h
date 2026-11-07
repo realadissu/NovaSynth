@@ -152,12 +152,15 @@ public:
         return 0.0f;
     }
 
-    // Sustain Pedal Polarity Inversion
+    // Sustain Pedal Polarity Inversion & Master Tuning (A4 Hz)
     [[nodiscard]] bool isInvertSustainPedal() const noexcept;
     void setInvertSustainPedal(bool inverted);
+    [[nodiscard]] float getMasterTuningHz() const noexcept;
+    void setMasterTuningHz(float hz);
 
 private:
     void registerFactoryPresets();
+    void applyHostTuningHzFromMidi(float tuningHz) noexcept;
 
     nova::dsp::WorshipSynthEngine synthEngine_;
     nova::dsp::WorshipSynthEngine::Parameters currentParams_{};
@@ -175,8 +178,12 @@ private:
     std::atomic<float> masterPeakR_{0.0f};
     std::array<std::atomic<float>, 8> sourcePeaks_{};
 
-    // Sustain Pedal & Arpeggiator APVTS Pointers for lock-free audio thread sync
+    // Sustain Pedal, Master Tuning & Arpeggiator APVTS Pointers for lock-free audio thread sync
     std::atomic<float>* invertSustainPedalParam_ = nullptr;
+    std::atomic<float>* masterTuningHzParam_ = nullptr;
+    int rpnMsb_ = 127;
+    int rpnLsb_ = 127;
+    int dataEntryMsb_ = 64;
     std::atomic<float>* arpPatternLengthParam_ = nullptr;
     std::array<std::atomic<float>*, 64> arpStepGateParams_{};
     std::array<std::atomic<float>*, 64> arpStepVelParams_{};

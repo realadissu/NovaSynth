@@ -202,6 +202,7 @@ public:
         float reverbDucking      = 0.25f;
         bool  reverbFreeze       = false;
         float masterGainDb       = 0.0f;
+        float masterTuningHz     = 440.0f; // Reference A4 tuning in Hz (435.0 .. 445.0 Hz)
     };
 
     struct Telemetry {

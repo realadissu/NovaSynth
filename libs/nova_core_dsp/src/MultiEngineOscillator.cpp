@@ -1064,7 +1064,7 @@ void MultiEngineOscillator::processSample(float baseFrequencyHz,
             const auto* zone = activeSampleZone_;
             if (zone->pcmL == nullptr || zone->numSamples <= 8) break;
 
-            const float detuneCents = (std::clamp(params_.scatter, 0.0f, 1.0f) - 0.5f) * 100.0f;
+            const float detuneCents = std::clamp(params_.scatter, 0.0f, 1.0f) * 50.0f;
             const float detuneRatio = std::pow(2.0f, detuneCents / 1200.0f);
             const double playbackRate = (static_cast<double>(slotFreq) * static_cast<double>(detuneRatio) / static_cast<double>(zone->rootFrequencyHz)) * (smp.sampleRate / sampleRate_);
             const double step = playbackRate * sampleDirection_;

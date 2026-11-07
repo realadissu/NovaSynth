@@ -310,7 +310,7 @@ public:
             unisonKnob_.setLabel("SPREAD");
             unisonKnob_.setSuffix("%");
             scatterKnob_.setLabel("DETUNE");
-            scatterKnob_.setSuffix("ct");
+            scatterKnob_.setSuffix("%");
         } else if (slot.engine == ET::EvolvingWavetable) {
             morphKnob_.setLabel("WT POS");
             warpKnob_.setLabel("WARP");

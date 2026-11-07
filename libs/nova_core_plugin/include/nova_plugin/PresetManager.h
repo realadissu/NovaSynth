@@ -55,7 +55,7 @@ public:
     [[nodiscard]] juce::String getCurrentPresetCategory() const;
 
     [[nodiscard]] static bool isGlobalPreferenceParameter(const juce::String& paramId) noexcept {
-        return paramId == "invertSustainPedal";
+        return paramId == "invertSustainPedal" || paramId == "masterTuningHz";
     }
 
     void loadGlobalPreferences();

@@ -3347,6 +3347,9 @@ TEST(NovaSynthRegressionTests, SubOscCardLowestNoteVoicingToggle) {
     pm.loadPresetByName("Init Patch");
 
     // Configure slot 1 as Sub Oscillator
+    if (auto* pSrcType = apvts.getParameter("osc1_sourceType")) {
+        pSrcType->setValueNotifyingHost(pSrcType->convertTo0to1(1.0f)); // SUB
+    }
     if (auto* pEngine = apvts.getParameter("osc1_engine")) {
         pEngine->setValueNotifyingHost(pEngine->convertTo0to1(3.0f)); // SubOscillator
     }
@@ -5063,6 +5066,157 @@ TEST(NovaSynthUiSyncTests, SourceAndFilterStateTogglesPropagateToAllViews) {
     proc.syncParametersFromAPVTS();
     tickAllTimers(editor.get(), tickAllTimers);
     EXPECT_NE(flt2En->getValue(), initFlt2);
+}
+
+TEST(NovaSynthTuningTests, SamplePlaybackZeroDetuneProducesExactRootPitch) {
+    nova::synth::NovaSynthProcessor proc;
+    // Verify default scatter parameter is 0.0 (0% detune, not 0.35 which caused detune offset)
+    auto* scatterParam = proc.getAPVTS().getRawParameterValue("osc1_scatter");
+    ASSERT_NE(scatterParam, nullptr);
+    EXPECT_NEAR(scatterParam->load(), 0.0f, 1e-5f);
+
+    // Measure DFT magnitude at fundamental C4 (261.6256 Hz) vs -50 cents (254.178 Hz) vs +50 cents (269.292 Hz)
+    auto measureFundamentalEnergy = [](float scatterVal, float probeFreqHz) {
+        nova::dsp::MultiEngineOscillator osc;
+        constexpr double sr = 48000.0;
+        osc.prepare(sr);
+
+        nova::dsp::MultiEngineOscillator::Parameters p{};
+        p.enabled = true;
+        p.sourceType = 4;
+        p.engine = nova::dsp::MultiEngineOscillator::EngineType::SamplePlayback;
+        p.modelIndex = 0; // Grand Piano Hammer (C4 = 261.6256 Hz)
+        p.shapeMorph = 0.0f;
+        p.detune = 0.0f;
+        p.scatter = scatterVal;
+        p.level = 1.0f;
+        p.sampleLoopMode = 1;
+        osc.setParameters(p);
+        osc.triggerNote(261.6256f, 0.9f, 12345u);
+
+        double re = 0.0;
+        double im = 0.0;
+        constexpr int totalSamples = 48000;
+        for (int i = 0; i < totalSamples; ++i) {
+            float l = 0.0f, r = 0.0f;
+            osc.processSample(261.6256f, 0.0f, 0.0f, l, r);
+            if (i >= 4800) {
+                const double phase = 2.0 * 3.14159265358979323846 * static_cast<double>(probeFreqHz) * static_cast<double>(i) / sr;
+                re += static_cast<double>(l) * std::cos(phase);
+                im -= static_cast<double>(l) * std::sin(phase);
+            }
+        }
+        return static_cast<float>(std::sqrt(re * re + im * im));
+    };
+
+    const float energyAtExactC4   = measureFundamentalEnergy(0.0f, 261.6256f);
+    const float energyAtMinus50ct = measureFundamentalEnergy(0.0f, 254.1780f);
+    const float energyDetunedAtPlus50ct = measureFundamentalEnergy(1.0f, 269.2920f);
+
+    // At 0% detune, spectral energy peaks sharply at 261.6256 Hz (not -50 cents!)
+    EXPECT_GT(energyAtExactC4, energyAtMinus50ct * 5.0f);
+    // At 100% detune (scatter = 1.0 -> +50 cents), spectral energy shifts to 269.292 Hz
+    EXPECT_GT(energyDetunedAtPlus50ct, measureFundamentalEnergy(1.0f, 261.6256f) * 5.0f);
+}
+
+TEST(NovaSynthTuningTests, MasterTuningParameterDspScalingAndDawSync) {
+    nova::synth::NovaSynthProcessor proc;
+    constexpr double sr = 48000.0;
+    proc.prepareToPlay(sr, 512);
+
+    // 1. Default masterTuningHz is 440.0 Hz, range [435.0 .. 445.0] in 0.1 Hz steps
+    EXPECT_NEAR(proc.getMasterTuningHz(), 440.0f, 0.01f);
+    EXPECT_TRUE(nova::plugin::PresetManager::isGlobalPreferenceParameter("masterTuningHz"));
+
+    proc.setMasterTuningHz(442.3f);
+    EXPECT_NEAR(proc.getMasterTuningHz(), 442.3f, 0.05f);
+
+    // 2. Switching presets preserves masterTuningHz (global preference)
+    proc.getPresetManager().loadPresetByIndex(1);
+    EXPECT_NEAR(proc.getMasterTuningHz(), 442.3f, 0.05f);
+
+    // 3. DAW state save/restore (getStateInformation / setStateInformation) preserves masterTuningHz
+    juce::MemoryBlock stateBlock;
+    proc.getStateInformation(stateBlock);
+
+    proc.setMasterTuningHz(436.5f);
+    EXPECT_NEAR(proc.getMasterTuningHz(), 436.5f, 0.05f);
+
+    proc.setStateInformation(stateBlock.getData(), static_cast<int>(stateBlock.getSize()));
+    proc.syncParametersFromAPVTS();
+    EXPECT_NEAR(proc.getMasterTuningHz(), 442.3f, 0.05f);
+
+    // 4. Verify DSP frequency scaling across 435.0 Hz, 440.0 Hz, and 445.0 Hz
+    auto measureA4Freq = [](float masterTuneHz) {
+        nova::dsp::WorshipSynthEngine engine;
+        constexpr double sampleRate = 48000.0;
+        engine.prepare(sampleRate, 512);
+
+        auto p = engine.getParameters();
+        p.masterTuningHz = masterTuneHz;
+        p.activeOscCount = 1;
+        p.oscSlots[0].enabled = true;
+        p.oscSlots[0].sourceType = 1; // SUB (pure sine, -1 octave unless octaveOffset = 1)
+        p.oscSlots[0].engine = nova::dsp::MultiEngineOscillator::EngineType::SubOscillator;
+        p.oscSlots[0].modelIndex = 0; // Pure Sine Sub
+        p.oscSlots[0].octaveOffset = 1; // Compensate Sub's -1 octave to play at A4 fundamental
+        p.oscSlots[0].semitoneOffset = 0;
+        p.oscSlots[0].shapeMorph = 0.0f;
+        p.oscSlots[0].detune = 0.0f;
+        p.oscSlots[0].level = 1.0f;
+        p.oscSlots[0].filterRouting = 3; // Direct
+        p.delayEnabled = false;
+        p.reverbMix = 0.0f;
+        p.ampEnv.attackSec = 0.001f;
+        p.ampEnv.sustainLvl = 1.0f;
+        engine.setParameters(p);
+        engine.getModMatrix().clear();
+
+        engine.noteOn(69, 1.0f); // A4
+
+        std::vector<float> outL(48000, 0.0f);
+        std::vector<float> outR(48000, 0.0f);
+        engine.processBlock(outL.data(), outR.data(), 48000);
+
+        int firstCrossing = -1;
+        int lastCrossing = -1;
+        int numCycles = 0;
+        for (int i = 4800; i < 47000; ++i) {
+            if (outL[static_cast<std::size_t>(i - 1)] <= 0.0f && outL[static_cast<std::size_t>(i)] > 0.0f) {
+                if (firstCrossing < 0) {
+                    firstCrossing = i;
+                } else {
+                    lastCrossing = i;
+                    ++numCycles;
+                }
+            }
+        }
+        if (numCycles <= 0 || lastCrossing <= firstCrossing) return 0.0f;
+        return static_cast<float>(static_cast<double>(numCycles) * sampleRate / static_cast<double>(lastCrossing - firstCrossing));
+    };
+
+    EXPECT_NEAR(measureA4Freq(435.0f), 435.0f, 0.25f);
+    EXPECT_NEAR(measureA4Freq(440.0f), 440.0f, 0.25f);
+    EXPECT_NEAR(measureA4Freq(445.0f), 445.0f, 0.25f);
+
+    // 5. Verify DAW MIDI Master Fine Tuning adoption via Universal Real-Time SysEx (04 03)
+    // Target 442.0 Hz -> cents = 1200 * log2(442 / 440) = +7.8525 cents
+    // combined14 = 8192 + round(7.8525 / 100 * 8192) = 8192 + 643 = 8835
+    const int target14 = 8835;
+    const juce::uint8 sysexData[6] = {
+        0x7F, 0x7F, 0x04, 0x03,
+        static_cast<juce::uint8>(target14 & 0x7F),
+        static_cast<juce::uint8>((target14 >> 7) & 0x7F)
+    };
+    juce::AudioBuffer<float> buf(2, 256);
+    juce::MidiBuffer midi;
+    midi.addEvent(juce::MidiMessage::createSysExMessage(sysexData, 6), 0);
+    proc.processBlock(buf, midi);
+    EXPECT_NEAR(proc.getMasterTuningHz(), 442.0f, 0.1f);
+
+    // Restore default 440.0 Hz so GlobalPreferences.json remains clean
+    proc.setMasterTuningHz(440.0f);
+    proc.getPresetManager().saveGlobalPreferences();
 }
 
 } // namespace
