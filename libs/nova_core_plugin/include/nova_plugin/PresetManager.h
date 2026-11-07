@@ -7,12 +7,20 @@
 
 namespace nova::plugin {
 
+struct PresetModSlot {
+    int source = 0;
+    int destination = 0;
+    float amount = 0.0f;
+    bool enabled = true;
+};
+
 struct PresetEntry {
     juce::String name;
     juce::String category;
     juce::String description;
     juce::StringArray tags;
     std::map<juce::String, float> parameterValues;
+    std::vector<PresetModSlot> modSlots{};
     bool isFactory = true;
     bool isFavorite = false;
 };

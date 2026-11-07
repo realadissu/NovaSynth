@@ -24,9 +24,7 @@ public:
 
     void getStateInformation(juce::MemoryBlock& destData) override;
     void setStateInformation(const void* data, int sizeInBytes) override;
-    void onPresetLoaded() override {
-        presetChangePending_.store(true, std::memory_order_release);
-    }
+    void onPresetLoaded() override;
 
     [[nodiscard]] nova::dsp::ModMatrix& getModMatrix() noexcept {
         return synthEngine_.getModMatrix();

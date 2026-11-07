@@ -3266,6 +3266,8 @@ TEST(ModulationMatrixTests, PanSpreadModulationScalesStereoWidth) {
 
 TEST(NovaSynthProcessorTests, SustainPedalInversionToggle) {
     nova::synth::NovaSynthProcessor proc;
+    proc.setInvertSustainPedal(false);
+    proc.getPresetManager().saveGlobalPreferences();
     proc.prepareToPlay(48000.0, 512);
 
     EXPECT_FALSE(proc.isInvertSustainPedal());
@@ -3304,6 +3306,9 @@ TEST(NovaSynthProcessorTests, SustainPedalInversionToggle) {
     midi.clear();
     midi.addEvent(juce::MidiMessage::controllerEvent(1, 64, 127), 0);
     proc.processBlock(buffer, midi);
+
+    proc.setInvertSustainPedal(false);
+    proc.getPresetManager().saveGlobalPreferences();
 }
 
 TEST(PresetManagerTests, GlobalHardwarePreferencesPersistAcrossPresetLoading) {
@@ -3336,6 +3341,9 @@ TEST(PresetManagerTests, GlobalHardwarePreferencesPersistAcrossPresetLoading) {
     EXPECT_FLOAT_EQ(*apvts.getRawParameterValue("invertSustainPedal"), 1.0f);
     pm.switchABState();
     EXPECT_FLOAT_EQ(*apvts.getRawParameterValue("invertSustainPedal"), 1.0f);
+
+    processor.setInvertSustainPedal(false);
+    pm.saveGlobalPreferences();
 }
 
 TEST(NovaSynthRegressionTests, SubOscCardLowestNoteVoicingToggle) {
@@ -5070,6 +5078,7 @@ TEST(NovaSynthUiSyncTests, SourceAndFilterStateTogglesPropagateToAllViews) {
 
 TEST(NovaSynthTuningTests, SamplePlaybackZeroDetuneProducesExactRootPitch) {
     nova::synth::NovaSynthProcessor proc;
+    proc.getPresetManager().loadPresetByName("Init Patch");
     // Verify default scatter parameter is 0.0 (0% detune, not 0.35 which caused detune offset)
     auto* scatterParam = proc.getAPVTS().getRawParameterValue("osc1_scatter");
     ASSERT_NE(scatterParam, nullptr);
@@ -5217,6 +5226,82 @@ TEST(NovaSynthTuningTests, MasterTuningParameterDspScalingAndDawSync) {
     // Restore default 440.0 Hz so GlobalPreferences.json remains clean
     proc.setMasterTuningHz(440.0f);
     proc.getPresetManager().saveGlobalPreferences();
+}
+
+TEST(NovaSynthTuningAndSampleTests, SwellPedalPresetsAndSampleAuditVerification) {
+    nova::synth::NovaSynthProcessor proc;
+    proc.prepareToPlay(48000.0, 512);
+
+    auto& pm = proc.getPresetManager();
+    EXPECT_GE(pm.getAllPresets().size(), 51u);
+
+    // 1. Verify acoustic sample presets use One-Shot loop mode and zero fine detune scatter
+    ASSERT_TRUE(pm.loadPresetByName("Solo Concert Grand Piano"));
+    proc.syncParametersFromAPVTS();
+    EXPECT_EQ(proc.getCurrentParameters().oscSlots[0].sampleLoopMode, 0);
+    EXPECT_NEAR(proc.getCurrentParameters().oscSlots[0].scatter, 0.0f, 1e-4f);
+
+    // 2. Verify sustained pipe sample preset uses Ping-Pong loop mode with smooth crossfade
+    ASSERT_TRUE(pm.loadPresetByName("Sacred Pipe Flute Swell"));
+    proc.syncParametersFromAPVTS();
+    EXPECT_EQ(proc.getCurrentParameters().oscSlots[0].sampleLoopMode, 2);
+    EXPECT_GT(proc.getCurrentParameters().oscSlots[0].sampleCrossfade, 0.10f);
+
+    // 3. Verify new Swell & Piano Pad presets respond to Expression Pedal (CC 11) and have controlled release/reverb
+    const std::vector<juce::String> swellPresets = {
+        "Velvet Piano Underpad Swell",
+        "Airy Worship Swell Carpet",
+        "Felt & Halo Dynamic Swell",
+        "Silk Strings & Breath Swell",
+        "Intimate Prayer Bed Swell",
+        "Golden Hour Horizon Swell",
+        "Warm Cello & Choir Swell",
+        "Midnight Sanctuary Swell"
+    };
+
+    for (const auto& name : swellPresets) {
+        ASSERT_TRUE(pm.loadPresetByName(name)) << "Missing preset: " << name.toStdString();
+        proc.syncParametersFromAPVTS();
+        const auto p = proc.getCurrentParameters();
+        EXPECT_LE(p.ampEnv.releaseSec, 1.65f) << "Release too long on " << name.toStdString();
+        EXPECT_LE(p.reverbDecay, 3.8f) << "Reverb decay too long on " << name.toStdString();
+        EXPECT_GE(p.reverbDucking, 0.42f) << "Reverb ducking too low on " << name.toStdString();
+    }
+
+    // 4. Measure low-swell vs high-swell via MIDI CC 11 (Expression Pedal) on "Velvet Piano Underpad Swell"
+    ASSERT_TRUE(pm.loadPresetByName("Velvet Piano Underpad Swell"));
+    juce::AudioBuffer<float> buf(2, 512);
+    auto measureSwellRms = [&](int cc11Value) {
+        proc.triggerPanic();
+        juce::MidiBuffer midi;
+        midi.addEvent(juce::MidiMessage::controllerEvent(1, 11, cc11Value), 0);
+        midi.addEvent(juce::MidiMessage::noteOn(1, 60, static_cast<juce::uint8>(100)), 0);
+        midi.addEvent(juce::MidiMessage::noteOn(1, 64, static_cast<juce::uint8>(100)), 0);
+        midi.addEvent(juce::MidiMessage::noteOn(1, 67, static_cast<juce::uint8>(100)), 0);
+        float sumSq = 0.0f;
+        int totalSamples = 0;
+        for (int b = 0; b < 80; ++b) {
+            proc.processBlock(buf, midi);
+            midi.clear();
+            if (b >= 40) {
+                const float* l = buf.getReadPointer(0);
+                const float* r = buf.getReadPointer(1);
+                for (int i = 0; i < 512; ++i) {
+                    sumSq += 0.5f * (l[i] * l[i] + r[i] * r[i]);
+                }
+                totalSamples += 512;
+            }
+        }
+        return std::sqrt(sumSq / static_cast<float>(std::max(1, totalSamples)));
+    };
+
+    const float rmsLowPedal  = measureSwellRms(0);
+    const float rmsHighPedal = measureSwellRms(127);
+
+    // Low pedal must lay a warm, audible carpet (> 0.03 RMS), and swelling the pedal up must bloom significantly (> 1.4x RMS)
+    EXPECT_GT(rmsLowPedal, 0.03f);
+    EXPECT_GT(rmsHighPedal, rmsLowPedal * 1.40f);
+    EXPECT_LT(rmsHighPedal, 0.98f);
 }
 
 } // namespace
