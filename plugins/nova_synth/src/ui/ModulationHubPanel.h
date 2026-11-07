@@ -184,9 +184,10 @@ public:
             }
         }
 
-        // Smoothly decay live performance visualizers
+        // Live performance visualizers
         const auto tel = proc_.getSynthTelemetry();
-        whlVisual_ = std::max(tel.modWheelValue, whlVisual_ * 0.94f);
+        whlVisual_ = tel.modWheelValue;
+        pbdVisual_ = std::clamp((tel.pitchBendValue / 2.0f) * 0.5f + 0.5f, 0.0f, 1.0f);
         velVisual_ = std::max(tel.activeVoiceCount > 0 ? tel.lastPlayedVelocity : 0.0f, velVisual_ * 0.92f);
         atVisual_  = std::max(std::max(tel.outputPeakL, tel.outputPeakR), atVisual_ * 0.92f);
 
@@ -707,7 +708,7 @@ private:
 
         static constexpr std::array<const char*, 4> kPerfLabels = { "WHL", "VEL", "A.T.", "PBD" };
         static constexpr std::array<uint32_t, 4> kPerfCols = { 0xff3b82f6, 0xff2dd4bf, 0xfff43f5e, 0xffa855f7 };
-        const std::array<float, 4> kPerfVals = { whlVisual_, velVisual_, atVisual_, 0.5f };
+        const std::array<float, 4> kPerfVals = { whlVisual_, velVisual_, atVisual_, pbdVisual_ };
 
         for (int i = 0; i < 4; ++i) {
             const juce::Rectangle<float> itemRect(
@@ -1237,6 +1238,7 @@ private:
     float whlVisual_ = 0.0f;
     float velVisual_ = 0.0f;
     float atVisual_  = 0.0f;
+    float pbdVisual_ = 0.5f;
 
     // 3. Quick Mod Matrix
     juce::Rectangle<int> addRouteBtnRect_;

@@ -65,6 +65,19 @@ public:
     void triggerAuditionNoteOn(int midiNote, float velocity = 0.82f) noexcept;
     void triggerAuditionNoteOff(int midiNote) noexcept;
 
+    void setModWheelFromUI(float normVal) noexcept {
+        synthEngine_.setModWheel(normVal);
+    }
+    [[nodiscard]] float getModWheelValue() const noexcept {
+        return synthEngine_.getModWheel();
+    }
+    void setPitchBendFromUI(float semitones) noexcept {
+        synthEngine_.setPitchBend(semitones);
+    }
+    [[nodiscard]] float getPitchBendSemitones() const noexcept {
+        return synthEngine_.getPitchBend();
+    }
+
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
     void syncParametersFromAPVTS() noexcept;

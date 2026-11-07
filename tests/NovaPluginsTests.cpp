@@ -1958,7 +1958,7 @@ TEST(NovaSynthComprehensiveTests, ThemeFontScaleScalingFactors) {
     EXPECT_NEAR(theme.getLabelFont(12.0f).getHeight(), 12.0f * 1.52f, 0.5f);
 }
 
-TEST(NovaSynthWindowSizingTests, EditorEnforcesSafeLaptopMinimumAndMaximumLimits) {
+TEST(NovaSynthWindowSizingTests, EditorEnforcesSafeLaptopMinimumAndUnrestrictedMaximumLimits) {
     nova::synth::NovaSynthProcessor proc;
     std::unique_ptr<juce::AudioProcessorEditor> editor(proc.createEditorIfNeeded());
     ASSERT_NE(editor, nullptr);
@@ -1967,17 +1967,15 @@ TEST(NovaSynthWindowSizingTests, EditorEnforcesSafeLaptopMinimumAndMaximumLimits
     auto* constrainer = editor->getConstrainer();
     ASSERT_NE(constrainer, nullptr);
 
-    // Guaranteed safe laptop limits: fits 13" MacBook screens comfortably with titlebar and dock
+    // Guaranteed safe laptop minimum limits + unrestricted maximum size for 4K/5K/ultrawide displays
     EXPECT_EQ(constrainer->getMinimumWidth(), 1000);
     EXPECT_EQ(constrainer->getMinimumHeight(), 720);
-    EXPECT_EQ(constrainer->getMaximumWidth(), 1680);
-    EXPECT_EQ(constrainer->getMaximumHeight(), 1100);
+    EXPECT_GE(constrainer->getMaximumWidth(), 16384);
+    EXPECT_GE(constrainer->getMaximumHeight(), 16384);
 
     // Initial editor size must fit within limits
     EXPECT_GE(editor->getWidth(), 1000);
-    EXPECT_LE(editor->getWidth(), 1680);
     EXPECT_GE(editor->getHeight(), 720);
-    EXPECT_LE(editor->getHeight(), 1100);
 
     // Undersized window clamp test
     juce::Rectangle<int> undersized(0, 0, 500, 350);
@@ -1985,11 +1983,11 @@ TEST(NovaSynthWindowSizingTests, EditorEnforcesSafeLaptopMinimumAndMaximumLimits
     EXPECT_GE(undersized.getWidth(), 1000);
     EXPECT_GE(undersized.getHeight(), 720);
 
-    // Oversized window clamp test
-    juce::Rectangle<int> oversized(0, 0, 3000, 2000);
-    constrainer->checkBounds(oversized, oversized, {}, false, false, false, false);
-    EXPECT_LE(oversized.getWidth(), 1680);
-    EXPECT_LE(oversized.getHeight(), 1100);
+    // Large 4K/ultrawide window test (must NOT be clamped down to 1680x1100 anymore)
+    juce::Rectangle<int> largeWindow(0, 0, 3000, 2000);
+    constrainer->checkBounds(largeWindow, largeWindow, {}, false, false, false, false);
+    EXPECT_EQ(largeWindow.getWidth(), 3000);
+    EXPECT_EQ(largeWindow.getHeight(), 2000);
 }
 
 TEST(StandaloneWindowConstrainerTests, ParentDocumentWindowInheritsAndEnforcesSizeLimits) {
@@ -2018,8 +2016,8 @@ TEST(StandaloneWindowConstrainerTests, ParentDocumentWindowInheritsAndEnforcesSi
     ASSERT_NE(parentConstrainer, nullptr);
     EXPECT_GE(parentConstrainer->getMinimumWidth(), 1000);
     EXPECT_GE(parentConstrainer->getMinimumHeight(), 720);
-    EXPECT_LE(parentConstrainer->getMaximumWidth(), 1680);
-    EXPECT_LE(parentConstrainer->getMaximumHeight(), 1100);
+    EXPECT_GE(parentConstrainer->getMaximumWidth(), 16384);
+    EXPECT_GE(parentConstrainer->getMaximumHeight(), 16384);
 
     // Clean up content before testWin destruction
     testWin.clearContentComponent();
@@ -5302,6 +5300,63 @@ TEST(NovaSynthTuningAndSampleTests, SwellPedalPresetsAndSampleAuditVerification)
     EXPECT_GT(rmsLowPedal, 0.03f);
     EXPECT_GT(rmsHighPedal, rmsLowPedal * 1.40f);
     EXPECT_LT(rmsHighPedal, 0.98f);
+
+    // 5. Verify all 8 Swell & Piano Pad presets have distinct oscillator engine/model combinations and filter settings
+    std::vector<std::tuple<int, int, int, int, float, int>> signatures;
+    for (const auto& name : swellPresets) {
+        ASSERT_TRUE(pm.loadPresetByName(name));
+        proc.syncParametersFromAPVTS();
+        const auto p = proc.getCurrentParameters();
+        signatures.emplace_back(
+            static_cast<int>(p.oscSlots[0].engine) * 10 + p.oscSlots[0].modelIndex,
+            static_cast<int>(p.oscSlots[1].engine) * 10 + p.oscSlots[1].modelIndex,
+            static_cast<int>(p.oscSlots[2].engine) * 10 + p.oscSlots[2].modelIndex,
+            static_cast<int>(p.oscSlots[3].engine) * 10 + p.oscSlots[3].modelIndex,
+            std::round(p.filterCutoffHz),
+            p.filter2Type
+        );
+    }
+    for (std::size_t i = 0; i < signatures.size(); ++i) {
+        for (std::size_t j = i + 1; j < signatures.size(); ++j) {
+            EXPECT_NE(signatures[i], signatures[j])
+                << "Swell presets " << swellPresets[i].toStdString()
+                << " and " << swellPresets[j].toStdString() << " have identical engine/filter signatures!";
+        }
+    }
+}
+
+TEST(NovaSynthKeyboardBarTests, PitchAndSwellWheelsAndFixedKeyWidthDynamicKeyCount) {
+    nova::synth::NovaSynthProcessor proc;
+    proc.prepareToPlay(48000.0, 512);
+    auto theme = nova::ui::NovaTheme::create(nova::ui::NovaTheme::AccentPreset::SpaceCyan);
+    nova::synth::StandaloneKeyboardBar kb(proc, theme);
+
+    // Standard width (1024px) -> fixed key width 14.0f, ~35-36 white keys
+    kb.setBounds(0, 0, 1024, 62);
+    const int keysAt1024 = kb.getVisibleWhiteKeyCount();
+    const float widthAt1024 = kb.getWhiteKeyWidth();
+    EXPECT_NEAR(widthAt1024, 14.0f, 0.01f);
+    EXPECT_GE(keysAt1024, 34);
+    EXPECT_LE(keysAt1024, 38);
+
+    // Wider window (1600px) -> white key width stays constant (14.0f), while visible white keys grow up to 52 (88 keys)
+    kb.setBounds(0, 0, 1600, 62);
+    const int keysAt1600 = kb.getVisibleWhiteKeyCount();
+    const float widthAt1600 = kb.getWhiteKeyWidth();
+    EXPECT_NEAR(widthAt1600, 14.0f, 0.01f);
+    EXPECT_EQ(keysAt1600, 52); // Full 88-key grand piano range (52 naturals)
+    EXPECT_GT(keysAt1600, keysAt1024);
+
+    // Verify Pitch & Swell wheel bounds exist and UI control updates engine state
+    EXPECT_GT(kb.getPitchWheelBounds().getWidth(), 10);
+    EXPECT_GT(kb.getSwellWheelBounds().getWidth(), 10);
+
+    proc.setModWheelFromUI(0.75f);
+    EXPECT_NEAR(proc.getModWheelValue(), 0.75f, 1e-4f);
+    proc.setPitchBendFromUI(-1.5f);
+    EXPECT_NEAR(proc.getPitchBendSemitones(), -1.5f, 1e-4f);
+    proc.setPitchBendFromUI(0.0f);
+    EXPECT_NEAR(proc.getPitchBendSemitones(), 0.0f, 1e-4f);
 }
 
 } // namespace

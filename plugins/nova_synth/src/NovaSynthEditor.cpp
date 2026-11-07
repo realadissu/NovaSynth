@@ -4298,6 +4298,7 @@ public:
 
     void updateModulationTelemetry(const nova::dsp::WorshipSynthEngine::Telemetry& tel) {
         filterDeck_.updateModulationTelemetry(tel);
+        keyboardBar_.syncFromTelemetry(tel.modWheelValue, tel.pitchBendValue);
     }
 
     void resized() override {
@@ -4410,8 +4411,8 @@ NovaSynthEditor::NovaSynthEditor(NovaSynthProcessor& proc)
 
     constexpr int kMinWidth = 1000;
     constexpr int kMinHeight = 720;
-    constexpr int kMaxWidth = 1680;
-    constexpr int kMaxHeight = 1100;
+    constexpr int kMaxWidth = 16384;
+    constexpr int kMaxHeight = 16384;
 
     const auto& displays = juce::Desktop::getInstance().getDisplays();
     const auto* primary = displays.getPrimaryDisplay();
@@ -4419,7 +4420,7 @@ NovaSynthEditor::NovaSynthEditor(NovaSynthProcessor& proc)
     const int screenH = (primary != nullptr) ? primary->userArea.getHeight() : 900;
 
     const int defaultW = std::clamp(1220, kMinWidth, std::max(kMinWidth, screenW - 30));
-    const int defaultH = std::clamp(screenH < 880 ? screenH - 40 : 840, kMinHeight, kMaxHeight);
+    const int defaultH = std::clamp(screenH < 880 ? screenH - 40 : 840, kMinHeight, std::max(kMinHeight, screenH - 40));
 
     setResizable(true, true);
     setResizeLimits(kMinWidth, kMinHeight, kMaxWidth, kMaxHeight);
@@ -4472,8 +4473,8 @@ void NovaSynthEditor::configureParentWindow() {
 
         constexpr int kMinWidth = 1000;
         constexpr int kMinHeight = 720;
-        constexpr int kMaxWidth = 1680;
-        constexpr int kMaxHeight = 1100;
+        constexpr int kMaxWidth = 16384;
+        constexpr int kMaxHeight = 16384;
 
         // 1. Enable Native OS Title Bar (Traffic lights on macOS, DWM on Windows, WM decorations on Linux)
         if (!docWin->isUsingNativeTitleBar()) {
@@ -4484,7 +4485,7 @@ void NovaSynthEditor::configureParentWindow() {
         // Apply our sleek dark LookAndFeel to parent window popups as well
         docWin->setLookAndFeel(&lookAndFeel_);
 
-        // 2. Strict minimum and maximum size enforcement across Standalone parent window and native peer
+        // 2. Minimum size enforcement with unrestricted maximum size across Standalone parent window and native peer
         if (auto* c = docWin->getConstrainer()) {
             c->setMinimumSize(kMinWidth, kMinHeight);
             c->setMaximumSize(kMaxWidth, kMaxHeight);
@@ -4493,34 +4494,21 @@ void NovaSynthEditor::configureParentWindow() {
             peer->setConstrainer(docWin->getConstrainer());
         }
 
-        // 3. Screen bounds guard: Ensure window opens with generous, comfortable workstation proportions
+        // 3. Screen bounds guard on initial open: Ensure window opens with generous workstation proportions
         const auto& displays = juce::Desktop::getInstance().getDisplays();
         if (const auto* primary = displays.getPrimaryDisplay()) {
             const auto screenArea = primary->userArea;
             const auto winBounds = docWin->getBounds();
 
             const int defaultW = std::clamp(1220, kMinWidth, std::max(kMinWidth, screenArea.getWidth() - 30));
-            const int defaultH = std::clamp(screenArea.getHeight() < 880 ? screenArea.getHeight() - 40 : 840, kMinHeight, kMaxHeight);
+            const int defaultH = std::clamp(screenArea.getHeight() < 880 ? screenArea.getHeight() - 40 : 840,
+                                            kMinHeight, std::max(kMinHeight, screenArea.getHeight() - 40));
 
-            // If the window bounds are uninitialized or smaller than default, open at full workstation size
-            const int baseW = (winBounds.getWidth() >= defaultW) ? winBounds.getWidth() : defaultW;
-            const int baseH = (winBounds.getHeight() >= defaultH) ? winBounds.getHeight() : defaultH;
-
-            const int targetW = std::clamp(baseW, kMinWidth, std::max(kMinWidth, screenArea.getWidth() - 20));
-            const int targetH = std::clamp(baseH, kMinHeight, std::max(kMinHeight, screenArea.getHeight() - 40));
-
-            int targetX = winBounds.getX();
-            int targetY = winBounds.getY();
-
-            if (targetX < screenArea.getX() || targetX + targetW > screenArea.getRight() || targetX == 0) {
-                targetX = screenArea.getX() + std::max(0, (screenArea.getWidth() - targetW) / 2);
-            }
-            if (targetY < screenArea.getY() || targetY + targetH > screenArea.getBottom() || targetY == 0) {
-                targetY = screenArea.getY() + std::max(0, (screenArea.getHeight() - targetH) / 2);
-            }
-
-            if (targetW != winBounds.getWidth() || targetH != winBounds.getHeight() ||
-                targetX != winBounds.getX() || targetY != winBounds.getY()) {
+            if (winBounds.getWidth() < kMinWidth || winBounds.getHeight() < kMinHeight) {
+                const int targetW = std::max(winBounds.getWidth(), defaultW);
+                const int targetH = std::max(winBounds.getHeight(), defaultH);
+                const int targetX = screenArea.getX() + std::max(0, (screenArea.getWidth() - targetW) / 2);
+                const int targetY = screenArea.getY() + std::max(0, (screenArea.getHeight() - targetH) / 2);
                 docWin->setBounds(targetX, targetY, targetW, targetH);
             }
         }

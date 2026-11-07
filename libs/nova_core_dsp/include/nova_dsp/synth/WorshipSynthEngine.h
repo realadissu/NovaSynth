@@ -243,7 +243,9 @@ public:
     void noteOff(int midiNote) noexcept;
     void setSustainPedal(bool down) noexcept;
     void setPitchBend(float semitones) noexcept { pitchBendSemitones_ = semitones; }
+    [[nodiscard]] float getPitchBend() const noexcept { return pitchBendSemitones_; }
     void setModWheel(float normVal) noexcept { modWheel_ = std::clamp(normVal, 0.0f, 1.0f); }
+    [[nodiscard]] float getModWheel() const noexcept { return modWheel_; }
     void allNotesOff() noexcept;
     void allSoundOff() noexcept { reset(); }
     void stopActiveArpVoices() noexcept;
