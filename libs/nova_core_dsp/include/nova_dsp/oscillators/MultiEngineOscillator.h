@@ -1,6 +1,7 @@
 #pragma once
 
 #include "nova_dsp/math/OnePoleSmoother.h"
+#include "nova_dsp/filters/StateVariableFilter.h"
 #include <array>
 #include <vector>
 #include <cstdint>
@@ -114,6 +115,24 @@ private:
     uint32_t rng_ = 0x9E3779B9u;
 
     // Organic Texture / Formant / Granular states
+    struct TextureGrain {
+        float pos = 0.0f;
+        float rate = 1.0f;
+        float lengthSamples = 1200.0f;
+        float age = 0.0f;
+        float panL = 0.7071f;
+        float panR = 0.7071f;
+        float amp = 1.0f;
+    };
+    static constexpr int kNumGrains = 16;
+    std::array<TextureGrain, kNumGrains> grains_{};
+
+    // 3-Band Fixed-Frequency Formant Filter Bank
+    std::array<StateVariableFilter, 3> formantFiltersL_{};
+    std::array<StateVariableFilter, 3> formantFiltersR_{};
+    float lastFormantShape_ = -999.0f;
+    int lastFormantModel_ = -1;
+
     float texFilterState1_ = 0.0f;
     float texFilterState2_ = 0.0f;
     float texGrainPhase_ = 0.0f;
