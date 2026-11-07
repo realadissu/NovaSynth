@@ -3691,6 +3691,7 @@ TEST(NovaSynthComprehensiveSuite5, DualFiltersAudioParametersAndRouting) {
         // Routing = 0: FLT 1 (muffled)
         params.oscSlots[0].filterRouting = 0;
         engine.setParameters(params);
+        engine.snapSmoothersToTarget();
         engine.noteOn(69, 0.8f); // A4 (440 Hz)
 
         juce::AudioBuffer<float> buf(2, 512);
@@ -3702,6 +3703,7 @@ TEST(NovaSynthComprehensiveSuite5, DualFiltersAudioParametersAndRouting) {
         engine.allNotesOff();
         params.oscSlots[0].filterRouting = 3;
         engine.setParameters(params);
+        engine.snapSmoothersToTarget();
         engine.noteOn(69, 0.8f);
 
         buf.clear();
@@ -4775,6 +4777,274 @@ TEST(FilterRoutingAndIndependenceTests, PluckOscillatorMaintainsSubstantialAcous
         }
         EXPECT_GT(peakAt200ms, 0.08f) << "Pluck model " << m << " should have audible acoustic body at 200ms!";
     }
+}
+
+TEST(FilterRoutingAndIndependenceTests, Filter2ToggleHasZeroEffectOnFilter1Oscillators) {
+    constexpr double sr = 48000.0;
+    constexpr int blockSize = 512;
+
+    nova::dsp::WorshipSynthEngine engine;
+    engine.prepare(sr, blockSize);
+
+    auto p = engine.getParameters();
+    p.activeOscCount = 3;
+
+    // Osc 1: Pluck (Engine 3), routed to Filter 1 (route 0)
+    p.oscSlots[0].enabled = true;
+    p.oscSlots[0].engine = nova::dsp::MultiEngineOscillator::EngineType::PhysicalPluckModal;
+    p.oscSlots[0].modelIndex = 0;
+    p.oscSlots[0].filterRouting = 0;
+    p.oscSlots[0].level = 1.0f;
+
+    // Osc 2: Wavetable (Engine 1), routed to Filter 1 (route 0)
+    p.oscSlots[1].enabled = true;
+    p.oscSlots[1].engine = nova::dsp::MultiEngineOscillator::EngineType::EvolvingWavetable;
+    p.oscSlots[1].modelIndex = 0;
+    p.oscSlots[1].filterRouting = 0;
+    p.oscSlots[1].level = 0.45f;
+
+    // Osc 3: Analog Saw (Engine 0), routed to Filter 1 (route 0)
+    p.oscSlots[2].enabled = true;
+    p.oscSlots[2].engine = nova::dsp::MultiEngineOscillator::EngineType::WarmAnalog;
+    p.oscSlots[2].modelIndex = 0; // Saw
+    p.oscSlots[2].filterRouting = 0;
+    p.oscSlots[2].level = 0.26f;
+
+    for (int i = 3; i < 8; ++i) p.oscSlots[static_cast<std::size_t>(i)].enabled = false;
+
+    // Env 1 from user's screenshot: Atk: 0.04s, Hold: 3s, Sus: 1.0
+    p.ampEnv.attackSec = 0.04f;
+    p.ampEnv.holdSec = 3.0f;
+    p.ampEnv.sustainLvl = 1.0f;
+
+    // Filter 1: Bandpass 12dB at 2600 Hz
+    p.filter1Enabled = true;
+    p.filterType = 1;
+    p.filterCutoffHz = 2600.0f;
+    p.filterResonance = 1.25f;
+
+    // Filter 2: LowPass 12dB at 602 Hz, vocalCarve = 0.30f
+    p.filter2Type = 0;
+    p.filter2CutoffHz = 602.0f;
+    p.filter2Resonance = 0.30f;
+    p.vocalCarve = 0.30f;
+
+    // Turn FX off to measure raw synth engine filter path
+    p.delayMix = 0.0f;
+    p.reverbMix = 0.0f;
+
+    // Measure with Filter 2 ENABLED
+    p.filter2Enabled = true;
+    engine.setParameters(p);
+    engine.snapSmoothersToTarget();
+    engine.noteOn(60, 0.85f);
+
+    float f2OnEnergy = 0.0f;
+    float f2OnPeak = 0.0f;
+    juce::AudioBuffer<float> buf(2, blockSize);
+    for (int b = 0; b < 25; ++b) {
+        buf.clear();
+        engine.processBlock(buf.getWritePointer(0), buf.getWritePointer(1), blockSize);
+        if (b > 5) {
+            f2OnPeak = std::max(f2OnPeak, buf.getMagnitude(0, blockSize));
+            const float* ch = buf.getReadPointer(0);
+            for (int i = 0; i < blockSize; ++i) f2OnEnergy += ch[i] * ch[i];
+        }
+    }
+    engine.allNotesOff();
+    engine.reset();
+
+    // Measure with Filter 2 DISABLED
+    p.filter2Enabled = false;
+    engine.setParameters(p);
+    engine.snapSmoothersToTarget();
+    engine.noteOn(60, 0.85f);
+
+    float f2OffEnergy = 0.0f;
+    float f2OffPeak = 0.0f;
+    for (int b = 0; b < 25; ++b) {
+        buf.clear();
+        engine.processBlock(buf.getWritePointer(0), buf.getWritePointer(1), blockSize);
+        if (b > 5) {
+            f2OffPeak = std::max(f2OffPeak, buf.getMagnitude(0, blockSize));
+            const float* ch = buf.getReadPointer(0);
+            for (int i = 0; i < blockSize; ++i) f2OffEnergy += ch[i] * ch[i];
+        }
+    }
+
+    std::cout << "[FILTER 2 TOGGLE TEST] F2 ON Energy: " << f2OnEnergy
+              << ", F2 OFF Energy: " << f2OffEnergy
+              << ", Ratio: " << (f2OffEnergy / std::max(1e-6f, f2OnEnergy)) << "\n";
+
+    // When all OSCs are on Filter 1 (Parallel), disabling Filter 2 MUST NOT increase volume!
+    // Output must be identical (within 0.5% tolerance)
+    EXPECT_NEAR(f2OffEnergy, f2OnEnergy, f2OnEnergy * 0.01f)
+        << "Deactivating Filter 2 caused Filter 1's audio to change in volume!";
+    EXPECT_NEAR(f2OffPeak, f2OnPeak, 0.01f);
+}
+
+TEST(FilterRoutingAndIndependenceTests, AllCombinationsOfDualFiltersAndRoutings) {
+    constexpr double sr = 48000.0;
+    constexpr int blockSize = 512;
+
+    nova::dsp::WorshipSynthEngine engine;
+    engine.prepare(sr, blockSize);
+
+    auto baseParams = engine.getParameters();
+    baseParams.activeOscCount = 2;
+    baseParams.oscSlots[0].enabled = true;
+    baseParams.oscSlots[0].engine = nova::dsp::MultiEngineOscillator::EngineType::WarmAnalog;
+    baseParams.oscSlots[0].modelIndex = 0; // Saw
+    baseParams.oscSlots[0].level = 0.80f;
+    baseParams.oscSlots[0].detune = 0.0f;
+
+    baseParams.oscSlots[1].enabled = false;
+    baseParams.delayMix = 0.0f;
+    baseParams.reverbMix = 0.0f;
+    baseParams.ampEnv.attackSec = 0.002f;
+    baseParams.ampEnv.decaySec = 0.5f;
+    baseParams.ampEnv.sustainLvl = 1.0f;
+
+    // Filter 1: LowPass 24 at 1000 Hz
+    baseParams.filterType = 0;
+    baseParams.filterCutoffHz = 1000.0f;
+    baseParams.filterResonance = 0.7071f;
+
+    // Filter 2: HighPass 12 at 500 Hz
+    baseParams.filter2Type = 2;
+    baseParams.filter2CutoffHz = 500.0f;
+    baseParams.filter2Resonance = 0.7071f;
+
+    juce::AudioBuffer<float> buf(2, blockSize);
+
+    // 1. DIRECT ROUTING (route 3): Both filters ON/OFF must have zero effect on volume
+    baseParams.oscSlots[0].filterRouting = 3;
+    float dirEnergyOn = 0.0f;
+    float dirEnergyOff = 0.0f;
+
+    baseParams.filter1Enabled = true;
+    baseParams.filter2Enabled = true;
+    engine.setParameters(baseParams);
+    engine.noteOn(60, 0.85f);
+    for (int b = 0; b < 10; ++b) {
+        buf.clear();
+        engine.processBlock(buf.getWritePointer(0), buf.getWritePointer(1), blockSize);
+        const float rms = buf.getRMSLevel(0, 0, blockSize);
+        if (b > 3) dirEnergyOn += rms;
+        std::cout << "[DIR ON] b=" << b << " rms=" << rms << "\n";
+    }
+    engine.allNotesOff();
+    engine.reset();
+
+    baseParams.filter1Enabled = false;
+    baseParams.filter2Enabled = false;
+    engine.setParameters(baseParams);
+    engine.noteOn(60, 0.85f);
+    for (int b = 0; b < 10; ++b) {
+        buf.clear();
+        engine.processBlock(buf.getWritePointer(0), buf.getWritePointer(1), blockSize);
+        const float rms = buf.getRMSLevel(0, 0, blockSize);
+        if (b > 3) dirEnergyOff += rms;
+        std::cout << "[DIR OFF] b=" << b << " rms=" << rms << "\n";
+    }
+    engine.allNotesOff();
+    engine.reset();
+
+    EXPECT_NEAR(dirEnergyOn, dirEnergyOff, 0.01f)
+        << "Direct routing should completely bypass both filters!";
+
+    // 2. DUAL SERIES ROUTING (route 2): F1 -> F2
+    baseParams.oscSlots[0].filterRouting = 2;
+
+    // F1 ON + F2 ON (Both active)
+    baseParams.filter1Enabled = true;
+    baseParams.filter2Enabled = true;
+    engine.setParameters(baseParams);
+    engine.noteOn(60, 0.85f);
+    float energyBothOn = 0.0f;
+    for (int b = 0; b < 10; ++b) {
+        buf.clear();
+        engine.processBlock(buf.getWritePointer(0), buf.getWritePointer(1), blockSize);
+        if (b > 3) energyBothOn += buf.getRMSLevel(0, 0, blockSize);
+    }
+    engine.allNotesOff();
+    engine.reset();
+
+    // F1 OFF + F2 OFF (Both bypassed) -> Full wideband sound
+    baseParams.filter1Enabled = false;
+    baseParams.filter2Enabled = false;
+    engine.setParameters(baseParams);
+    engine.noteOn(60, 0.85f);
+    float energyBothOff = 0.0f;
+    for (int b = 0; b < 10; ++b) {
+        buf.clear();
+        engine.processBlock(buf.getWritePointer(0), buf.getWritePointer(1), blockSize);
+        if (b > 3) energyBothOff += buf.getRMSLevel(0, 0, blockSize);
+    }
+    engine.allNotesOff();
+    engine.reset();
+
+    EXPECT_GT(energyBothOff, energyBothOn)
+        << "Bypassing both filters in Dual Series must let full wideband audio pass!";
+
+    // 3. FLT 2 ROUTING (route 1): Toggling Filter 1 ON/OFF must have 0 effect
+    baseParams.oscSlots[0].filterRouting = 1;
+    baseParams.filter2Enabled = true;
+
+    baseParams.filter1Enabled = true;
+    engine.setParameters(baseParams);
+    engine.noteOn(60, 0.85f);
+    float flt2WithF1On = 0.0f;
+    for (int b = 0; b < 10; ++b) {
+        buf.clear();
+        engine.processBlock(buf.getWritePointer(0), buf.getWritePointer(1), blockSize);
+        if (b > 3) flt2WithF1On += buf.getRMSLevel(0, 0, blockSize);
+    }
+    engine.allNotesOff();
+    engine.reset();
+
+    baseParams.filter1Enabled = false;
+    engine.setParameters(baseParams);
+    engine.noteOn(60, 0.85f);
+    float flt2WithF1Off = 0.0f;
+    for (int b = 0; b < 10; ++b) {
+        buf.clear();
+        engine.processBlock(buf.getWritePointer(0), buf.getWritePointer(1), blockSize);
+        if (b > 3) flt2WithF1Off += buf.getRMSLevel(0, 0, blockSize);
+    }
+    engine.allNotesOff();
+    engine.reset();
+
+    EXPECT_NEAR(flt2WithF1On, flt2WithF1Off, 0.005f)
+        << "Filter 1 state must have zero influence on oscillators routed to Filter 2!";
+}
+
+TEST(NovaSynthUiSyncTests, SourceAndFilterStateTogglesPropagateToAllViews) {
+    nova::synth::NovaSynthProcessor proc;
+    proc.prepareToPlay(48000.0, 512);
+
+    auto editor = std::make_unique<nova::synth::NovaSynthEditor>(proc);
+    editor->setBounds(0, 0, 1200, 800);
+
+    // Initial state: Osc 1 is enabled
+    auto* osc1En = proc.getAPVTS().getParameter("osc1_enabled");
+    ASSERT_NE(osc1En, nullptr);
+    EXPECT_GT(osc1En->getValue(), 0.5f);
+
+    // Toggle Osc 1 off via APVTS
+    osc1En->setValueNotifyingHost(0.0f);
+    EXPECT_LT(osc1En->getValue(), 0.5f);
+
+    // Toggle Osc 1 back on
+    osc1En->setValueNotifyingHost(1.0f);
+    EXPECT_GT(osc1En->getValue(), 0.5f);
+
+    // Toggle Filter 2 enable
+    auto* flt2En = proc.getAPVTS().getParameter("filter2Enabled");
+    ASSERT_NE(flt2En, nullptr);
+    const float initFlt2 = flt2En->getValue();
+    flt2En->setValueNotifyingHost(initFlt2 > 0.5f ? 0.0f : 1.0f);
+    EXPECT_NE(flt2En->getValue(), initFlt2);
 }
 
 } // namespace

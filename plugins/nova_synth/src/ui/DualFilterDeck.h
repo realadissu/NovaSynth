@@ -11,6 +11,8 @@ namespace nova::synth {
 
 class DualFilterDeck : public juce::Component {
 public:
+    std::function<void()> onFilterStateChanged;
+
     DualFilterDeck(NovaSynthProcessor& proc, const nova::ui::NovaTheme& theme)
         : proc_(proc),
           theme_(theme),
@@ -160,6 +162,7 @@ public:
             if (auto* p = apvts.getParameter("filter1Enabled")) {
                 p->setValueNotifyingHost(params.filter1Enabled ? 0.0f : 1.0f);
             }
+            if (onFilterStateChanged) onFilterStateChanged();
             repaint();
             return;
         }
@@ -170,6 +173,7 @@ public:
             if (auto* p = apvts.getParameter("filter2Enabled")) {
                 p->setValueNotifyingHost(params.filter2Enabled ? 0.0f : 1.0f);
             }
+            if (onFilterStateChanged) onFilterStateChanged();
             repaint();
             return;
         }

@@ -36,6 +36,10 @@ private:
 
     std::function<void(int)> onSetWorkbenchTab_;
     std::function<void(const nova::dsp::WorshipSynthEngine::Telemetry&)> onUpdateTelemetry_;
+    std::function<void()> onSyncUI_;
+    std::array<bool, 8> lastOscEnabled_{};
+    bool lastFlt1Enabled_ = true;
+    bool lastFlt2Enabled_ = true;
 
     juce::Component::SafePointer<juce::DocumentWindow> parentDocWindow_;
     juce::Component::SafePointer<juce::Button> standaloneOptionsButton_;

@@ -2204,6 +2204,7 @@ public:
             auto card = std::make_unique<SourceCardComponent>(proc_, theme_, i);
             card->onCardStateChanged = [this](int /*slot*/) {
                 refreshCards();
+                if (onSourceStateChanged) onSourceStateChanged();
             };
             card->onExpandRequested = [this](int slotIdx, bool shouldExpand) {
                 handleCardExpand(slotIdx, shouldExpand);

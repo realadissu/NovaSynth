@@ -2108,6 +2108,8 @@ class JornaLowerWorkbench : public juce::Component {
 public:
     std::function<void(int)> onSelectOsc;
     std::function<void()> onOpenMixerDrawer;
+    std::function<void()> onSourceStateChanged;
+    std::function<void()> onFilterStateChanged;
 
     JornaLowerWorkbench(NovaSynthProcessor& proc, const nova::ui::NovaTheme& theme)
         : proc_(proc),
@@ -3820,6 +3822,7 @@ private:
                     if (auto* p = apvts.getParameter("osc1_enabled")) p->setValueNotifyingHost(1.0f);
                 }
             }
+            if (onSourceStateChanged) onSourceStateChanged();
             repaint();
             return;
         }
@@ -3839,6 +3842,7 @@ private:
                     if (auto* p = apvts.getParameter("filter1Enabled")) p->setValueNotifyingHost(1.0f);
                 }
             }
+            if (onFilterStateChanged) onFilterStateChanged();
             repaint();
             return;
         }
@@ -3848,6 +3852,7 @@ private:
             if (auto* p = apvts.getParameter("filter1Enabled")) {
                 p->setValueNotifyingHost(p->getValue() > 0.5f ? 0.0f : 1.0f);
             }
+            if (onFilterStateChanged) onFilterStateChanged();
             repaint();
             return;
         }
@@ -3856,6 +3861,7 @@ private:
             if (auto* p = apvts.getParameter("filter2Enabled")) {
                 p->setValueNotifyingHost(p->getValue() > 0.5f ? 0.0f : 1.0f);
             }
+            if (onFilterStateChanged) onFilterStateChanged();
             repaint();
             return;
         }
@@ -3932,6 +3938,7 @@ private:
                 if (auto* p = apvts.getParameter(prefix + "enabled")) {
                     p->setValueNotifyingHost(p->getValue() > 0.5f ? 0.0f : 1.0f);
                 }
+                if (onSourceStateChanged) onSourceStateChanged();
                 repaint();
                 return;
             }
@@ -4254,12 +4261,29 @@ public:
             sourceDeck_.scrollToSlot(slotIdx);
             workbench_.setSelectedOscIndex(slotIdx);
         };
-        sourceList_.onSourceStateChanged = [this]() {
-            sourceDeck_.refreshCards();
-        };
-        sourceDeck_.onSourceStateChanged = [this]() {
+        auto notifyAllSourceViews = [this]() {
             sourceList_.repaint();
+            sourceDeck_.refreshCards();
+            workbench_.repaint();
         };
+
+        sourceList_.onSourceStateChanged = notifyAllSourceViews;
+        sourceDeck_.onSourceStateChanged = notifyAllSourceViews;
+        workbench_.onSourceStateChanged  = notifyAllSourceViews;
+
+        filterDeck_.onFilterStateChanged = [this]() {
+            workbench_.repaint();
+        };
+        workbench_.onFilterStateChanged = [this]() {
+            filterDeck_.repaint();
+        };
+    }
+
+    void syncSourceStates() {
+        sourceList_.repaint();
+        sourceDeck_.refreshCards();
+        workbench_.repaint();
+        filterDeck_.repaint();
     }
 
     void setInitialWorkbenchTab(int tabIdx) {
@@ -4356,6 +4380,16 @@ NovaSynthEditor::NovaSynthEditor(NovaSynthProcessor& proc)
     onUpdateTelemetry_ = [wsPagePtr](const nova::dsp::WorshipSynthEngine::Telemetry& tel) {
         wsPagePtr->updateModulationTelemetry(tel);
     };
+    onSyncUI_ = [wsPagePtr]() {
+        wsPagePtr->syncSourceStates();
+    };
+
+    const auto initParams = processor_.getCurrentParameters();
+    for (int i = 0; i < 8; ++i) {
+        lastOscEnabled_[static_cast<std::size_t>(i)] = initParams.oscSlots[static_cast<std::size_t>(i)].enabled;
+    }
+    lastFlt1Enabled_ = initParams.filter1Enabled;
+    lastFlt2Enabled_ = initParams.filter2Enabled;
 
     shell_.addPage("WORKSPACE", std::move(wsPage));
 
@@ -4518,6 +4552,24 @@ void NovaSynthEditor::timerCallback() {
     if (onUpdateTelemetry_) {
         const auto tel = processor_.getSynthTelemetry();
         onUpdateTelemetry_(tel);
+    }
+
+    const auto params = processor_.getCurrentParameters();
+    bool anyChanged = false;
+    for (int i = 0; i < 8; ++i) {
+        const bool curEn = params.oscSlots[static_cast<std::size_t>(i)].enabled;
+        if (curEn != lastOscEnabled_[static_cast<std::size_t>(i)]) {
+            lastOscEnabled_[static_cast<std::size_t>(i)] = curEn;
+            anyChanged = true;
+        }
+    }
+    if (params.filter1Enabled != lastFlt1Enabled_ || params.filter2Enabled != lastFlt2Enabled_) {
+        lastFlt1Enabled_ = params.filter1Enabled;
+        lastFlt2Enabled_ = params.filter2Enabled;
+        anyChanged = true;
+    }
+    if (anyChanged && onSyncUI_) {
+        onSyncUI_();
     }
 }
 

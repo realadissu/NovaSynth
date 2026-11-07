@@ -357,6 +357,7 @@ void MultiEngineOscillator::updateCoefficients() noexcept {
 }
 
 void MultiEngineOscillator::reset() noexcept {
+    rng_ = 0x9E3779B9u;
     shapeSmoother_.reset(params_.shapeMorph);
     phases_.fill(0.0f);
     driftOffsetsCents_.fill(0.0f);

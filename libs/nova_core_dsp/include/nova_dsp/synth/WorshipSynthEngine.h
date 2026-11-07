@@ -347,8 +347,6 @@ private:
     LfoGenerator lfo3_{};
     LfoGenerator lfo4_{};
     ModMatrix modMatrix_{};
-    StateVariableFilter vocalCarveL_{};
-    StateVariableFilter vocalCarveR_{};
     DualEngineReverb reverb_{};
 
     // Stereo Ping-Pong Delay buffer

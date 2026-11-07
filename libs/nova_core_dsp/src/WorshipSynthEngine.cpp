@@ -89,8 +89,6 @@ void WorshipSynthEngine::prepare(double sampleRate, int maxBlockSize) {
     lfo2_.prepare(sampleRate_);
     lfo3_.prepare(sampleRate_);
     lfo4_.prepare(sampleRate_);
-    vocalCarveL_.prepare(sampleRate_);
-    vocalCarveR_.prepare(sampleRate_);
     reverb_.prepare(sampleRate_, maxBlockSize);
 
     const int maxDelaySamples = static_cast<int>(sampleRate_ * 2.0);
@@ -116,9 +114,11 @@ void WorshipSynthEngine::prepare(double sampleRate, int maxBlockSize) {
 
     reset();
     setParameters(params_);
+    snapSmoothersToTarget();
 }
 
 void WorshipSynthEngine::reset() noexcept {
+    snapSmoothersToTarget();
     for (auto& v : voices_) {
         v.active = false;
         v.heldByKey = false;
@@ -141,6 +141,7 @@ void WorshipSynthEngine::reset() noexcept {
         v.filter2R.reset();
     }
     polyHeadroomSmoother_.reset(1.0f);
+    voiceCounter_ = 0;
     physicalHeldNotes_.fill(false);
     latchedCount_ = 0;
     latchedNotes_.fill(0);
@@ -209,10 +210,6 @@ void WorshipSynthEngine::setParameters(const Parameters& params) noexcept {
 
     const float targetCutoff2 = std::clamp(params_.filter2CutoffHz, 40.0f, 19000.0f);
     cutoff2Smoother_.setTargetValue(targetCutoff2);
-
-    const float carveDb = params_.filter2Enabled ? (-18.0f * std::clamp(params_.vocalCarve, 0.0f, 1.0f)) : 0.0f;
-    vocalCarveL_.setParameters(StateVariableFilter::Type::Bell, 2200.0f, 1.2f, carveDb);
-    vocalCarveR_.setParameters(StateVariableFilter::Type::Bell, 2200.0f, 1.2f, carveDb);
 
     DualEngineReverb::Parameters revParams = reverb_.getParameters();
     revParams.engineMode       = DualEngineReverb::EngineMode::LushCloud;
@@ -1060,11 +1057,21 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
         bool fltEnvAsAmp = false;
         bool modEnvAsAmp = false;
         bool auxEnvAsAmp = false;
+        float fltBothWeight = 0.0f;
+        float flt1OnlyWeight = 0.0f;
         for (int i = 0; i < params_.activeOscCount; ++i) {
-            if (params_.oscSlots[static_cast<std::size_t>(i)].ampEnvSource == 1) fltEnvAsAmp = true;
-            if (params_.oscSlots[static_cast<std::size_t>(i)].ampEnvSource == 2) modEnvAsAmp = true;
-            if (params_.oscSlots[static_cast<std::size_t>(i)].ampEnvSource == 3) auxEnvAsAmp = true;
+            const auto& slot = params_.oscSlots[static_cast<std::size_t>(i)];
+            if (slot.ampEnvSource == 1) fltEnvAsAmp = true;
+            if (slot.ampEnvSource == 2) modEnvAsAmp = true;
+            if (slot.ampEnvSource == 3) auxEnvAsAmp = true;
+            if (slot.enabled) {
+                if (slot.filterRouting == 2) fltBothWeight += slot.level;
+                else if (slot.filterRouting == 0) flt1OnlyWeight += slot.level;
+            }
         }
+        const float bothFraction = (fltBothWeight + flt1OnlyWeight > 1e-5f)
+            ? (fltBothWeight / (fltBothWeight + flt1OnlyWeight))
+            : 0.0f;
 
         for (int s = 0; s < numSamples; ++s) {
             const float lfo1Val = lfo1_.processSample();
@@ -1279,13 +1286,6 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
                 flt1InR *= v.flt1ResComp;
             }
 
-            // Calculate the fraction of Filter 1's audio that belongs to FLT 1+2 (Dual Series):
-            const float inBothMag = std::abs(voiceBothL) + std::abs(voiceBothR);
-            const float inFlt1Mag = std::abs(voiceFlt1L) + std::abs(voiceFlt1R);
-            const float bothFraction = (inBothMag + inFlt1Mag > 1e-7f)
-                ? (inBothMag / (inBothMag + inFlt1Mag))
-                : 0.0f;
-
             // Only the FLT 1+2 series portion of Filter 1's output continues into Filter 2.
             // The FLT 1 parallel portion goes directly to the master mix and is NEVER touched by Filter 2!
             const float flt1DirectL = flt1InL * (1.0f - bothFraction);
@@ -1313,7 +1313,7 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
                     else if (params_.filter2Type == 2) svf2Type = StateVariableFilter::Type::HighPass;
                     else if (params_.filter2Type == 3) {
                         svf2Type = StateVariableFilter::Type::Bell;
-                        bellGainDb = -12.0f * std::clamp(params_.vocalCarve, 0.25f, 1.0f);
+                        bellGainDb = -12.0f * std::clamp(params_.vocalCarve + vocalCarveMod, 0.0f, 1.0f);
                     }
 
                     v.filter2L.setParameters(svf2Type, voiceCutoff2, effReso2, bellGainDb);
@@ -1350,13 +1350,6 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
                 synthL += vOutL;
                 synthR += vOutR;
             }
-        }
-
-        // Optional subtle Vocal Carve scoop if enabled on played synth voices
-        const float effCarve = std::clamp(params_.vocalCarve + vocalCarveMod, 0.0f, 1.0f);
-        if (effCarve > 0.02f) {
-            synthL = vocalCarveL_.processSample(synthL);
-            synthR = vocalCarveR_.processSample(synthR);
         }
 
         // Dynamic Pan Spread Modulation (Mid/Side stereo width expansion via ModMatrix)
