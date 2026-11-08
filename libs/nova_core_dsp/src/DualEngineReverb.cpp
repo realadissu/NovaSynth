@@ -798,9 +798,12 @@ void DualEngineReverb::processBlock(float* leftChannel, float* rightChannel, int
         }
 
         // 9. Combine Soft Early Reflections, Dense 16-Channel Late Tank & Enveloping Shimmer Cloud Halo
+        // In LushCloud mode, early reflections are smoothed into diffuse cloud mist (erScale 0.04)
+        // rather than discrete acoustic room reflections to avoid metallic/grainy slap.
+        const float erScale = isLush ? (erLevel * 0.04f) : (erLevel * 0.38f);
         const float tankWetScale = 1.15f - 0.22f * activeShim;
-        float wetL = erOutL * (erLevel * 0.38f) + lateOutL * tankWetScale + shimmerHaloL * 0.78f;
-        float wetR = erOutR * (erLevel * 0.38f) + lateOutR * tankWetScale + shimmerHaloR * 0.78f;
+        float wetL = erOutL * erScale + lateOutL * tankWetScale + shimmerHaloL * 0.78f;
+        float wetR = erOutR * erScale + lateOutR * tankWetScale + shimmerHaloR * 0.78f;
 
         wetL = vocalCarveL_.processSample(wetL) * duckReduction;
         wetR = vocalCarveR_.processSample(wetR) * duckReduction;

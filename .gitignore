@@ -19,3 +19,5 @@ compile_commands.json
 *.info
 coverage_report/
 Testing/
+eval_*.wav
+

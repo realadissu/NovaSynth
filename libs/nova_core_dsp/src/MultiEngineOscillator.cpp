@@ -299,9 +299,9 @@ const SharedWavetableBank& getWavetableBank() {
     return bank;
 }
 
-// Shared static 5-model high-resolution texture bank (4096 samples each, 8 evolving cycles)
+// Shared static 6-model high-resolution texture bank (4096 samples each, 8 evolving cycles)
 struct SharedTextureSourceBank {
-    static constexpr int kTexTables = 5;
+    static constexpr int kTexTables = 6;
     static constexpr int kTexSize = 4096;
     static constexpr int kCycles = 8;
     static constexpr int kCycleSize = kTexSize / kCycles; // 512 samples per cycle
@@ -406,6 +406,25 @@ struct SharedTextureSourceBank {
                 }
                 const float airChamber = 0.15f * std::sin(21.0f * w + 0.8f) * (0.7f + 0.3f * std::cos(wTot * 2.0f));
                 tables[4][static_cast<std::size_t>(i)] = pipe + airChamber;
+            }
+
+            // ========================================================
+            // Table 5: Velvet Warmth Pad
+            // Pre-filtered vintage Roland Juno/Prophet warm analog bed
+            // ========================================================
+            {
+                float pad = 0.0f;
+                for (int h = 1; h <= 18; ++h) {
+                    const float fh = static_cast<float>(h);
+                    // Gentle 12 dB/oct pre-filtering above harmonic 2.8 suppresses harsh buzz
+                    const float rolloff = 1.0f / (1.0f + (fh / 2.8f) * (fh / 2.8f));
+                    const float warmSaw = (1.0f / fh) * rolloff;
+                    const float singingCore = 0.70f * std::exp(-0.75f * (fh - 2.0f) * (fh - 2.0f));
+                    const float evolve = 1.0f + 0.14f * std::sin(wTot * 2.0f + fh * 0.45f);
+                    pad += (warmSaw + singingCore) * evolve * std::sin(fh * w + dispPhase(h));
+                }
+                const float warmSub = 0.28f * std::sin(0.5f * w);
+                tables[5][static_cast<std::size_t>(i)] = std::tanh((pad + warmSub) * 1.25f);
             }
         }
 
@@ -879,6 +898,17 @@ void MultiEngineOscillator::processSample(float baseFrequencyHz,
                             const float dtSync = dt * syncFactor;
                             const float syncSaw = (2.0f * syncPh - 1.0f) - polyBlep(syncPh, std::min(0.48f, dtSync));
                             wave = syncSaw * 0.85f;
+                        }
+                        break;
+                    case 6: // Velvet Analog Pad (Warm Roland/Prophet pre-filtered pad with gentle sub)
+                        {
+                            const float saw = (2.0f * ph - 1.0f) - polyBlep(ph, dt);
+                            const float phSub = std::fmod(ph * 0.5f, 1.0f);
+                            const float subTri = 2.0f * std::abs(2.0f * (phSub - 0.5f)) - 1.0f;
+                            const float subLvl = 0.20f + 0.12f * (1.0f - shape);
+                            const float sawLvl = 0.60f + 0.30f * shape;
+                            const float mixed = saw * sawLvl + subTri * subLvl;
+                            wave = std::tanh(mixed * 1.25f);
                         }
                         break;
                     default:
@@ -1486,12 +1516,12 @@ std::vector<const char*> MultiEngineOscillator::getModelsForEngine(EngineType en
 
     switch (engine) {
         case EngineType::WarmAnalog:
-            return { "Classic Saw", "Pulse / Square", "Warm Triangle", "Mellow Sine", "Super Saw Multi", "Hard Sync Lead" };
+            return { "Classic Saw", "Pulse / Square", "Warm Triangle", "Mellow Sine", "Super Saw Multi", "Hard Sync Lead", "Velvet Analog Pad" };
         case EngineType::EvolvingWavetable:
             return { "Worship Harmonics", "Cathedral Drawbars", "Silky Velvet Strings", "Vocal Choir Formants",
                      "Harmonic Octave Pad", "Glass Bell Chimes", "Warm Brass Swell", "Celestial Shimmer Air" };
         case EngineType::OrganicTexture:
-            return { "Ambient Choir Breath", "Bowed Cello Texture", "Tape Halo & Flutter", "Cathedral Rain Cloud", "Warm Wind & Air Swell" };
+            return { "Ambient Choir Breath", "Bowed Cello Texture", "Tape Halo & Flutter", "Cathedral Rain Cloud", "Warm Wind & Air Swell", "Velvet Warmth Pad" };
         case EngineType::PhysicalPluckModal:
             return { "Acoustic Steel String", "Nylon Worship Harp", "Kalimba / Music Box", "Glass Mallet Resonance" };
         case EngineType::SubOscillator:
@@ -1534,7 +1564,8 @@ std::vector<float> MultiEngineOscillator::buildWaveformPreview(const Parameters&
                     case 2: val = 2.0f * std::abs(2.0f * (u - 0.5f)) - 1.0f; break; // Triangle
                     case 3: val = std::sin(twoPi * u); break; // Sine
                     case 4: val = 0.5f * (2.0f * u - 1.0f) + 0.5f * (2.0f * std::fmod(u + 0.33f, 1.0f) - 1.0f); break; // SuperSaw
-                    case 5: default: val = 2.0f * std::fmod(u * (1.0f + 2.0f * p.shapeMorph), 1.0f) - 1.0f; break; // Hard Sync
+                    case 5: val = 2.0f * std::fmod(u * (1.0f + 2.0f * p.shapeMorph), 1.0f) - 1.0f; break; // Hard Sync
+                    case 6: default: val = std::tanh(((2.0f * u - 1.0f) * 0.7f + (2.0f * std::abs(2.0f * (std::fmod(u * 0.5f, 1.0f) - 0.5f)) - 1.0f) * 0.3f) * 1.3f); break; // Velvet Analog Pad
                 }
                 break;
             case EngineType::EvolvingWavetable: {

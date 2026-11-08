@@ -348,7 +348,7 @@ TEST(MultiEngineOscillatorTests, AllGranularAndPluckModelsProduceDistinctSignatu
     // 1. Verify Granular (OrganicTexture) models are distinct
     {
         std::vector<std::vector<float>> granularBuffers;
-        for (int m = 0; m < 5; ++m) {
+        for (int m = 0; m < 6; ++m) {
             MultiEngineOscillator osc;
             osc.prepare(48000.0);
             MultiEngineOscillator::Parameters p;
@@ -371,8 +371,8 @@ TEST(MultiEngineOscillatorTests, AllGranularAndPluckModelsProduceDistinctSignatu
         }
 
         // Check every pair (m1, m2) has distinct audio
-        for (int i = 0; i < 5; ++i) {
-            for (int j = i + 1; j < 5; ++j) {
+        for (int i = 0; i < 6; ++i) {
+            for (int j = i + 1; j < 6; ++j) {
                 float diffEnergy = 0.0f;
                 for (int s = 0; s < 1024; ++s) {
                     const float d = granularBuffers[static_cast<std::size_t>(i)][static_cast<std::size_t>(s)] -
@@ -469,7 +469,7 @@ TEST(MultiEngineOscillatorTests, AnalogAllSixWaveformsRenderAccurately) {
     osc.prepare(48000.0);
 
     std::vector<std::vector<float>> analogBuffers;
-    for (int m = 0; m < 6; ++m) {
+    for (int m = 0; m < 7; ++m) {
         MultiEngineOscillator::Parameters p;
         p.enabled = true;
         p.sourceType = 0;
@@ -489,8 +489,8 @@ TEST(MultiEngineOscillatorTests, AnalogAllSixWaveformsRenderAccurately) {
         analogBuffers.push_back(std::move(buf));
     }
 
-    for (int i = 0; i < 6; ++i) {
-        for (int j = i + 1; j < 6; ++j) {
+    for (int i = 0; i < 7; ++i) {
+        for (int j = i + 1; j < 7; ++j) {
             float diff = 0.0f;
             for (int s = 0; s < 512; ++s) {
                 const float d = analogBuffers[static_cast<std::size_t>(i)][static_cast<std::size_t>(s)] -
@@ -5460,7 +5460,11 @@ TEST(AirSheenAndMidPocketTests, MacroAirBoostsSilkyTopWithoutAddingHarshMids) {
     p.oscSlots[0].modelIndex = 0; // Saw (rich wideband spectrum)
     p.oscSlots[0].filterRouting = 0;
     p.oscSlots[0].level = 1.0f;
-    p.filter1Enabled = false;
+    p.filter1Enabled = true;
+    p.filterCutoffHz = 6000.0f;
+    p.filterResonance = 0.0f;
+    p.filterType = 0; // LowPass 24
+    p.filterEnvAmount = 0.0f;
     p.filter2Enabled = false;
     p.delayEnabled = false;
     p.reverbMix = 0.0f;

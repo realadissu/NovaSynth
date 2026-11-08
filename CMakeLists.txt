@@ -27,3 +27,6 @@ add_subdirectory(plugins/nova_synth)
 
 # Unit & Realtime-Safety Tests
 add_subdirectory(tests)
+
+# Evaluation Tools
+add_subdirectory(tools)

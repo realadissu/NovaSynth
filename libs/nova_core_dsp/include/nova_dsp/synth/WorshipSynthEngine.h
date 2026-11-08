@@ -379,12 +379,6 @@ private:
     OnePoleSmoother masterGainSmoother_{};
     OnePoleSmoother polyHeadroomSmoother_{};
 
-    // Master Tone & Velvet Air Sheen Filters
-    StateVariableFilter masterAirFilterL_{};
-    StateVariableFilter masterAirFilterR_{};
-    StateVariableFilter masterMidPocketFilterL_{};
-    StateVariableFilter masterMidPocketFilterR_{};
-
     LockFreeRingBuffer<float, 2048> visualizerRingBuffer_{};
 
     std::atomic<int> telemetryActiveVoices_{0};
