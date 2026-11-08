@@ -48,6 +48,8 @@ public:
         float highDamping = 0.45f;      // 0.0 .. 1.0 (HF absorption in tank)
         float bassMultiplier = 1.15f;   // 0.4 .. 2.0 (LF RT60 ratio)
         float vocalCarve = 0.20f;       // 0.0 .. 1.0 (Carves 1.8 - 3.2 kHz for vocals/piano clarity)
+        float shimmerLowCutHz = 190.0f; // 40 .. 2500 Hz (cuts mud & fundamentals out of shimmer shifter)
+        float shimmerHighCutHz = 10500.0f; // 2000 .. 20000 Hz (silky high-end opening for celestial bloom)
 
         // Lush / Worship Cloud Controls
         float modRateHz = 0.65f;        // 0.05 .. 3.0 Hz

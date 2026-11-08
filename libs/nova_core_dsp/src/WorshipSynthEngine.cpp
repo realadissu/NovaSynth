@@ -108,6 +108,16 @@ void WorshipSynthEngine::prepare(double sampleRate, int maxBlockSize) {
     droneFilterL_.prepare(sampleRate_);
     droneFilterR_.prepare(sampleRate_);
 
+    masterAirFilterL_.prepare(sampleRate_);
+    masterAirFilterR_.prepare(sampleRate_);
+    masterAirFilterL_.setParameters(StateVariableFilter::Type::HighShelf, 9200.0f, 0.7071f, 0.0f);
+    masterAirFilterR_.setParameters(StateVariableFilter::Type::HighShelf, 9200.0f, 0.7071f, 0.0f);
+
+    masterMidPocketFilterL_.prepare(sampleRate_);
+    masterMidPocketFilterR_.prepare(sampleRate_);
+    masterMidPocketFilterL_.setParameters(StateVariableFilter::Type::Bell, 1250.0f, 0.65f, 0.0f);
+    masterMidPocketFilterR_.setParameters(StateVariableFilter::Type::Bell, 1250.0f, 0.65f, 0.0f);
+
     const std::size_t maxBlock = static_cast<std::size_t>(std::max(maxBlockSize, 2048));
     droneBufferL_.assign(maxBlock, 0.0f);
     droneBufferR_.assign(maxBlock, 0.0f);
@@ -155,6 +165,10 @@ void WorshipSynthEngine::reset() noexcept {
     currentDroneOctave_ = 0;
     droneFilterL_.reset();
     droneFilterR_.reset();
+    masterAirFilterL_.reset();
+    masterAirFilterR_.reset();
+    masterMidPocketFilterL_.reset();
+    masterMidPocketFilterR_.reset();
     currentArpNote_ = -1;
     arpPhaseSamples_ = 0.0;
     lfo1_.reset(0.0f);
@@ -205,9 +219,8 @@ void WorshipSynthEngine::setParameters(const Parameters& params) noexcept {
     lfo4_.setParameters(params_.lfo4Shape, rate4, params_.lfo4Depth);
 
     // Warmth macro darkens/warms the low-pass filter when turned up above 0.50;
-    // Air macro gently opens top-end sheen; Shimmer macro belongs strictly to the reverb shimmer bloom!
-    const float warmthFactor = std::pow(2.0f, (0.50f - params_.macroWarmth) * 1.35f)
-                             * std::pow(2.0f, (params_.macroAir - 0.30f) * 0.70f);
+    // Air macro belongs to the dedicated silky 9.2 kHz Air Sheen stage!
+    const float warmthFactor = std::pow(2.0f, (0.50f - params_.macroWarmth) * 1.35f);
     const float targetCutoff = std::clamp(params_.filterCutoffHz * warmthFactor, 60.0f, 19000.0f);
     cutoffSmoother_.setTargetValue(targetCutoff);
 
@@ -232,6 +245,8 @@ void WorshipSynthEngine::setParameters(const Parameters& params) noexcept {
     revParams.shimmerPitchMode = std::clamp(params_.reverbShimmerPitch, 0, 3);
     revParams.shimmerOctave    = std::clamp(params_.reverbShimmer + params_.macroShimmer * 0.50f, 0.0f, 1.0f);
     revParams.shimmerFifth     = 0.0f;
+    revParams.shimmerLowCutHz  = 540.0f;
+    revParams.shimmerHighCutHz = 10500.0f;
     revParams.ducking          = std::clamp(params_.reverbDucking, 0.0f, 1.0f);
     revParams.vocalCarve       = params_.vocalCarve;
     revParams.freeze           = params_.reverbFreeze;
@@ -1389,6 +1404,12 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
         // Apply Stereo BBD Chorus / Solina Ensemble to filtered synth voices
         chorus_.process(synthL, synthR, synthL, synthR);
 
+        // Apply Velvet Air Sheen & Soft-Mid Carve tone shaping
+        synthL = masterMidPocketFilterL_.processSample(synthL);
+        synthR = masterMidPocketFilterR_.processSample(synthR);
+        synthL = masterAirFilterL_.processSample(synthL);
+        synthR = masterAirFilterR_.processSample(synthR);
+
         // Dedicated Drone Warmth Filter
         droneToneSmoother_.setTargetValue(std::clamp(params_.droneTone, 0.0f, 1.0f));
         const float toneNorm = droneToneSmoother_.getNextValue();
@@ -1397,6 +1418,14 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
             const float toneCutoff = std::clamp(180.0f * std::pow(77.0f, toneNorm), 140.0f, static_cast<float>(sampleRate_ * 0.45));
             droneFilterL_.setParameters(StateVariableFilter::Type::LowPass, toneCutoff, 0.15f);
             droneFilterR_.setParameters(StateVariableFilter::Type::LowPass, toneCutoff, 0.15f);
+
+            // Update Master Air Sheen (HighShelf at 9.2 kHz) & Mid-Pocket Carve (Bell dip at 1250 Hz)
+            const float airGainDb = (params_.macroAir - 0.20f) * 10.0f;
+            const float midPocketGainDb = -7.5f * std::clamp(params_.macroWarmth - 0.20f, 0.0f, 1.0f);
+            masterAirFilterL_.setParameters(StateVariableFilter::Type::HighShelf, 9200.0f, 0.65f, airGainDb);
+            masterAirFilterR_.setParameters(StateVariableFilter::Type::HighShelf, 9200.0f, 0.65f, airGainDb);
+            masterMidPocketFilterL_.setParameters(StateVariableFilter::Type::Bell, 1250.0f, 0.65f, midPocketGainDb);
+            masterMidPocketFilterR_.setParameters(StateVariableFilter::Type::Bell, 1250.0f, 0.65f, midPocketGainDb);
         }
         droneL = droneFilterL_.processSample(droneL);
         droneR = droneFilterR_.processSample(droneR);
@@ -1470,6 +1499,8 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
         auto revParams = reverb_.getParameters();
         revParams.mix = std::clamp(params_.reverbMix + params_.macroShimmer * 0.25f + revMod, 0.0f, 1.0f);
         revParams.shimmerOctave = std::clamp(params_.reverbShimmer + params_.macroShimmer * 0.50f + shimMod, 0.0f, 1.0f);
+        revParams.shimmerLowCutHz = 540.0f;
+        revParams.shimmerHighCutHz = 10500.0f;
         reverb_.setParameters(revParams);
     }
 

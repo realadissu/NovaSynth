@@ -2273,6 +2273,7 @@ TEST(WorshipSynthEngineTests, OscillatorIndependentEnvelopeRoutingAndSwell) {
 
     // OSC 1: Fast attack (5ms), AmpEnv1
     p.oscSlots[0].enabled = true;
+    p.oscSlots[0].detune = 0.0f;
     p.oscSlots[0].level = 0.8f;
     p.oscSlots[0].ampEnvSource = 0; // Main Amp Env
     p.ampEnv.attackSec = 0.005f;
@@ -2281,8 +2282,13 @@ TEST(WorshipSynthEngineTests, OscillatorIndependentEnvelopeRoutingAndSwell) {
     // OSC 2: Disabled
     p.oscSlots[1].enabled = false;
 
-    // OSC 3: Slow swell attack (600ms), ModEnv3
+    // OSC 3: Slow swell attack (600ms), ModEnv3, WarmAnalog engine
     p.oscSlots[2].enabled = true;
+    p.oscSlots[2].engine = nova::dsp::MultiEngineOscillator::EngineType::WarmAnalog;
+    p.oscSlots[2].modelIndex = 1; // Square
+    p.oscSlots[2].detune = 0.0f;
+    p.oscSlots[2].octaveOffset = 0;
+    p.oscSlots[2].semitoneOffset = 7;
     p.oscSlots[2].level = 0.8f;
     p.oscSlots[2].ampEnvSource = 2; // Mod Env 3
     p.modEnv.attackSec = 0.600f;
@@ -2300,25 +2306,31 @@ TEST(WorshipSynthEngineTests, OscillatorIndependentEnvelopeRoutingAndSwell) {
     std::vector<float> left(256, 0.0f);
     std::vector<float> right(256, 0.0f);
 
-    // Advance 5 blocks (~27 ms): OSC 1 attack (5ms) is fully complete, but OSC 3 (600ms) is at only ~4% of its swell
-    for (int b = 0; b < 5; ++b) {
+    // Advance 2 blocks (~11 ms): OSC 1 attack (5ms) is fully complete, but OSC 3 (600ms) is at only ~4% of its swell
+    for (int b = 0; b < 2; ++b) {
         synth.processBlock(left.data(), right.data(), 256);
     }
-    float earlyRms = 0.0f;
-    for (float s : left) earlyRms += s * s;
-    earlyRms = std::sqrt(earlyRms / 256.0f);
+    float earlySumSq = 0.0f;
+    for (int b = 0; b < 2; ++b) {
+        synth.processBlock(left.data(), right.data(), 256);
+        for (float s : left) earlySumSq += s * s;
+    }
+    const float earlyRms = std::sqrt(earlySumSq / (2.0f * 256.0f));
     EXPECT_GT(earlyRms, 0.01f);
 
-    // Render 120 more blocks (~640 ms > 600 ms swell time)
-    for (int b = 0; b < 120; ++b) {
+    // Render 135 more blocks (~720 ms > 600 ms swell time)
+    for (int b = 0; b < 135; ++b) {
         synth.processBlock(left.data(), right.data(), 256);
     }
 
-    // Now OSC 3 has fully swelled in; total energy must be significantly higher than with OSC 1 alone!
-    float lateRms = 0.0f;
-    for (float s : left) lateRms += s * s;
-    lateRms = std::sqrt(lateRms / 256.0f);
-    EXPECT_GT(lateRms, earlyRms * 1.08f);
+    // Now OSC 3 has fully swelled in; average over 4 blocks to cancel beating ripple
+    float lateSumSq = 0.0f;
+    for (int b = 0; b < 4; ++b) {
+        synth.processBlock(left.data(), right.data(), 256);
+        for (float s : left) lateSumSq += s * s;
+    }
+    const float lateRms = std::sqrt(lateSumSq / (4.0f * 256.0f));
+    EXPECT_GT(lateRms, earlyRms * 1.15f);
 
     synth.allNotesOff();
 }
@@ -5106,6 +5118,397 @@ TEST(FilterRoutingAndIndependenceTests, FilterRoutingModeSwitchPreservesOscillat
     EXPECT_EQ(static_cast<int>(osc1Route->convertFrom0to1(osc1Route->getValue())), 2);
     EXPECT_EQ(proc.getCurrentParameters().oscSlots[0].filterRouting, 2);
     EXPECT_EQ(proc.getCurrentParameters().filterRoutingMode, 0);
+}
+
+// -------------------------------------------------------------------------------------------------
+// DUAL FILTER REGRESSION & NEGATIVE ISOLATION TEST SUITE
+// Tests negative cases (leakage/crosstalk must be mathematically zero; series must fail to pass signal
+// where parallel succeeds, boundary clamping must reject invalid routing indices).
+// -------------------------------------------------------------------------------------------------
+TEST(DualFilterNegativeAndLeakageIsolationTests, StrictNegativeIsolationFLT1OnlyRouting) {
+    constexpr double kSr = 48000.0;
+    constexpr int kBlock = 512;
+    nova::dsp::WorshipSynthEngine engine;
+    engine.prepare(kSr, kBlock);
+
+    nova::dsp::WorshipSynthEngine::Parameters p;
+    p.activeOscCount = 1;
+    p.oscSlots[0].enabled = true;
+    p.oscSlots[0].engine = nova::dsp::MultiEngineOscillator::EngineType::WarmAnalog;
+    p.oscSlots[0].modelIndex = 0; // Saw wave
+    p.oscSlots[0].filterRouting = 0; // Strictly FLT 1 ONLY
+    p.oscSlots[0].level = 1.0f;
+    for (int i = 1; i < 8; ++i) p.oscSlots[static_cast<std::size_t>(i)].enabled = false;
+
+    // Filter 1 is LowPass at 1200 Hz
+    p.filter1Enabled = true;
+    p.filterType = 0;
+    p.filterCutoffHz = 1200.0f;
+    p.filterResonance = 0.7071f;
+    p.delayEnabled = false;
+    p.reverbMix = 0.0f;
+    p.chorusEnabled = false;
+    p.ampEnv.attackSec = 0.001f;
+    p.ampEnv.sustainLvl = 1.0f;
+
+    auto renderBlock = [&](bool f2On, float f2Cutoff, float f2Reso, int routingMode) {
+        engine.reset();
+        p.filter2Enabled = f2On;
+        p.filter2Type = 2; // HighPass
+        p.filter2CutoffHz = f2Cutoff;
+        p.filter2Resonance = f2Reso;
+        p.filterRoutingMode = routingMode;
+        engine.setParameters(p);
+        engine.snapSmoothersToTarget();
+        engine.noteOn(60, 0.9f);
+
+        std::vector<float> bL(kBlock, 0.0f), bR(kBlock, 0.0f);
+        // Process 2 blocks; record 2nd block with settled envelope
+        engine.processBlock(bL.data(), bR.data(), kBlock);
+        std::fill(bL.begin(), bL.end(), 0.0f);
+        std::fill(bR.begin(), bR.end(), 0.0f);
+        engine.processBlock(bL.data(), bR.data(), kBlock);
+        engine.allNotesOff();
+        return bL;
+    };
+
+    // Case A: Filter 2 completely disabled
+    const auto bufA = renderBlock(false, 1000.0f, 0.7071f, 0);
+
+    // Case B: Filter 2 enabled with extreme, destructive parameters (HighPass 18 kHz, High Reso, Parallel mode)
+    // Because Osc 1 is routed ONLY to Filter 1, Filter 2 must have STRICTLY ZERO EFFECT!
+    const auto bufB = renderBlock(true, 18000.0f, 4.0f, 1);
+
+    float maxSampleDiff = 0.0f;
+    for (int i = 0; i < kBlock; ++i) {
+        maxSampleDiff = std::max(maxSampleDiff, std::abs(bufA[static_cast<std::size_t>(i)] - bufB[static_cast<std::size_t>(i)]));
+    }
+
+    // Negative Assertion: If any audio leaked into Filter 2 or mode affected Route 0, this test FAILS!
+    EXPECT_LT(maxSampleDiff, 1e-5f)
+        << "Routing 0 (FLT 1 Only) must have strictly zero crosstalk/leakage into Filter 2!";
+}
+
+TEST(DualFilterNegativeAndLeakageIsolationTests, StrictNegativeIsolationFLT2OnlyRouting) {
+    constexpr double kSr = 48000.0;
+    constexpr int kBlock = 512;
+    nova::dsp::WorshipSynthEngine engine;
+    engine.prepare(kSr, kBlock);
+
+    nova::dsp::WorshipSynthEngine::Parameters p;
+    p.activeOscCount = 1;
+    p.oscSlots[0].enabled = true;
+    p.oscSlots[0].engine = nova::dsp::MultiEngineOscillator::EngineType::WarmAnalog;
+    p.oscSlots[0].modelIndex = 0; // Saw wave
+    p.oscSlots[0].filterRouting = 1; // Strictly FLT 2 ONLY
+    p.oscSlots[0].level = 1.0f;
+    for (int i = 1; i < 8; ++i) p.oscSlots[static_cast<std::size_t>(i)].enabled = false;
+
+    // Filter 2 is LowPass at 1500 Hz
+    p.filter2Enabled = true;
+    p.filter2Type = 0;
+    p.filter2CutoffHz = 1500.0f;
+    p.filter2Resonance = 0.7071f;
+    p.delayEnabled = false;
+    p.reverbMix = 0.0f;
+    p.chorusEnabled = false;
+    p.ampEnv.attackSec = 0.001f;
+    p.ampEnv.sustainLvl = 1.0f;
+
+    auto renderBlock = [&](bool f1On, float f1Cutoff, float f1Reso, int routingMode) {
+        engine.reset();
+        p.filter1Enabled = f1On;
+        p.filterType = 0; // LowPass
+        p.filterCutoffHz = f1Cutoff;
+        p.filterResonance = f1Reso;
+        p.filterRoutingMode = routingMode;
+        engine.setParameters(p);
+        engine.snapSmoothersToTarget();
+        engine.noteOn(60, 0.9f);
+
+        std::vector<float> bL(kBlock, 0.0f), bR(kBlock, 0.0f);
+        engine.processBlock(bL.data(), bR.data(), kBlock);
+        std::fill(bL.begin(), bL.end(), 0.0f);
+        std::fill(bR.begin(), bR.end(), 0.0f);
+        engine.processBlock(bL.data(), bR.data(), kBlock);
+        engine.allNotesOff();
+        return bL;
+    };
+
+    // Case A: Filter 1 disabled
+    const auto bufA = renderBlock(false, 1000.0f, 0.7071f, 1);
+
+    // Case B: Filter 1 enabled with brickwall LowPass at 40 Hz in Serial mode
+    // Filter 1 must have STRICTLY ZERO EFFECT on an oscillator routed to Filter 2!
+    const auto bufB = renderBlock(true, 40.0f, 3.5f, 0);
+
+    float maxSampleDiff = 0.0f;
+    for (int i = 0; i < kBlock; ++i) {
+        maxSampleDiff = std::max(maxSampleDiff, std::abs(bufA[static_cast<std::size_t>(i)] - bufB[static_cast<std::size_t>(i)]));
+    }
+
+    // Negative Assertion: If any audio leaked into Filter 1, this test FAILS!
+    EXPECT_LT(maxSampleDiff, 1e-5f)
+        << "Routing 1 (FLT 2 Only) must have strictly zero crosstalk/leakage from Filter 1!";
+}
+
+TEST(DualFilterNegativeAndLeakageIsolationTests, StrictNegativeDirectRoutingBypassesBothFilters) {
+    constexpr double kSr = 48000.0;
+    constexpr int kBlock = 512;
+    nova::dsp::WorshipSynthEngine engine;
+    engine.prepare(kSr, kBlock);
+
+    nova::dsp::WorshipSynthEngine::Parameters p;
+    p.activeOscCount = 1;
+    p.oscSlots[0].enabled = true;
+    p.oscSlots[0].engine = nova::dsp::MultiEngineOscillator::EngineType::WarmAnalog;
+    p.oscSlots[0].modelIndex = 0; // Saw wave
+    p.oscSlots[0].filterRouting = 3; // DIRECT (bypasses both filters)
+    p.oscSlots[0].level = 1.0f;
+    for (int i = 1; i < 8; ++i) p.oscSlots[static_cast<std::size_t>(i)].enabled = false;
+    p.delayEnabled = false;
+    p.reverbMix = 0.0f;
+    p.chorusEnabled = false;
+    p.ampEnv.attackSec = 0.001f;
+    p.ampEnv.sustainLvl = 1.0f;
+
+    auto renderBlock = [&](bool filtersOn) {
+        engine.reset();
+        p.filter1Enabled = filtersOn;
+        p.filterType = 0;
+        p.filterCutoffHz = 40.0f; // LowPass 40 Hz
+        p.filter2Enabled = filtersOn;
+        p.filter2Type = 2;
+        p.filter2CutoffHz = 18000.0f; // HighPass 18 kHz
+        p.filterRoutingMode = 0; // Serial
+        engine.setParameters(p);
+        engine.snapSmoothersToTarget();
+        engine.noteOn(60, 0.9f);
+
+        std::vector<float> bL(kBlock, 0.0f), bR(kBlock, 0.0f);
+        engine.processBlock(bL.data(), bR.data(), kBlock);
+        std::fill(bL.begin(), bL.end(), 0.0f);
+        std::fill(bR.begin(), bR.end(), 0.0f);
+        engine.processBlock(bL.data(), bR.data(), kBlock);
+        engine.allNotesOff();
+        return bL;
+    };
+
+    // Case A: Both brickwall filters ON
+    const auto bufWithFilters = renderBlock(true);
+
+    // Case B: Both filters OFF
+    const auto bufWithoutFilters = renderBlock(false);
+
+    float maxSampleDiff = 0.0f;
+    for (int i = 0; i < kBlock; ++i) {
+        maxSampleDiff = std::max(maxSampleDiff, std::abs(bufWithFilters[static_cast<std::size_t>(i)] - bufWithoutFilters[static_cast<std::size_t>(i)]));
+    }
+
+    // Direct routing must be 100% unaffected by either filter!
+    EXPECT_LT(maxSampleDiff, 1e-5f)
+        << "Direct routing (Route 3) must bypass both filters with zero deviation!";
+}
+
+TEST(DualFilterNegativeAndLeakageIsolationTests, StrictNegativeSerialVsParallelDiscrimination) {
+    constexpr double kSr = 48000.0;
+    constexpr int kBlock = 512;
+    nova::dsp::WorshipSynthEngine engine;
+    engine.prepare(kSr, kBlock);
+
+    nova::dsp::WorshipSynthEngine::Parameters p;
+    p.activeOscCount = 1;
+    p.oscSlots[0].enabled = true;
+    p.oscSlots[0].engine = nova::dsp::MultiEngineOscillator::EngineType::WarmAnalog;
+    p.oscSlots[0].modelIndex = 0; // Saw wave
+    p.oscSlots[0].filterRouting = 2; // Route to BOTH filters
+    p.oscSlots[0].level = 1.0f;
+    for (int i = 1; i < 8; ++i) p.oscSlots[static_cast<std::size_t>(i)].enabled = false;
+    p.delayEnabled = false;
+    p.reverbMix = 0.0f;
+    p.chorusEnabled = false;
+    p.ampEnv.attackSec = 0.001f;
+    p.ampEnv.sustainLvl = 1.0f;
+
+    // Filter 1 = HighPass 3000 Hz, Filter 2 = LowPass 200 Hz
+    p.filter1Enabled = true;
+    p.filterType = 2; // HighPass 12
+    p.filterCutoffHz = 3000.0f;
+    p.filterResonance = 0.7071f;
+
+    p.filter2Enabled = true;
+    p.filter2Type = 0; // LowPass 12
+    p.filter2CutoffHz = 200.0f;
+    p.filter2Resonance = 0.7071f;
+
+    // A. SERIAL MODE (1 -> 2): Non-overlapping passbands MUST result in silence
+    p.filterRoutingMode = 0;
+    engine.setParameters(p);
+    engine.snapSmoothersToTarget();
+    engine.noteOn(60, 0.9f);
+
+    std::vector<float> buf_L(kBlock, 0.0f), buf_R(kBlock, 0.0f);
+    float serialEnergy = 0.0f;
+    for (int b = 0; b < 10; ++b) {
+        std::fill(buf_L.begin(), buf_L.end(), 0.0f);
+        std::fill(buf_R.begin(), buf_R.end(), 0.0f);
+        engine.processBlock(buf_L.data(), buf_R.data(), kBlock);
+        if (b >= 5) {
+            for (int i = 0; i < kBlock; ++i) {
+                serialEnergy += buf_L[static_cast<std::size_t>(i)] * buf_L[static_cast<std::size_t>(i)];
+            }
+        }
+    }
+    const float serialRms = std::sqrt(serialEnergy / static_cast<float>(5 * kBlock));
+    engine.allNotesOff();
+    engine.reset();
+
+    // B. PARALLEL MODE (1 + 2): HP 3000 Hz and LP 200 Hz sum side-by-side and MUST be audible
+    p.filterRoutingMode = 1;
+    engine.setParameters(p);
+    engine.snapSmoothersToTarget();
+    engine.noteOn(60, 0.9f);
+
+    float parallelEnergy = 0.0f;
+    for (int b = 0; b < 10; ++b) {
+        std::fill(buf_L.begin(), buf_L.end(), 0.0f);
+        std::fill(buf_R.begin(), buf_R.end(), 0.0f);
+        engine.processBlock(buf_L.data(), buf_R.data(), kBlock);
+        if (b >= 5) {
+            for (int i = 0; i < kBlock; ++i) {
+                parallelEnergy += buf_L[static_cast<std::size_t>(i)] * buf_L[static_cast<std::size_t>(i)];
+            }
+        }
+    }
+    const float parallelRms = std::sqrt(parallelEnergy / static_cast<float>(5 * kBlock));
+
+    // Negative Verification:
+    // If Serial mode behaves like parallel, serialRms will exceed 0.02f -> FAILS!
+    EXPECT_LT(serialRms, 0.015f)
+        << "Serial cascade of HP 3000 Hz into LP 200 Hz must NOT leak signal!";
+
+    // If Parallel mode behaves like serial, parallelRms will drop below 0.10f -> FAILS!
+    EXPECT_GT(parallelRms, 0.12f)
+        << "Parallel summing of HP 3000 Hz and LP 200 Hz must pass rich sum of highs and low frequencies!";
+
+    EXPECT_GT(parallelRms, serialRms * 10.0f)
+        << "Parallel energy must exceed serial cascade energy by at least 10x!";
+}
+
+TEST(DualFilterNegativeAndLeakageIsolationTests, BoundaryAndMalformedRoutingValuesClampedSafely) {
+    constexpr double kSr = 48000.0;
+    constexpr int kBlock = 512;
+    nova::dsp::WorshipSynthEngine engine;
+    engine.prepare(kSr, kBlock);
+
+    nova::dsp::WorshipSynthEngine::Parameters p;
+    p.activeOscCount = 1;
+    p.oscSlots[0].enabled = true;
+    p.oscSlots[0].engine = nova::dsp::MultiEngineOscillator::EngineType::WarmAnalog;
+    p.oscSlots[0].modelIndex = 0;
+    p.oscSlots[0].level = 1.0f;
+
+    // Test extreme/out-of-bounds routing values
+    p.oscSlots[0].filterRouting = -5; // Out of bounds negative
+    p.filterRoutingMode = 99;         // Out of bounds mode
+    engine.setParameters(p);
+    engine.snapSmoothersToTarget();
+    engine.noteOn(60, 0.8f);
+
+    std::vector<float> buf_L(kBlock, 0.0f), buf_R(kBlock, 0.0f);
+    engine.processBlock(buf_L.data(), buf_R.data(), kBlock);
+
+    // Verify zero NaNs or Infs
+    for (int i = 0; i < kBlock; ++i) {
+        EXPECT_FALSE(std::isnan(buf_L[static_cast<std::size_t>(i)]));
+        EXPECT_FALSE(std::isinf(buf_L[static_cast<std::size_t>(i)]));
+    }
+
+    p.oscSlots[0].filterRouting = 100; // Out of bounds positive
+    p.filterRoutingMode = -2;
+    engine.setParameters(p);
+    engine.snapSmoothersToTarget();
+    engine.processBlock(buf_L.data(), buf_R.data(), kBlock);
+
+    for (int i = 0; i < kBlock; ++i) {
+        EXPECT_FALSE(std::isnan(buf_L[static_cast<std::size_t>(i)]));
+        EXPECT_FALSE(std::isinf(buf_L[static_cast<std::size_t>(i)]));
+    }
+}
+
+TEST(AirSheenAndMidPocketTests, MacroAirBoostsSilkyTopWithoutAddingHarshMids) {
+    constexpr double kSr = 48000.0;
+    constexpr int kBlock = 512;
+    nova::dsp::WorshipSynthEngine engine;
+    engine.prepare(kSr, kBlock);
+
+    auto measureMagnitudeAtFreq = [](const float* buf, int n, double sr, float freq) {
+        double real = 0.0, imag = 0.0;
+        const double omega = 2.0 * std::numbers::pi_v<double> * static_cast<double>(freq) / sr;
+        for (int i = 0; i < n; ++i) {
+            const double angle = omega * static_cast<double>(i);
+            real += static_cast<double>(buf[i]) * std::cos(angle);
+            imag -= static_cast<double>(buf[i]) * std::sin(angle);
+        }
+        return static_cast<float>(std::sqrt(real * real + imag * imag) / static_cast<double>(n));
+    };
+
+    nova::dsp::WorshipSynthEngine::Parameters p;
+    p.activeOscCount = 1;
+    p.oscSlots[0].enabled = true;
+    p.oscSlots[0].engine = nova::dsp::MultiEngineOscillator::EngineType::WarmAnalog;
+    p.oscSlots[0].modelIndex = 0; // Saw (rich wideband spectrum)
+    p.oscSlots[0].filterRouting = 0;
+    p.oscSlots[0].level = 1.0f;
+    p.filter1Enabled = false;
+    p.filter2Enabled = false;
+    p.delayEnabled = false;
+    p.reverbMix = 0.0f;
+    p.chorusEnabled = false;
+    p.ampEnv.attackSec = 0.001f;
+    p.ampEnv.sustainLvl = 1.0f;
+
+    auto renderWithAir = [&](float airVal) {
+        p.macroAir = airVal;
+        engine.setParameters(p);
+        engine.snapSmoothersToTarget();
+        engine.noteOn(60, 0.9f);
+
+        std::vector<float> tail_L(4096, 0.0f), tail_R(4096, 0.0f);
+        std::vector<float> bL(kBlock, 0.0f), bR(kBlock, 0.0f);
+        for (int b = 0; b < 16; ++b) {
+            std::fill(bL.begin(), bL.end(), 0.0f);
+            std::fill(bR.begin(), bR.end(), 0.0f);
+            engine.processBlock(bL.data(), bR.data(), kBlock);
+            if (b >= 8) {
+                const int offset = (b - 8) * kBlock;
+                for (int i = 0; i < kBlock; ++i) {
+                    tail_L[static_cast<std::size_t>(offset + i)] = bL[static_cast<std::size_t>(i)];
+                }
+            }
+        }
+        engine.allNotesOff();
+        engine.reset();
+        return tail_L;
+    };
+
+    const auto lowAirAudio  = renderWithAir(0.20f); // 0 dB Air sheen
+    const auto highAirAudio = renderWithAir(0.90f); // +7 dB Air sheen
+
+    // Note 60 = 261.6256 Hz; H38 = 9941.8 Hz, H4 = 1046.5 Hz
+    const float lowAir10k  = measureMagnitudeAtFreq(lowAirAudio.data(),  4096, kSr, 9941.8f);
+    const float highAir10k = measureMagnitudeAtFreq(highAirAudio.data(), 4096, kSr, 9941.8f);
+
+    const float lowAir1k  = measureMagnitudeAtFreq(lowAirAudio.data(),  4096, kSr, 1046.5f);
+    const float highAir1k = measureMagnitudeAtFreq(highAirAudio.data(), 4096, kSr, 1046.5f);
+
+    // 10 kHz silky air must be significantly boosted by turning up Macro Air
+    EXPECT_GT(highAir10k, lowAir10k * 1.50f)
+        << "Macro Air must boost 10 kHz silky sheen!";
+
+    // 1 kHz mids must NOT be boosted aggressively (less than 15% difference, unlike old cutoff opening)
+    EXPECT_NEAR(highAir1k, lowAir1k, lowAir1k * 0.15f)
+        << "Macro Air must NOT boost harsh 1 kHz mids!";
 }
 
 TEST(NovaSynthUiSyncTests, SourceAndFilterStateTogglesPropagateToAllViews) {

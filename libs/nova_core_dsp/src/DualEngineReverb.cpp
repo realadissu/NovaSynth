@@ -172,23 +172,25 @@ void DualEngineReverb::prepare(double sampleRate, int /*maxBlockSize*/) {
     vocalCarveL_.prepare(sampleRate_);
     vocalCarveR_.prepare(sampleRate_);
 
-    // Valhalla-style Warm Shimmer LowPass (5.2 kHz, Bessel-like Q=0.55):
-    // Allows fundamentals & lower octaves to ascend freely while gently melting away ultrasonic fizz
+    // Valhalla-style Celestial Shimmer Silk LowPass:
+    // Allows ascending shimmer overtones to sparkle freely into the 8 - 14 kHz air band
+    const float initShimHigh = std::clamp(params_.shimmerHighCutHz, 2500.0f, static_cast<float>(sampleRate_ * 0.45));
     shimmerSilkL_.prepare(sampleRate_);
     shimmerSilkR_.prepare(sampleRate_);
-    shimmerSilkL_.setParameters(StateVariableFilter::Type::LowPass, 5200.0f, 0.55f);
-    shimmerSilkR_.setParameters(StateVariableFilter::Type::LowPass, 5200.0f, 0.55f);
+    shimmerSilkL_.setParameters(StateVariableFilter::Type::LowPass, initShimHigh, 0.55f);
+    shimmerSilkR_.setParameters(StateVariableFilter::Type::LowPass, initShimHigh, 0.55f);
 
     // Inter-stage filter for cascaded +2 octave (+24st) shimmer
     shimmerInterStageL_.prepare(sampleRate_);
     shimmerInterStageR_.prepare(sampleRate_);
-    shimmerInterStageL_.setParameters(StateVariableFilter::Type::LowPass, 6400.0f, 0.58f);
-    shimmerInterStageR_.setParameters(StateVariableFilter::Type::LowPass, 6400.0f, 0.58f);
+    shimmerInterStageL_.setParameters(StateVariableFilter::Type::LowPass, std::min(12500.0f, initShimHigh * 1.15f), 0.58f);
+    shimmerInterStageR_.setParameters(StateVariableFilter::Type::LowPass, std::min(12500.0f, initShimHigh * 1.15f), 0.58f);
 
+    const float initEffShimmerLowCut = (params_.shimmerPitchMode == 3) ? std::min(140.0f, params_.shimmerLowCutHz) : params_.shimmerLowCutHz;
     shimmerHighPassL_.prepare(sampleRate_);
     shimmerHighPassR_.prepare(sampleRate_);
-    shimmerHighPassL_.setParameters(StateVariableFilter::Type::HighPass, 185.0f, 0.65f);
-    shimmerHighPassR_.setParameters(StateVariableFilter::Type::HighPass, 185.0f, 0.65f);
+    shimmerHighPassL_.setParameters(StateVariableFilter::Type::HighPass, initEffShimmerLowCut, 0.65f);
+    shimmerHighPassR_.setParameters(StateVariableFilter::Type::HighPass, initEffShimmerLowCut, 0.65f);
 
     // Shimmer Diffusers: 2-stage prime allpass phase scattering
     constexpr std::array<float, 2> kShimmerDiffMsL = { 9.13f, 14.87f };
@@ -353,6 +355,16 @@ void DualEngineReverb::setParameters(const Parameters& params) noexcept {
     const float carveDb = -9.5f * std::clamp(params_.vocalCarve, 0.0f, 1.0f);
     vocalCarveL_.setParameters(StateVariableFilter::Type::Bell, 2200.0f, 0.85f, carveDb);
     vocalCarveR_.setParameters(StateVariableFilter::Type::Bell, 2200.0f, 0.85f, carveDb);
+
+    const float shimHigh = std::clamp(params_.shimmerHighCutHz, 2500.0f, static_cast<float>(sampleRate_ * 0.45));
+    shimmerSilkL_.setParameters(StateVariableFilter::Type::LowPass, shimHigh, 0.55f);
+    shimmerSilkR_.setParameters(StateVariableFilter::Type::LowPass, shimHigh, 0.55f);
+    shimmerInterStageL_.setParameters(StateVariableFilter::Type::LowPass, std::min(12500.0f, shimHigh * 1.15f), 0.58f);
+    shimmerInterStageR_.setParameters(StateVariableFilter::Type::LowPass, std::min(12500.0f, shimHigh * 1.15f), 0.58f);
+
+    const float effShimmerLowCut = (params_.shimmerPitchMode == 3) ? std::min(140.0f, params_.shimmerLowCutHz) : params_.shimmerLowCutHz;
+    shimmerHighPassL_.setParameters(StateVariableFilter::Type::HighPass, effShimmerLowCut, 0.65f);
+    shimmerHighPassR_.setParameters(StateVariableFilter::Type::HighPass, effShimmerLowCut, 0.65f);
 
     const float clampedDiff = std::clamp(params_.diffusion, 0.0f, 0.95f);
     const float diffFeedback = clampedDiff * 0.72f;
