@@ -1299,15 +1299,26 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
                 flt1InR *= v.flt1ResComp;
             }
 
-            // Only the FLT 1+2 series portion of Filter 1's output continues into Filter 2.
-            // The FLT 1 parallel portion goes directly to the master mix and is NEVER touched by Filter 2!
-            const float flt1DirectL = flt1InL * (1.0f - bothFraction);
-            const float flt1DirectR = flt1InR * (1.0f - bothFraction);
-            const float flt1ToFlt2L = flt1InL * bothFraction;
-            const float flt1ToFlt2R = flt1InR * bothFraction;
+            // Routing logic for Dual Filters:
+            // Parallel (mode 1): FLT 1 takes (Flt1 + Both), FLT 2 takes (Flt2 + Both) in parallel, outputs sum.
+            // Serial (mode 0): FLT 1 takes (Flt1 + Both); Flt1-only goes direct, Both cascades into FLT 2.
+            const bool isParallel = (params_.filterRoutingMode == 1);
+            float flt1DirectL = 0.0f;
+            float flt1DirectR = 0.0f;
+            float flt2InL = 0.0f;
+            float flt2InR = 0.0f;
 
-            float flt2InL = voiceFlt2L + flt1ToFlt2L;
-            float flt2InR = voiceFlt2R + flt1ToFlt2R;
+            if (isParallel) {
+                flt1DirectL = flt1InL;
+                flt1DirectR = flt1InR;
+                flt2InL = voiceFlt2L + voiceBothL;
+                flt2InR = voiceFlt2R + voiceBothR;
+            } else {
+                flt1DirectL = flt1InL * (1.0f - bothFraction);
+                flt1DirectR = flt1InR * (1.0f - bothFraction);
+                flt2InL = voiceFlt2L + flt1InL * bothFraction;
+                flt2InR = voiceFlt2R + flt1InR * bothFraction;
+            }
 
             if (params_.filter2Enabled) {
                 const float voiceResoMod2 = voiceOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::Filter2Resonance)] * 0.5f;

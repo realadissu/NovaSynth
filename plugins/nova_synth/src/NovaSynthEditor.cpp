@@ -3356,8 +3356,10 @@ private:
             g.drawRoundedRectangle(dualTargetRect_.toFloat(), 3.0f, 0.8f);
         }
         g.setFont(theme_.getValueFont(11.0f));
-        g.setColour(dualHov ? juce::Colour(0xff2dd4bf) : theme_.textMuted);
-        g.drawText("DUAL (FLT 1 + 2)", dualTargetRect_, juce::Justification::centred);
+        g.setColour(dualHov ? juce::Colour(0xff2dd4bf) : theme_.textSecondary);
+        const bool isParallel = (params.filterRoutingMode == 1);
+        const juce::String routingLabel = dualHov ? "CONNECT DUAL (FLT 1 + 2)" : (isParallel ? "PARALLEL (1 + 2)" : "SERIAL (1 -> 2)");
+        g.drawText(routingLabel, dualTargetRect_, juce::Justification::centred);
 
         // FLT 2 Pill
         const juce::Rectangle<float> flt2R(cardFilters.getX() + 10.0f, static_cast<float>(dualTargetRect_.getBottom() + 3), fltW, fltH);
@@ -3841,6 +3843,17 @@ private:
                 if (!cachedFlt1Enabled_ && !cachedFlt2Enabled_) {
                     if (auto* p = apvts.getParameter("filter1Enabled")) p->setValueNotifyingHost(1.0f);
                 }
+            }
+            if (onFilterStateChanged) onFilterStateChanged();
+            repaint();
+            return;
+        }
+
+        // Dual Filter Routing Mode Toggle (SERIAL / PARALLEL)
+        if (dualTargetRect_.contains(pos)) {
+            if (auto* p = apvts.getParameter("filterRoutingMode")) {
+                const float cur = p->convertFrom0to1(p->getValue());
+                p->setValueNotifyingHost(cur > 0.5f ? 0.0f : 1.0f);
             }
             if (onFilterStateChanged) onFilterStateChanged();
             repaint();

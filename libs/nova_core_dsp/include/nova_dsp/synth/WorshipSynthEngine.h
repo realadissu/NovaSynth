@@ -110,6 +110,8 @@ public:
         float filter2Drive = 0.0f;
         float vocalCarve = 0.25f;
 
+        int filterRoutingMode = 0;  // 0: Serial (1 -> 2), 1: Parallel (1 + 2)
+
         // Envelopes (ENV 1 = Amp, ENV 2 = Filter, ENV 3 = Mod/Morph, ENV 4 = Pitch/Aux)
         AdsrEnvelope::Parameters ampEnv{ 0.45f, 1.40f, 0.82f, 2.20f };
         AdsrEnvelope::Parameters filterEnv{ 0.60f, 1.80f, 0.40f, 2.00f };

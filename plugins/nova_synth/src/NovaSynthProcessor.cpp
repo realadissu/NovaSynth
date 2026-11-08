@@ -170,6 +170,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout NovaSynthProcessor::createPa
         juce::ParameterID{"vocalCarve", 1}, "Vocal Carve",
         juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.28f));
 
+    params.push_back(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{"filterRoutingMode", 1}, "Filter Routing Mode",
+        juce::StringArray{"SERIAL (1 -> 2)", "PARALLEL (1 + 2)"}, 0));
+
     // Envelopes
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{"ampDelay", 1}, "Amp Pre-Delay",
@@ -1392,31 +1396,26 @@ void NovaSynthProcessor::registerFactoryPresets() {
         "Buttery-smooth, rock-steady vintage analog poly-pad (Saw + Warm Triangle + Sub). Quiet, warm velvet cushion under piano at low Swell; opens seamlessly up to 3 kHz with zero shimmer or pitch warble.",
         {"Swell", "Pedal", "Bethel", "Soaking", "Analog", "Warm"},
         {{"activeOscCount", 4.0f},
-         {"osc1_enabled", 1.0f}, {"osc1_sourceType", 0.0f}, {"osc1_engine", 0.0f}, {"osc1_model", 0.0f}, {"osc1_octave", 0.0f}, {"osc1_shape", 0.16f}, {"osc1_detune", 0.26f}, {"osc1_scatter", 0.18f}, {"osc1_warp", 0.12f}, {"osc1_filterRouting", 2.0f}, {"osc1_level", 0.42f},
-         {"osc2_enabled", 1.0f}, {"osc2_sourceType", 0.0f}, {"osc2_engine", 0.0f}, {"osc2_model", 2.0f}, {"osc2_octave", 0.0f}, {"osc2_shape", 0.12f}, {"osc2_detune", 0.18f}, {"osc2_scatter", 0.14f}, {"osc2_warp", 0.10f}, {"osc2_filterRouting", 2.0f}, {"osc2_level", 0.44f},
-         {"osc3_enabled", 1.0f}, {"osc3_sourceType", 0.0f}, {"osc3_engine", 0.0f}, {"osc3_model", 4.0f}, {"osc3_octave", 0.0f}, {"osc3_shape", 0.24f}, {"osc3_detune", 0.32f}, {"osc3_scatter", 0.24f}, {"osc3_spread", 0.72f}, {"osc3_ampEnvSource", 2.0f}, {"osc3_filterRouting", 0.0f}, {"osc3_level", 0.05f},
-         {"osc4_enabled", 1.0f}, {"osc4_sourceType", 1.0f}, {"osc4_engine", 4.0f}, {"osc4_model", 0.0f}, {"osc4_octave", -1.0f}, {"osc4_shape", 0.04f}, {"osc4_detune", 0.0f}, {"osc4_lowestNoteOnly", 1.0f}, {"osc4_filterRouting", 0.0f}, {"osc4_level", 0.46f},
-         {"filter1Enabled", 1.0f}, {"filterType", 0.0f}, {"filterCutoffHz", 460.0f}, {"filterResonance", 0.80f}, {"filterEnvAmount", 0.10f}, {"filterDrive", 0.14f},
-         {"filter2Enabled", 1.0f}, {"filter2Type", 3.0f}, {"filter2CutoffHz", 1380.0f}, {"filter2Resonance", 0.82f}, {"vocalCarve", 0.42f},
-         {"ampAttack", 0.42f}, {"ampDecay", 1.8f}, {"ampSustain", 0.92f}, {"ampRelease", 1.40f},
-         {"fltAttack", 0.50f}, {"fltDecay", 1.8f}, {"fltSustain", 0.55f}, {"fltRelease", 1.35f},
-         {"modAttack", 0.55f}, {"modDecay", 1.8f}, {"modSustain", 0.90f}, {"modRelease", 1.35f},
-         {"lfo1RateHz", 0.22f}, {"lfo1Depth", 0.25f}, {"lfo2RateHz", 0.14f}, {"lfo2Depth", 0.22f},
-         {"chorusEnabled", 1.0f}, {"chorusMode", 0.0f}, {"chorusMix", 0.44f}, {"chorusRateHz", 0.50f}, {"chorusDepth", 0.65f},
-         {"macroWarmth", 0.80f}, {"macroMotion", 0.30f}, {"macroShimmer", 0.0f}, {"macroAir", 0.28f},
-         {"delayEnabled", 1.0f}, {"delaySync", 1.0f}, {"delaySyncDiv", 1.0f}, {"delayMix", 0.12f}, {"delayFeedback", 0.22f},
-         {"reverbMix", 0.34f}, {"reverbDry", 1.0f}, {"reverbDecay", 3.2f}, {"reverbShimmer", 0.0f}, {"reverbShimmerPitch", 0.0f}, {"reverbDucking", 0.48f},
+         {"osc1_enabled", 1.0f}, {"osc1_sourceType", 0.0f}, {"osc1_engine", 0.0f}, {"osc1_model", 0.0f}, {"osc1_octave", 0.0f}, {"osc1_shape", 0.05f}, {"osc1_detune", 0.05f}, {"osc1_scatter", 0.0f}, {"osc1_warp", 0.0f}, {"osc1_filterRouting", 2.0f}, {"osc1_level", 0.45f},
+         {"osc2_enabled", 1.0f}, {"osc2_sourceType", 0.0f}, {"osc2_engine", 0.0f}, {"osc2_model", 2.0f}, {"osc2_octave", 0.0f}, {"osc2_shape", 0.0f}, {"osc2_detune", 0.04f}, {"osc2_scatter", 0.0f}, {"osc2_warp", 0.0f}, {"osc2_filterRouting", 2.0f}, {"osc2_level", 0.42f},
+         {"osc3_enabled", 0.0f}, {"osc3_sourceType", 0.0f}, {"osc3_engine", 0.0f}, {"osc3_model", 4.0f}, {"osc3_octave", 0.0f}, {"osc3_shape", 0.0f}, {"osc3_detune", 0.0f}, {"osc3_scatter", 0.0f}, {"osc3_spread", 0.50f}, {"osc3_ampEnvSource", 0.0f}, {"osc3_filterRouting", 0.0f}, {"osc3_level", 0.0f},
+         {"osc4_enabled", 1.0f}, {"osc4_sourceType", 1.0f}, {"osc4_engine", 4.0f}, {"osc4_model", 0.0f}, {"osc4_octave", -1.0f}, {"osc4_shape", 0.0f}, {"osc4_detune", 0.0f}, {"osc4_lowestNoteOnly", 1.0f}, {"osc4_filterRouting", 0.0f}, {"osc4_level", 0.38f},
+         {"filter1Enabled", 1.0f}, {"filterType", 0.0f}, {"filterCutoffHz", 340.0f}, {"filterResonance", 0.38f}, {"filterEnvAmount", 0.08f}, {"filterDrive", 0.05f},
+         {"filter2Enabled", 1.0f}, {"filter2Type", 3.0f}, {"filter2CutoffHz", 850.0f}, {"filter2Resonance", 0.70f}, {"vocalCarve", 0.45f},
+         {"filterRoutingMode", 0.0f},
+         {"ampAttack", 0.48f}, {"ampDecay", 2.0f}, {"ampSustain", 0.95f}, {"ampRelease", 1.50f},
+         {"fltAttack", 0.60f}, {"fltDecay", 2.0f}, {"fltSustain", 0.60f}, {"fltRelease", 1.50f},
+         {"modAttack", 0.60f}, {"modDecay", 2.0f}, {"modSustain", 0.90f}, {"modRelease", 1.50f},
+         {"lfo1RateHz", 0.20f}, {"lfo1Depth", 0.0f}, {"lfo2RateHz", 0.15f}, {"lfo2Depth", 0.0f},
+         {"chorusEnabled", 1.0f}, {"chorusMode", 0.0f}, {"chorusMix", 0.24f}, {"chorusRateHz", 0.42f}, {"chorusDepth", 0.35f}, {"chorusWarmth", 0.70f},
+         {"macroWarmth", 0.85f}, {"macroMotion", 0.10f}, {"macroShimmer", 0.0f}, {"macroAir", 0.20f},
+         {"delayEnabled", 0.0f}, {"delaySync", 1.0f}, {"delaySyncDiv", 1.0f}, {"delayMix", 0.0f}, {"delayFeedback", 0.15f},
+         {"reverbMix", 0.38f}, {"reverbDry", 1.0f}, {"reverbDecay", 3.6f}, {"reverbShimmer", 0.0f}, {"reverbShimmerPitch", 0.0f}, {"reverbDucking", 0.46f},
          {"droneEnabled", 0.0f}, {"arpEnabled", 0.0f}, {"subLowestOnly", 1.0f}},
         {ms(Src::ModWheel, Dst::FilterCutoff, 0.72f),
-         ms(Src::ModWheel, Dst::Osc1Level,    0.46f),
-         ms(Src::ModWheel, Dst::Osc2Level,    0.42f),
-         ms(Src::ModWheel, Dst::Osc3Level,    0.66f),
-         ms(Src::ModWheel, Dst::Osc4Level,    0.32f),
-         ms(Src::ModWheel, Dst::Osc3Shape,    0.48f),
-         ms(Src::ModWheel, Dst::PanSpread,    0.48f),
-         ms(Src::ModWheel, Dst::ReverbMix,    0.12f),
-         ms(Src::Lfo1,     Dst::FilterCutoff, 0.10f),
-         ms(Src::Lfo2,     Dst::PanSpread,    0.18f)}
+         ms(Src::ModWheel, Dst::Osc1Level,    0.42f),
+         ms(Src::ModWheel, Dst::Osc2Level,    0.38f),
+         ms(Src::ModWheel, Dst::ReverbMix,    0.10f)}
     });
 
     // 45. ICF Silky High Shimmer (Ref 2: Die Schoepfung singt 05:17 - Weightless High String & Fifth Sheen)
@@ -1762,6 +1761,9 @@ void NovaSynthProcessor::syncParametersFromAPVTS() noexcept {
     p.filter2EnvAmount = apvts_.getRawParameterValue("filter2EnvAmount")->load();
     p.filter2Drive     = apvts_.getRawParameterValue("filter2Drive")->load();
     p.vocalCarve       = apvts_.getRawParameterValue("vocalCarve")->load();
+    if (auto* pFltMode = apvts_.getRawParameterValue("filterRoutingMode")) {
+        p.filterRoutingMode = static_cast<int>(pFltMode->load());
+    }
 
     if (auto* pDel = apvts_.getRawParameterValue("ampDelay")) p.ampEnv.delaySec = pDel->load();
     p.ampEnv.attackSec     = apvts_.getRawParameterValue("ampAttack")->load();

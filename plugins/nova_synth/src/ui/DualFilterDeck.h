@@ -192,12 +192,18 @@ public:
 
         // Routing buttons
         if (serialBtnRect_.contains(pos)) {
-            setAllSourcesRouting(2);
+            if (auto* p = apvts.getParameter("filterRoutingMode")) {
+                p->setValueNotifyingHost(0.0f);
+            }
+            if (onFilterStateChanged) onFilterStateChanged();
             repaint();
             return;
         }
         if (parallelBtnRect_.contains(pos)) {
-            setAllSourcesRouting(0);
+            if (auto* p = apvts.getParameter("filterRoutingMode")) {
+                p->setValueNotifyingHost(1.0f);
+            }
+            if (onFilterStateChanged) onFilterStateChanged();
             repaint();
             return;
         }
@@ -477,7 +483,7 @@ private:
         serialBtnRect_   = juce::Rectangle<int>(area.getCentreX() - btnW - 1, btnY, btnW, btnH);
         parallelBtnRect_ = juce::Rectangle<int>(area.getCentreX() + 1, btnY, btnW, btnH);
 
-        const bool isSerial = (params.oscSlots[0].filterRouting == 2);
+        const bool isSerial = (params.filterRoutingMode == 0);
 
         // Serial Button
         g.setColour(isSerial ? theme_.accentPrimary.withAlpha(0.28f) : theme_.bgElevated.withAlpha(0.6f));
@@ -679,15 +685,7 @@ private:
         }
     }
 
-    void setAllSourcesRouting(int route) {
-        auto& apvts = proc_.getAPVTS();
-        for (int i = 1; i <= 8; ++i) {
-            const juce::String prefix = "osc" + juce::String(i) + "_";
-            if (auto* p = apvts.getParameter(prefix + "filterRouting")) {
-                p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(route)));
-            }
-        }
-    }
+
 
     static juce::String getFilterTypeName(int fltNum, int type) {
         if (fltNum == 1) {

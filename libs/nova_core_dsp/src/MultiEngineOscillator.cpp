@@ -517,7 +517,7 @@ void MultiEngineOscillator::updateCoefficients() noexcept {
 
     for (int u = 0; u < kMaxUnison; ++u) {
         const auto idx = static_cast<std::size_t>(u);
-        const float cents = kUnisonDetuneFactors[idx] * detuneAmt * 13.5f + driftOffsetsCents_[idx];
+        const float cents = (kUnisonDetuneFactors[idx] * 13.5f + driftOffsetsCents_[idx]) * detuneAmt;
         unisonPitchMultipliers_[idx] = std::pow(2.0f, cents / 1200.0f);
 
         const float stereoWidth = std::sqrt(detuneAmt);
@@ -1047,13 +1047,13 @@ void MultiEngineOscillator::processSample(float baseFrequencyHz,
             float texR = grainSumR;
 
             switch (model) {
-                case 0: { // Ambient Choir Breath: 3-band human vocal tract formant resonator (/u/ -> /o/ -> /a/ -> /i/)
+                case 0: { // Ambient Choir Breath: gentle acoustic vocal tract formant body (/u/ -> /o/ -> /a/ -> /i/)
                     const float effShape = std::clamp(shape, 0.0f, 1.0f);
                     if (std::abs(effShape - lastFormantShape_) > 0.002f || lastFormantModel_ != 0) {
                         lastFormantShape_ = effShape;
                         lastFormantModel_ = 0;
                         float f1Hz = 320.0f, f2Hz = 800.0f, f3Hz = 2400.0f;
-                        float q1 = 4.0f, q2 = 5.0f, q3 = 3.5f;
+                        float q1 = 1.2f, q2 = 1.4f, q3 = 1.2f;
                         if (effShape < 0.333f) {
                             const float t = effShape / 0.333f;
                             f1Hz = 320.0f + t * (500.0f - 320.0f);
@@ -1064,7 +1064,7 @@ void MultiEngineOscillator::processSample(float baseFrequencyHz,
                             f1Hz = 500.0f + t * (750.0f - 500.0f);
                             f2Hz = 1000.0f + t * (1250.0f - 1000.0f);
                             f3Hz = 2500.0f + t * (2700.0f - 2500.0f);
-                            q1 = 4.0f + t * 0.5f; q2 = 5.0f + t * 0.5f;
+                            q1 = 1.2f + t * 0.2f; q2 = 1.4f + t * 0.2f;
                         } else {
                             const float t = (effShape - 0.667f) / 0.333f;
                             f1Hz = 750.0f + t * (320.0f - 750.0f);
@@ -1085,22 +1085,22 @@ void MultiEngineOscillator::processSample(float baseFrequencyHz,
                     const float f2R = formantFiltersR_[1].processSample(grainSumR);
                     const float f3R = formantFiltersR_[2].processSample(grainSumR);
 
-                    const float formL = f1L * 0.70f + f2L * 0.55f + f3L * 0.35f;
-                    const float formR = f1R * 0.70f + f2R * 0.55f + f3R * 0.35f;
-                    texL = grainSumL * 0.35f + formL * 0.65f;
-                    texR = grainSumR * 0.35f + formR * 0.65f;
+                    const float formL = f1L * 0.45f + f2L * 0.40f + f3L * 0.30f;
+                    const float formR = f1R * 0.45f + f2R * 0.40f + f3R * 0.30f;
+                    texL = (grainSumL * 0.72f + formL * 0.35f) * 1.06f;
+                    texR = (grainSumR * 0.72f + formR * 0.35f) * 1.06f;
                     break;
                 }
-                case 1: { // Bowed Cello: fixed-frequency wood body resonances (110, 220, 440 Hz)
+                case 1: { // Bowed Cello: gentle warm body resonances (110, 220, 440 Hz)
                     if (lastFormantModel_ != 1) {
                         lastFormantModel_ = 1;
                         lastFormantShape_ = -999.0f;
-                        formantFiltersL_[0].setParameters(StateVariableFilter::Type::BandPass, 110.0f, 3.2f);
-                        formantFiltersL_[1].setParameters(StateVariableFilter::Type::BandPass, 220.0f, 3.8f);
-                        formantFiltersL_[2].setParameters(StateVariableFilter::Type::BandPass, 440.0f, 3.5f);
-                        formantFiltersR_[0].setParameters(StateVariableFilter::Type::BandPass, 110.0f, 3.2f);
-                        formantFiltersR_[1].setParameters(StateVariableFilter::Type::BandPass, 220.0f, 3.8f);
-                        formantFiltersR_[2].setParameters(StateVariableFilter::Type::BandPass, 440.0f, 3.5f);
+                        formantFiltersL_[0].setParameters(StateVariableFilter::Type::BandPass, 110.0f, 1.2f);
+                        formantFiltersL_[1].setParameters(StateVariableFilter::Type::BandPass, 220.0f, 1.4f);
+                        formantFiltersL_[2].setParameters(StateVariableFilter::Type::BandPass, 440.0f, 1.3f);
+                        formantFiltersR_[0].setParameters(StateVariableFilter::Type::BandPass, 110.0f, 1.2f);
+                        formantFiltersR_[1].setParameters(StateVariableFilter::Type::BandPass, 220.0f, 1.4f);
+                        formantFiltersR_[2].setParameters(StateVariableFilter::Type::BandPass, 440.0f, 1.3f);
                     }
                     const float f1L = formantFiltersL_[0].processSample(grainSumL);
                     const float f2L = formantFiltersL_[1].processSample(grainSumL);
@@ -1109,10 +1109,10 @@ void MultiEngineOscillator::processSample(float baseFrequencyHz,
                     const float f2R = formantFiltersR_[1].processSample(grainSumR);
                     const float f3R = formantFiltersR_[2].processSample(grainSumR);
 
-                    const float woodL = f1L * 0.60f + f2L * 0.50f + f3L * 0.35f;
-                    const float woodR = f1R * 0.60f + f2R * 0.50f + f3R * 0.35f;
-                    texL = grainSumL * 0.40f + woodL * 0.55f;
-                    texR = grainSumR * 0.40f + woodR * 0.55f;
+                    const float woodL = f1L * 0.45f + f2L * 0.35f + f3L * 0.25f;
+                    const float woodR = f1R * 0.45f + f2R * 0.35f + f3R * 0.25f;
+                    texL = grainSumL * 0.70f + woodL * 0.30f;
+                    texR = grainSumR * 0.70f + woodR * 0.30f;
                     break;
                 }
                 case 2: { // Tape Halo: warm Mellotron saturation

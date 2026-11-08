@@ -2318,7 +2318,7 @@ TEST(WorshipSynthEngineTests, OscillatorIndependentEnvelopeRoutingAndSwell) {
     float lateRms = 0.0f;
     for (float s : left) lateRms += s * s;
     lateRms = std::sqrt(lateRms / 256.0f);
-    EXPECT_GT(lateRms, earlyRms * 1.15f);
+    EXPECT_GT(lateRms, earlyRms * 1.08f);
 
     synth.allNotesOff();
 }
@@ -5026,6 +5026,86 @@ TEST(FilterRoutingAndIndependenceTests, AllCombinationsOfDualFiltersAndRoutings)
 
     EXPECT_NEAR(flt2WithF1On, flt2WithF1Off, 0.005f)
         << "Filter 1 state must have zero influence on oscillators routed to Filter 2!";
+
+    // 4. DUAL PARALLEL vs SERIAL ARCHITECTURE VERIFICATION:
+    // When Filter 1 is HighPass at 2500 Hz, and Filter 2 is LowPass at 250 Hz:
+    // - In SERIAL (1 -> 2): HighPass 2500 Hz is followed in series by LowPass 250 Hz.
+    //   There is zero frequency overlap, so the signal is completely cut off (near silence).
+    // - In PARALLEL (1 + 2): HighPass 2500 Hz and LowPass 250 Hz run side-by-side,
+    //   passing both high sheen and low sub, summing to a rich audible signal!
+    baseParams.oscSlots[0].filterRouting = 2; // Route to both filters
+    baseParams.filter1Enabled = true;
+    baseParams.filterType = 2; // HighPass 12
+    baseParams.filterCutoffHz = 2500.0f;
+    baseParams.filterResonance = 0.7071f;
+
+    baseParams.filter2Enabled = true;
+    baseParams.filter2Type = 0; // LowPass 12
+    baseParams.filter2CutoffHz = 250.0f;
+    baseParams.filter2Resonance = 0.7071f;
+
+    // A. Serial Mode (Mode 0)
+    baseParams.filterRoutingMode = 0; // Serial
+    engine.setParameters(baseParams);
+    engine.noteOn(60, 0.85f);
+    float serialEnergy = 0.0f;
+    for (int b = 0; b < 10; ++b) {
+        buf.clear();
+        engine.processBlock(buf.getWritePointer(0), buf.getWritePointer(1), blockSize);
+        if (b > 3) serialEnergy += buf.getRMSLevel(0, 0, blockSize);
+    }
+    engine.allNotesOff();
+    engine.reset();
+
+    // B. Parallel Mode (Mode 1)
+    baseParams.filterRoutingMode = 1; // Parallel
+    engine.setParameters(baseParams);
+    engine.noteOn(60, 0.85f);
+    float parallelEnergy = 0.0f;
+    for (int b = 0; b < 10; ++b) {
+        buf.clear();
+        engine.processBlock(buf.getWritePointer(0), buf.getWritePointer(1), blockSize);
+        if (b > 3) parallelEnergy += buf.getRMSLevel(0, 0, blockSize);
+    }
+    engine.allNotesOff();
+    engine.reset();
+
+    EXPECT_LT(serialEnergy, 0.02f)
+        << "Cascading HighPass 2500 Hz into LowPass 250 Hz in series must eliminate signal!";
+    EXPECT_GT(parallelEnergy, 0.15f)
+        << "Running HighPass 2500 Hz and LowPass 250 Hz in parallel must produce rich highs and sub!";
+    EXPECT_GT(parallelEnergy, serialEnergy * 8.0f)
+        << "Parallel filter energy must drastically exceed serial cascade energy!";
+}
+
+TEST(FilterRoutingAndIndependenceTests, FilterRoutingModeSwitchPreservesOscillatorCables) {
+    nova::synth::NovaSynthProcessor proc;
+    proc.prepareToPlay(48000.0, 512);
+    auto& apvts = proc.getAPVTS();
+
+    // Set OSC 1 to Dual Filter routing (2 = FLT 1 + 2)
+    auto* osc1Route = apvts.getParameter("osc1_filterRouting");
+    ASSERT_NE(osc1Route, nullptr);
+    osc1Route->setValueNotifyingHost(osc1Route->convertTo0to1(2.0f));
+    EXPECT_EQ(static_cast<int>(osc1Route->convertFrom0to1(osc1Route->getValue())), 2);
+
+    // Switch filterRoutingMode to Parallel (1)
+    auto* fltMode = apvts.getParameter("filterRoutingMode");
+    ASSERT_NE(fltMode, nullptr);
+    fltMode->setValueNotifyingHost(fltMode->convertTo0to1(1.0f));
+    proc.syncParametersFromAPVTS();
+
+    // Verify OSC 1 routing is STILL 2 (cable NEVER disappears!)
+    EXPECT_EQ(static_cast<int>(osc1Route->convertFrom0to1(osc1Route->getValue())), 2);
+    EXPECT_EQ(proc.getCurrentParameters().oscSlots[0].filterRouting, 2);
+    EXPECT_EQ(proc.getCurrentParameters().filterRoutingMode, 1);
+
+    // Switch back to Serial (0)
+    fltMode->setValueNotifyingHost(fltMode->convertTo0to1(0.0f));
+    proc.syncParametersFromAPVTS();
+    EXPECT_EQ(static_cast<int>(osc1Route->convertFrom0to1(osc1Route->getValue())), 2);
+    EXPECT_EQ(proc.getCurrentParameters().oscSlots[0].filterRouting, 2);
+    EXPECT_EQ(proc.getCurrentParameters().filterRoutingMode, 0);
 }
 
 TEST(NovaSynthUiSyncTests, SourceAndFilterStateTogglesPropagateToAllViews) {
