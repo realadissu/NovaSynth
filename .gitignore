@@ -12,6 +12,7 @@ external/
 .idea/
 .cache/
 compile_commands.json
+libs/nova_core_dsp/src/SampleBankData.cpp
 
 # Coverage & Test artifacts
 *.gcda

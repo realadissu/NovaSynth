@@ -96,6 +96,12 @@ private:
 
     void updateCoefficients() noexcept;
 
+    void processOrganicTexture(float slotFreq, float shape, float invSr, float& sigL, float& sigR) noexcept;
+    void processPhysicalPluck(float slotFreq, float shape, float invSr, float& sigL, float& sigR) noexcept;
+    void processSubOscillator(float slotFreq, float shape, float invSr, float& sigL, float& sigR) noexcept;
+    void processNoiseTransient(float shape, float invSr, float& sigL, float& sigR) noexcept;
+    void processSamplePlayback(float slotFreq, float& sigL, float& sigR) noexcept;
+
     double sampleRate_ = 48000.0;
     Parameters params_{};
     OnePoleSmoother shapeSmoother_{};

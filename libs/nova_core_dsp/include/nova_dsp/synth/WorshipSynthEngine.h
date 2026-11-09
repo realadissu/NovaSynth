@@ -173,16 +173,12 @@ public:
         float arpSwing    = 0.0f;   // 0.0 to 0.75
         int   arpPatternLength = 16; // 16, 32, or 64 steps
         static constexpr int kMaxArpSteps = 64;
-        std::array<bool, kMaxArpSteps>  arpStepGates = [] {
-            std::array<bool, kMaxArpSteps> arr{};
-            arr.fill(true);
-            return arr;
+        std::array<bool, kMaxArpSteps> arpStepGates = [] {
+            std::array<bool, kMaxArpSteps> arr{}; arr.fill(true); return arr;
         }();
         std::array<float, kMaxArpSteps> arpStepVelocities = [] {
             std::array<float, kMaxArpSteps> arr{};
-            for (std::size_t i = 0; i < kMaxArpSteps; ++i) {
-                arr[i] = (i % 4 == 0) ? 0.95f : ((i % 2 == 0) ? 0.80f : 0.65f);
-            }
+            for (std::size_t i = 0; i < kMaxArpSteps; ++i) arr[i] = (i % 4 == 0) ? 0.95f : ((i % 2 == 0) ? 0.80f : 0.65f);
             return arr;
         }();
 
@@ -324,6 +320,7 @@ private:
     void startVoice(int midiNote, float velocity, bool isDrone = false, bool isArp = false) noexcept;
     void updateDroneVoices() noexcept;
     void stepArpeggiator(int numSamples) noexcept;
+    void processMasterEffectsChain(float* outLeft, float* outRight, int numSamples) noexcept;
 
     double sampleRate_ = 48000.0;
     Parameters params_{};

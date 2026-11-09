@@ -79,6 +79,7 @@ public:
     }
 
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+    static void appendModulationAndFxParameters(std::vector<std::unique_ptr<juce::RangedAudioParameter>>& params);
 
     void syncParametersFromAPVTS() noexcept;
 
