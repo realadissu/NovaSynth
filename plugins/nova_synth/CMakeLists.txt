@@ -32,6 +32,9 @@ nova_add_audio_plugin(NovaSynth
         src/ui/JornaBottomFooterBar.cpp
         src/ui/NovaSynthWorkspacePage.h
         src/ui/NovaSynthWorkspacePage.cpp
+        src/ui/StandaloneKeyboardBar.h
+        src/ui/StandaloneKeyboardBar.cpp
+        src/ui/StandaloneKeyboardBarDrawing.cpp
         src/ui/NovaSynthUiHelpers.h
         src/ui/NovaSynthUiHelpers.cpp
         src/ui/JornaSourcesColumn.h
