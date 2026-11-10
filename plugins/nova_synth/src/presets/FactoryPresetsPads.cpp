@@ -1,10 +1,44 @@
 #include "FactoryPresets.h"
 #include "nova_plugin/PresetManager.h"
+#include "nova_dsp/synth/WorshipSynthEngine.h"
 
 namespace nova::synth {
 
 void registerFactoryPresetsPads(nova::plugin::PresetManager& presetManager_) {
     using nova::plugin::PresetEntry;
+    using Src = nova::dsp::ModMatrix::Source;
+    using Dst = nova::dsp::ModMatrix::Destination;
+    auto ms = [](Src s, Dst d, float amt) noexcept -> nova::plugin::PresetModSlot {
+        return { static_cast<int>(s), static_cast<int>(d), amt, true };
+    };
+
+    // =========================================================================
+    // 0. SUNDAY PIANO FOUNDATION (Primary Default Worship Pad)
+    // =========================================================================
+
+    // 1. Sunday Piano Foundation
+    presetManager_.registerFactoryPreset(PresetEntry{
+        "Sunday Piano Foundation", "Worship Pads",
+        "Warm analog velvet pad layered with deep sub-bass and active vocal-carve pocket. Transparent low foundation designed specifically to sit under acoustic piano without clashing.",
+        {"Worship", "Piano", "Pad", "Warm", "Foundation"},
+        {{"activeOscCount", 3.0f},
+         {"osc1_enabled", 1.0f}, {"osc1_sourceType", 0.0f}, {"osc1_engine", 0.0f}, {"osc1_model", 6.0f}, {"osc1_octave", 0.0f}, {"osc1_shape", 0.22f}, {"osc1_detune", 0.18f}, {"osc1_scatter", 0.0f}, {"osc1_warp", 0.0f}, {"osc1_filterRouting", 2.0f}, {"osc1_level", 0.60f},
+         {"osc2_enabled", 1.0f}, {"osc2_sourceType", 0.0f}, {"osc2_engine", 0.0f}, {"osc2_model", 2.0f}, {"osc2_octave", 0.0f}, {"osc2_shape", 0.10f}, {"osc2_detune", 0.15f}, {"osc2_scatter", 0.0f}, {"osc2_warp", 0.0f}, {"osc2_filterRouting", 2.0f}, {"osc2_level", 0.40f},
+         {"osc3_enabled", 1.0f}, {"osc3_sourceType", 1.0f}, {"osc3_engine", 4.0f}, {"osc3_model", 0.0f}, {"osc3_octave", -1.0f}, {"osc3_shape", 0.0f}, {"osc3_detune", 0.0f}, {"osc3_lowestNoteOnly", 1.0f}, {"osc3_filterRouting", 2.0f}, {"osc3_level", 0.45f},
+         {"osc4_enabled", 0.0f}, {"osc5_enabled", 0.0f}, {"osc6_enabled", 0.0f}, {"osc7_enabled", 0.0f}, {"osc8_enabled", 0.0f},
+         {"filter1Enabled", 1.0f}, {"filterType", 0.0f}, {"filterCutoffHz", 460.0f}, {"filterResonance", 0.30f}, {"filterEnvAmount", 0.0f}, {"filterDrive", 0.0f},
+         {"filter2Enabled", 1.0f}, {"filter2Type", 3.0f}, {"filter2CutoffHz", 720.0f}, {"filter2Resonance", 0.25f}, {"vocalCarve", 0.65f},
+         {"filterRoutingMode", 0.0f},
+         {"ampAttack", 0.35f}, {"ampDecay", 2.0f}, {"ampSustain", 0.95f}, {"ampRelease", 1.50f},
+         {"fltAttack", 0.50f}, {"fltDecay", 2.0f}, {"fltSustain", 0.70f}, {"fltRelease", 1.50f},
+         {"macroWarmth", 0.65f}, {"macroMotion", 0.15f}, {"macroShimmer", 0.0f}, {"macroAir", 0.15f},
+         {"chorusEnabled", 1.0f}, {"chorusMix", 0.30f}, {"chorusRateHz", 0.40f}, {"chorusDepth", 0.32f}, {"chorusWarmth", 0.80f},
+         {"delayEnabled", 0.0f},
+         {"reverbMix", 0.42f}, {"reverbDry", 1.0f}, {"reverbDecay", 3.8f}, {"reverbShimmer", 0.0f}, {"reverbDucking", 0.35f},
+         {"droneEnabled", 0.0f}, {"arpEnabled", 0.0f}, {"subLowestOnly", 1.0f}},
+        {ms(Src::ModWheel, Dst::FilterCutoff, 0.48f),
+         ms(Src::ModWheel, Dst::VocalCarve, 0.35f)}
+    });
 
     // =========================================================================
     // 1. SHIMMER & CELESTIAL
