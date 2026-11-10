@@ -5,6 +5,7 @@ add_library(nova_core_ui STATIC
     src/ArcKnob.cpp
     src/SectionDeck.cpp
     src/PluginShell.cpp
+    src/PluginShellToolbar.cpp
 )
 
 target_include_directories(nova_core_ui PUBLIC

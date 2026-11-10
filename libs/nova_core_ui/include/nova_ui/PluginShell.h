@@ -65,6 +65,7 @@ public:
 
 private:
     void timerCallback() override;
+    void setupToolbarButtons();
     void openPresetPopupMenu();
     void openSettingsPopupMenu();
     void updateABButtons();
