@@ -65,6 +65,9 @@ nova_add_audio_plugin(NovaSynth
         src/ui/ArpeggiatorHubPanel.h
         src/ui/ArpeggiatorHubPanel.cpp
         src/ui/ArpeggiatorHubPanelDrawing.cpp
+        src/ui/DroneHubPanel.h
+        src/ui/DroneHubPanel.cpp
+        src/ui/DroneHubPanelDrawing.cpp
         src/ui/ModulationHubPanel.h
         src/ui/ModulationHubPanel.cpp
         src/ui/ModulationHubPanelDrawing.cpp
