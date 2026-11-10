@@ -71,11 +71,10 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
     float lastEnvVal = 0.0f, lastCutoffModOct = 0.0f, lastCutoff2ModOct = 0.0f;
     float lastResoMod = 0.0f, lastReso2Mod = 0.0f;
 
-    modMatrix_.setSourceValue(ModMatrix::Source::ModWheel,     modWheel_);
-    modMatrix_.setSourceValue(ModMatrix::Source::MacroWarmth,  params_.macroWarmth);
-    modMatrix_.setSourceValue(ModMatrix::Source::MacroMotion,  params_.macroMotion);
-    modMatrix_.setSourceValue(ModMatrix::Source::MacroShimmer, params_.macroShimmer);
-    modMatrix_.setSourceValue(ModMatrix::Source::MacroAir,     params_.macroAir);
+    modMatrix_.setSourceValue(ModMatrix::Source::ModWheel, modWheel_);
+    modMatrix_.setSourceValue(ModMatrix::Source::MacroWarmth, params_.macroWarmth);
+    modMatrix_.setSourceValue(ModMatrix::Source::MacroMotion, params_.macroMotion);
+    modMatrix_.setSourceValue(ModMatrix::Source::MacroShimmer, params_.macroShimmer); modMatrix_.setSourceValue(ModMatrix::Source::MacroAir, params_.macroAir);
 
     int lowestKeyNote = 128;
     for (const auto& v : voices_) {
@@ -150,10 +149,8 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
             const float masterGain = masterGainSmoother_.getNextValue(), polyHeadroom = polyHeadroomSmoother_.getNextValue();
 
             if ((s & 7) == 0) {
-                modMatrix_.setSourceValue(ModMatrix::Source::Lfo1, lfo1Val);
-                modMatrix_.setSourceValue(ModMatrix::Source::Lfo2, lfo2Val);
-                modMatrix_.setSourceValue(ModMatrix::Source::Lfo3, lfo3Val);
-                modMatrix_.setSourceValue(ModMatrix::Source::Lfo4, lfo4Val);
+                modMatrix_.setSourceValue(ModMatrix::Source::Lfo1, lfo1Val); modMatrix_.setSourceValue(ModMatrix::Source::Lfo2, lfo2Val);
+                modMatrix_.setSourceValue(ModMatrix::Source::Lfo3, lfo3Val); modMatrix_.setSourceValue(ModMatrix::Source::Lfo4, lfo4Val);
                 modMatrix_.evaluate();
 
                 const float lfo1RMod = modMatrix_.getModulationOffset(ModMatrix::Destination::Lfo1Rate);
@@ -183,10 +180,8 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
             const float cutoffModOctaves = modMatrix_.getModulationOffset(ModMatrix::Destination::FilterCutoff) * 3.6f;
             const float filterResoMod = modMatrix_.getModulationOffset(ModMatrix::Destination::FilterResonance) * 0.5f;
             const float vocalCarveMod = modMatrix_.getModulationOffset(ModMatrix::Destination::VocalCarve);
-            lastCutoffModOct = cutoffModOctaves;
-            lastCutoff2ModOct = modMatrix_.getModulationOffset(ModMatrix::Destination::Filter2Cutoff) * 3.6f;
-            lastResoMod = filterResoMod;
-            lastReso2Mod = modMatrix_.getModulationOffset(ModMatrix::Destination::Filter2Resonance) * 0.5f;
+            lastCutoffModOct = cutoffModOctaves; lastCutoff2ModOct = modMatrix_.getModulationOffset(ModMatrix::Destination::Filter2Cutoff) * 3.6f;
+            lastResoMod = filterResoMod; lastReso2Mod = modMatrix_.getModulationOffset(ModMatrix::Destination::Filter2Resonance) * 0.5f;
 
             float synthL = 0.0f, synthR = 0.0f;
             float droneL = 0.0f, droneR = 0.0f;
@@ -264,6 +259,7 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
                     const float voiceCutMod = voiceOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::FilterCutoff)] * 3.6f;
                     const float effReso = std::clamp(params_.filterResonance + voiceResoMod, 0.35f, 6.0f);
                     const bool isFourPoleLadder = (params_.filterType == 0 || params_.filterType == 2);
+                    const bool antiHowl = (params_.filterResonance <= 0.25f);
 
                     if ((s & 15) == 0) {
                         const float envOctaves = fltEnvVal * params_.filterEnvAmount * 2.1f;
@@ -273,15 +269,18 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
                         else if (params_.filterType == 2) svfType = StateVariableFilter::Type::HighPass;
 
                         if (isFourPoleLadder) {
-                            const float stageQ = std::clamp(std::sqrt(effReso), 0.50f, 2.45f);
+                            const float maxQ = antiHowl ? 0.60f : 2.45f;
+                            const float stageQ = std::clamp(std::sqrt(effReso), 0.50f, maxQ);
                             const float cutStage2 = std::clamp(voiceCutoff * 1.03f, 40.0f, static_cast<float>(sampleRate_ * 0.46));
                             v.filterL.setParameters(svfType, voiceCutoff, stageQ);
                             v.filterR.setParameters(svfType, voiceCutoff, stageQ);
                             v.filterStage2L.setParameters(svfType, cutStage2, stageQ);
                             v.filterStage2R.setParameters(svfType, cutStage2, stageQ);
                         } else {
-                            v.filterL.setParameters(svfType, voiceCutoff, effReso);
-                            v.filterR.setParameters(svfType, voiceCutoff, effReso);
+                            const float maxQ = antiHowl ? 0.60f : 6.0f;
+                            const float svfQ = std::clamp(effReso, 0.35f, maxQ);
+                            v.filterL.setParameters(svfType, voiceCutoff, svfQ);
+                            v.filterR.setParameters(svfType, voiceCutoff, svfQ);
                         }
                         v.flt1ResComp = 1.0f / std::sqrt(1.0f + 0.35f * std::max(0.0f, effReso - 0.707f));
                     }
@@ -311,19 +310,26 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
                     const float voiceResoMod2 = voiceOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::Filter2Resonance)] * 0.5f;
                     const float voiceCutMod2 = voiceOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::Filter2Cutoff)] * 3.6f;
                     const float effReso2 = std::clamp(params_.filter2Resonance + voiceResoMod2, 0.35f, 6.0f);
+                    const bool antiHowl2 = (params_.filter2Resonance <= 0.25f);
                     if ((s & 15) == 0) {
                         const float envOctaves2 = fltEnvVal * params_.filter2EnvAmount * 2.1f;
                         const float voiceCutoff2 = std::clamp(baseCutoff2 * std::exp2(envOctaves2 + voiceCutMod2), 40.0f, static_cast<float>(sampleRate_ * 0.46));
                         auto svf2Type = StateVariableFilter::Type::LowPass;
-                        float bellGainDb = 0.0f;
+                        float bellGainDb = 0.0f, f2Q = effReso2, f2Cutoff = voiceCutoff2;
                         if (params_.filter2Type == 1) svf2Type = StateVariableFilter::Type::BandPass;
                         else if (params_.filter2Type == 2) svf2Type = StateVariableFilter::Type::HighPass;
                         else if (params_.filter2Type == 3) {
                             svf2Type = StateVariableFilter::Type::Bell;
-                            bellGainDb = -12.0f * std::clamp(params_.vocalCarve + vocalCarveMod, 0.0f, 1.0f);
+                            const float cutoffOpen = (baseCutoff > 800.0f) ? std::clamp((baseCutoff - 800.0f) / 3200.0f, 0.0f, 1.0f) : 0.0f;
+                            const float swellBoost = cutoffOpen * (0.35f + 0.65f * std::max(modWheel_, 1.0f - params_.macroWarmth));
+                            const float effCarve = std::clamp(params_.vocalCarve + vocalCarveMod + swellBoost * 0.45f, 0.0f, 1.0f);
+                            bellGainDb = -14.0f * effCarve;
+                            f2Q = 0.88f; // Covers 450 Hz to 1200 Hz pocket
+                            f2Cutoff = (params_.filter2CutoffHz >= 450.0f && params_.filter2CutoffHz <= 1200.0f) ? voiceCutoff2 : 720.0f;
                         }
-                        v.filter2L.setParameters(svf2Type, voiceCutoff2, effReso2, bellGainDb);
-                        v.filter2R.setParameters(svf2Type, voiceCutoff2, effReso2, bellGainDb);
+                        if (params_.filter2Type != 3 && antiHowl2) f2Q = std::clamp(f2Q, 0.35f, 0.60f);
+                        v.filter2L.setParameters(svf2Type, f2Cutoff, f2Q, bellGainDb);
+                        v.filter2R.setParameters(svf2Type, f2Cutoff, f2Q, bellGainDb);
                         v.flt2ResComp = 1.0f / std::sqrt(1.0f + 0.30f * std::max(0.0f, effReso2 - 0.707f));
                     }
 
@@ -376,10 +382,8 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
         }
     }
 
-    telemetryLfo1_.store(lastLfo1, std::memory_order_relaxed);
-    telemetryLfo2_.store(lastLfo2, std::memory_order_relaxed);
-    telemetryLfo3_.store(lastLfo3, std::memory_order_relaxed);
-    telemetryLfo4_.store(lastLfo4, std::memory_order_relaxed);
+    telemetryLfo1_.store(lastLfo1, std::memory_order_relaxed); telemetryLfo2_.store(lastLfo2, std::memory_order_relaxed);
+    telemetryLfo3_.store(lastLfo3, std::memory_order_relaxed); telemetryLfo4_.store(lastLfo4, std::memory_order_relaxed);
     telemetryFilterCutoffMod_.store(lastCutoffModOct, std::memory_order_relaxed);
     telemetryFilter2CutoffMod_.store(lastCutoff2ModOct, std::memory_order_relaxed);
     telemetryFilterResoMod_.store(lastResoMod, std::memory_order_relaxed);

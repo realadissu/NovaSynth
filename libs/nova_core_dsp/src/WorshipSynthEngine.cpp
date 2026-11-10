@@ -41,6 +41,8 @@ WorshipSynthEngine::WorshipSynthEngine() {
     modMatrix_.setSlot(1, ModMatrix::Source::Lfo2,        ModMatrix::Destination::Osc1Shape,    0.25f, true);
     modMatrix_.setSlot(2, ModMatrix::Source::MacroMotion, ModMatrix::Destination::Osc2Shape,    0.40f, true);
     modMatrix_.setSlot(3, ModMatrix::Source::MacroWarmth, ModMatrix::Destination::FilterCutoff, -0.35f, true);
+    modMatrix_.setSlot(4, ModMatrix::Source::MacroWarmth, ModMatrix::Destination::VocalCarve,   -0.30f, true);
+    modMatrix_.setSlot(5, ModMatrix::Source::ModWheel,    ModMatrix::Destination::VocalCarve,    0.35f, true);
 }
 
 void WorshipSynthEngine::prepare(double sampleRate, int maxBlockSize) {
@@ -55,10 +57,8 @@ void WorshipSynthEngine::prepare(double sampleRate, int maxBlockSize) {
         v.filter2L.prepare(sampleRate_); v.filter2R.prepare(sampleRate_);
     }
 
-    lfo1_.prepare(sampleRate_);
-    lfo2_.prepare(sampleRate_);
-    lfo3_.prepare(sampleRate_);
-    lfo4_.prepare(sampleRate_);
+    lfo1_.prepare(sampleRate_); lfo2_.prepare(sampleRate_);
+    lfo3_.prepare(sampleRate_); lfo4_.prepare(sampleRate_);
     chorus_.prepare(sampleRate_);
     reverb_.prepare(sampleRate_, maxBlockSize);
 
@@ -68,14 +68,10 @@ void WorshipSynthEngine::prepare(double sampleRate, int maxBlockSize) {
     delayWritePos_ = 0;
     delayEnergy_ = 0.0f;
 
-    cutoffSmoother_.prepare(sampleRate_, 12.0f);
-    cutoff2Smoother_.prepare(sampleRate_, 12.0f);
-    masterGainSmoother_.prepare(sampleRate_, 12.0f);
-    polyHeadroomSmoother_.prepare(sampleRate_, 25.0f);
-    polyHeadroomSmoother_.reset(1.0f);
-    droneToneSmoother_.prepare(sampleRate_, 15.0f);
-    droneFilterL_.prepare(sampleRate_);
-    droneFilterR_.prepare(sampleRate_);
+    cutoffSmoother_.prepare(sampleRate_, 12.0f);   cutoff2Smoother_.prepare(sampleRate_, 12.0f);
+    masterGainSmoother_.prepare(sampleRate_, 12.0f); polyHeadroomSmoother_.prepare(sampleRate_, 25.0f);
+    polyHeadroomSmoother_.reset(1.0f);               droneToneSmoother_.prepare(sampleRate_, 15.0f);
+    droneFilterL_.prepare(sampleRate_);             droneFilterR_.prepare(sampleRate_);
 
     const std::size_t maxBlock = static_cast<std::size_t>(std::max(maxBlockSize, 2048));
     droneBufferL_.assign(maxBlock, 0.0f);
@@ -121,10 +117,8 @@ void WorshipSynthEngine::reset() noexcept {
 }
 
 void WorshipSynthEngine::snapSmoothersToTarget() noexcept {
-    cutoffSmoother_.snapToTarget();
-    cutoff2Smoother_.snapToTarget();
-    masterGainSmoother_.snapToTarget();
-    droneToneSmoother_.snapToTarget();
+    cutoffSmoother_.snapToTarget();   cutoff2Smoother_.snapToTarget();
+    masterGainSmoother_.snapToTarget(); droneToneSmoother_.snapToTarget();
     polyHeadroomSmoother_.reset(1.0f);
 }
 
@@ -183,8 +177,10 @@ void WorshipSynthEngine::setParameters(const Parameters& params) noexcept {
     revParams.shimmerFifth     = 0.0f;
     revParams.shimmerLowCutHz  = 540.0f;
     revParams.shimmerHighCutHz = 10500.0f;
+    const float cutoffOpen = (targetCutoff > 800.0f) ? std::clamp((targetCutoff - 800.0f) / 3200.0f, 0.0f, 1.0f) : 0.0f;
+    const float coupledCarve = std::clamp(params_.vocalCarve + cutoffOpen * (1.0f - params_.macroWarmth) * 0.40f, 0.0f, 1.0f);
     revParams.ducking          = std::clamp(params_.reverbDucking, 0.0f, 1.0f);
-    revParams.vocalCarve       = params_.vocalCarve;
+    revParams.vocalCarve       = coupledCarve;
     revParams.freeze           = params_.reverbFreeze;
     reverb_.setParameters(revParams);
 
@@ -316,12 +312,16 @@ void WorshipSynthEngine::processMasterEffectsChain(float* outLeft, float* outRig
 
     const float revMod = modMatrix_.getModulationOffset(ModMatrix::Destination::ReverbMix);
     const float shimMod = modMatrix_.getModulationOffset(ModMatrix::Destination::ShimmerAmount);
-    if (std::abs(revMod) > 0.001f || std::abs(shimMod) > 0.001f) {
+    const float vcMod = modMatrix_.getModulationOffset(ModMatrix::Destination::VocalCarve);
+    if (std::abs(revMod) > 0.001f || std::abs(shimMod) > 0.001f || std::abs(vcMod) > 0.001f) {
         auto revParams = reverb_.getParameters();
         revParams.mix = std::clamp(params_.reverbMix + params_.macroShimmer * 0.25f + revMod, 0.0f, 1.0f);
         revParams.shimmerOctave = std::clamp(params_.reverbShimmer + params_.macroShimmer * 0.50f + shimMod, 0.0f, 1.0f);
         revParams.shimmerLowCutHz = 540.0f;
         revParams.shimmerHighCutHz = 10500.0f;
+        const float cCut = cutoffSmoother_.getCurrentValue();
+        const float cOpen = (cCut > 800.0f) ? std::clamp((cCut - 800.0f) / 3200.0f, 0.0f, 1.0f) : 0.0f;
+        revParams.vocalCarve = std::clamp(params_.vocalCarve + vcMod + cOpen * (0.35f + 0.65f * std::max(modWheel_, 1.0f - params_.macroWarmth)) * 0.40f, 0.0f, 1.0f);
         reverb_.setParameters(revParams);
     }
 

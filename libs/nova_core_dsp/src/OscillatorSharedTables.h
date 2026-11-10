@@ -31,14 +31,14 @@ struct SharedWavetableBank {
                 float s0 = 0.0f;
                 for (int h = 1; h <= 8; ++h) {
                     const float fh = static_cast<float>(h);
-                    s0 += (1.0f / std::pow(fh, 1.10f)) * std::sin(fh * w + dispPhase(h));
+                    s0 += (1.0f / std::pow(fh, 1.20f)) * std::sin(fh * w + dispPhase(h));
                 }
                 tables[0][0][static_cast<std::size_t>(i)] = s0;
 
                 float s1 = 0.0f;
                 for (int h = 1; h <= 16; ++h) {
                     const float fh = static_cast<float>(h);
-                    const float amp = (1.0f / std::pow(fh, 0.98f)) * (1.0f + 0.20f * std::cos(fh * 0.9f));
+                    const float amp = (1.0f / std::pow(fh, 1.20f)) * (1.0f + 0.12f * std::cos(fh * 0.9f));
                     s1 += amp * std::sin(fh * w + dispPhase(h));
                 }
                 tables[0][1][static_cast<std::size_t>(i)] = s1;
@@ -46,7 +46,7 @@ struct SharedWavetableBank {
                 float s2 = 0.0f;
                 for (int h = 1; h <= 24; ++h) {
                     const float fh = static_cast<float>(h);
-                    const float amp = (1.0f / std::pow(fh, 0.92f)) * (1.0f + 0.25f * std::cos(fh * 1.2f));
+                    const float amp = (1.0f / std::pow(fh, 1.15f)) * (1.0f + 0.15f * std::cos(fh * 1.2f));
                     s2 += amp * std::sin(fh * w + dispPhase(h));
                 }
                 tables[0][2][static_cast<std::size_t>(i)] = s2;
@@ -54,7 +54,7 @@ struct SharedWavetableBank {
                 float s3 = 0.0f;
                 for (int h = 1; h <= 36; ++h) {
                     const float fh = static_cast<float>(h);
-                    const float amp = (1.0f / std::pow(fh, 0.85f)) * (1.0f + 0.20f * std::sin(fh * 1.5f));
+                    const float amp = (1.0f / std::pow(fh, 1.10f)) * (1.0f + 0.12f * std::sin(fh * 1.5f));
                     s3 += amp * std::sin(fh * w + dispPhase(h));
                 }
                 tables[0][3][static_cast<std::size_t>(i)] = s3;
@@ -74,7 +74,7 @@ struct SharedWavetableBank {
                 float s0 = 0.0f;
                 for (int h = 1; h <= 8; ++h) {
                     const float fh = static_cast<float>(h);
-                    const float amp = (1.0f / fh) * (1.0f + 0.40f * std::exp(-0.80f * (fh - 3.0f) * (fh - 3.0f)));
+                    const float amp = (1.0f / std::pow(fh, 1.20f)) * (1.0f + 0.12f * std::exp(-1.50f * (fh - 3.0f) * (fh - 3.0f)));
                     s0 += amp * std::sin(fh * w + dispPhase(h));
                 }
                 tables[2][0][static_cast<std::size_t>(i)] = s0;
@@ -82,17 +82,17 @@ struct SharedWavetableBank {
                 float s1 = 0.0f;
                 for (int h = 1; h <= 16; ++h) {
                     const float fh = static_cast<float>(h);
-                    const float f1 = 0.45f * std::exp(-0.40f * (fh - 3.5f) * (fh - 3.5f));
-                    const float f2 = 0.25f * std::exp(-0.30f * (fh - 8.5f) * (fh - 8.5f));
-                    s1 += ((1.0f / fh) + f1 + f2) * std::sin(fh * w + dispPhase(h));
+                    const float f1 = 0.14f * std::exp(-0.80f * (fh - 3.5f) * (fh - 3.5f));
+                    const float f2 = 0.08f * std::exp(-0.60f * (fh - 8.5f) * (fh - 8.5f));
+                    s1 += ((1.0f / std::pow(fh, 1.20f)) + f1 + f2) * std::sin(fh * w + dispPhase(h));
                 }
                 tables[2][1][static_cast<std::size_t>(i)] = s1;
 
                 float s2 = 0.0f;
                 for (int h = 1; h <= 24; ++h) {
                     const float fh = static_cast<float>(h);
-                    const float body = (1.0f / std::pow(fh, 0.92f));
-                    const float sheen = 0.22f * std::exp(-0.15f * (fh - 16.0f) * (fh - 16.0f));
+                    const float body = (1.0f / std::pow(fh, 1.20f));
+                    const float sheen = 0.12f * std::exp(-0.15f * (fh - 16.0f) * (fh - 16.0f));
                     s2 += (body + sheen) * std::sin(fh * w + dispPhase(h));
                 }
                 tables[2][2][static_cast<std::size_t>(i)] = s2;
@@ -100,8 +100,8 @@ struct SharedWavetableBank {
                 float s3 = 0.0f;
                 for (int h = 1; h <= 32; ++h) {
                     const float fh = static_cast<float>(h);
-                    const float body = (1.0f / std::pow(fh, 0.88f));
-                    const float sheen = 0.35f * std::exp(-0.12f * (fh - 18.0f) * (fh - 18.0f));
+                    const float body = (1.0f / std::pow(fh, 1.20f));
+                    const float sheen = 0.18f * std::exp(-0.12f * (fh - 18.0f) * (fh - 18.0f));
                     s3 += (body + sheen) * std::sin(fh * w + dispPhase(h));
                 }
                 tables[2][3][static_cast<std::size_t>(i)] = s3;
@@ -112,38 +112,38 @@ struct SharedWavetableBank {
                 float s0 = 0.0f;
                 for (int h = 1; h <= 16; ++h) {
                     const float fh = static_cast<float>(h);
-                    const float f1 = 0.90f * std::exp(-1.20f * (fh - 2.0f) * (fh - 2.0f));
-                    const float f2 = 0.50f * std::exp(-0.80f * (fh - 5.0f) * (fh - 5.0f));
-                    s0 += ((h == 1 ? 0.60f : 0.05f) + f1 + f2) * std::sin(fh * w + dispPhase(h));
+                    const float f1 = 0.35f * std::exp(-1.50f * (fh - 2.0f) * (fh - 2.0f));
+                    const float f2 = 0.18f * std::exp(-1.00f * (fh - 5.0f) * (fh - 5.0f));
+                    s0 += ((1.0f / std::pow(fh, 1.20f)) * (h == 1 ? 0.70f : 0.20f) + f1 + f2) * std::sin(fh * w + dispPhase(h));
                 }
                 tables[3][0][static_cast<std::size_t>(i)] = s0;
 
                 float s1 = 0.0f;
                 for (int h = 1; h <= 18; ++h) {
                     const float fh = static_cast<float>(h);
-                    const float f1 = 0.85f * std::exp(-0.90f * (fh - 3.2f) * (fh - 3.2f));
-                    const float f2 = 0.60f * std::exp(-0.60f * (fh - 7.0f) * (fh - 7.0f));
-                    s1 += ((h == 1 ? 0.50f : 0.05f) + f1 + f2) * std::sin(fh * w + dispPhase(h));
+                    const float f1 = 0.30f * std::exp(-1.20f * (fh - 3.2f) * (fh - 3.2f));
+                    const float f2 = 0.20f * std::exp(-0.90f * (fh - 7.0f) * (fh - 7.0f));
+                    s1 += ((1.0f / std::pow(fh, 1.20f)) * (h == 1 ? 0.65f : 0.20f) + f1 + f2) * std::sin(fh * w + dispPhase(h));
                 }
                 tables[3][1][static_cast<std::size_t>(i)] = s1;
 
                 float s2 = 0.0f;
                 for (int h = 1; h <= 22; ++h) {
                     const float fh = static_cast<float>(h);
-                    const float f1 = 0.80f * std::exp(-0.60f * (fh - 5.2f) * (fh - 5.2f));
-                    const float f2 = 0.70f * std::exp(-0.40f * (fh - 9.0f) * (fh - 9.0f));
-                    const float f3 = 0.35f * std::exp(-0.30f * (fh - 16.0f) * (fh - 16.0f));
-                    s2 += ((h == 1 ? 0.40f : 0.05f) + f1 + f2 + f3) * std::sin(fh * w + dispPhase(h));
+                    const float f1 = 0.25f * std::exp(-0.90f * (fh - 5.2f) * (fh - 5.2f));
+                    const float f2 = 0.22f * std::exp(-0.60f * (fh - 9.0f) * (fh - 9.0f));
+                    const float f3 = 0.15f * std::exp(-0.35f * (fh - 16.0f) * (fh - 16.0f));
+                    s2 += ((1.0f / std::pow(fh, 1.20f)) * (h == 1 ? 0.60f : 0.20f) + f1 + f2 + f3) * std::sin(fh * w + dispPhase(h));
                 }
                 tables[3][2][static_cast<std::size_t>(i)] = s2;
 
                 float s3 = 0.0f;
                 for (int h = 1; h <= 24; ++h) {
                     const float fh = static_cast<float>(h);
-                    const float f1 = 0.75f * std::exp(-1.00f * (fh - 2.2f) * (fh - 2.2f));
-                    const float f2 = 0.85f * std::exp(-0.25f * (fh - 15.0f) * (fh - 15.0f));
-                    const float f3 = 0.55f * std::exp(-0.20f * (fh - 20.0f) * (fh - 20.0f));
-                    s3 += ((h == 1 ? 0.35f : 0.04f) + f1 + f2 + f3) * std::sin(fh * w + dispPhase(h));
+                    const float f1 = 0.25f * std::exp(-1.20f * (fh - 2.2f) * (fh - 2.2f));
+                    const float f2 = 0.28f * std::exp(-0.30f * (fh - 15.0f) * (fh - 15.0f));
+                    const float f3 = 0.18f * std::exp(-0.25f * (fh - 20.0f) * (fh - 20.0f));
+                    s3 += ((1.0f / std::pow(fh, 1.20f)) * (h == 1 ? 0.55f : 0.18f) + f1 + f2 + f3) * std::sin(fh * w + dispPhase(h));
                 }
                 tables[3][3][static_cast<std::size_t>(i)] = s3;
             }
@@ -173,31 +173,31 @@ struct SharedWavetableBank {
                 float s0 = 0.0f;
                 for (int h = 1; h <= 6; ++h) {
                     const float fh = static_cast<float>(h);
-                    s0 += (1.0f / fh) * std::sin(fh * w);
+                    s0 += (1.0f / std::pow(fh, 1.20f)) * std::sin(fh * w);
                 }
                 tables[6][0][static_cast<std::size_t>(i)] = s0;
 
                 float s1 = 0.0f;
                 for (int h = 1; h <= 12; ++h) {
                     const float fh = static_cast<float>(h);
-                    const float hornPeak = 0.45f * std::exp(-0.60f * (fh - 3.5f) * (fh - 3.5f));
-                    s1 += ((1.0f / std::pow(fh, 0.85f)) + hornPeak) * std::sin(fh * w);
+                    const float hornPeak = 0.18f * std::exp(-0.80f * (fh - 3.5f) * (fh - 3.5f));
+                    s1 += ((1.0f / std::pow(fh, 1.20f)) + hornPeak) * std::sin(fh * w);
                 }
                 tables[6][1][static_cast<std::size_t>(i)] = s1;
 
                 float s2 = 0.0f;
                 for (int h = 1; h <= 18; ++h) {
                     const float fh = static_cast<float>(h);
-                    const float hornPeak = 0.65f * std::exp(-0.35f * (fh - 4.2f) * (fh - 4.2f));
-                    s2 += ((1.0f / std::pow(fh, 0.75f)) + hornPeak) * std::sin(fh * w);
+                    const float hornPeak = 0.22f * std::exp(-0.50f * (fh - 4.2f) * (fh - 4.2f));
+                    s2 += ((1.0f / std::pow(fh, 1.20f)) + hornPeak) * std::sin(fh * w);
                 }
                 tables[6][2][static_cast<std::size_t>(i)] = s2;
 
                 float s3 = 0.0f;
                 for (int h = 1; h <= 34; ++h) {
                     const float fh = static_cast<float>(h);
-                    const float hornPeak = 0.85f * std::exp(-0.22f * (fh - 5.0f) * (fh - 5.0f));
-                    s3 += ((1.0f / std::pow(fh, 0.68f)) + hornPeak) * std::sin(fh * w);
+                    const float hornPeak = 0.26f * std::exp(-0.35f * (fh - 5.0f) * (fh - 5.0f));
+                    s3 += ((1.0f / std::pow(fh, 1.20f)) + hornPeak) * std::sin(fh * w);
                 }
                 tables[6][3][static_cast<std::size_t>(i)] = s3;
             }
@@ -260,14 +260,14 @@ struct SharedTextureSourceBank {
                 float v = 0.0f;
                 for (int h = 1; h <= 24; ++h) {
                     const float fh = static_cast<float>(h);
-                    const float f1 = 0.95f * std::exp(-0.70f * (fh - 3.5f) * (fh - 3.5f));
-                    const float f2 = 0.75f * std::exp(-0.45f * (fh - 8.0f) * (fh - 8.0f));
-                    const float f3 = 0.40f * std::exp(-0.30f * (fh - 17.0f) * (fh - 17.0f));
-                    const float baseAmp = 0.50f / std::pow(fh, 0.75f);
-                    const float mod = 1.0f + 0.18f * std::sin(wTot * 2.0f + fh * 0.7f);
+                    const float f1 = 0.25f * std::exp(-0.90f * (fh - 3.5f) * (fh - 3.5f));
+                    const float f2 = 0.18f * std::exp(-0.60f * (fh - 8.0f) * (fh - 8.0f));
+                    const float f3 = 0.15f * std::exp(-0.35f * (fh - 17.0f) * (fh - 17.0f));
+                    const float baseAmp = 1.0f / std::pow(fh, 1.20f);
+                    const float mod = 1.0f + 0.12f * std::sin(wTot * 2.0f + fh * 0.7f);
                     v += (baseAmp + f1 + f2 + f3) * mod * std::sin(fh * w + dispPhase(h));
                 }
-                const float breath = 0.12f * std::sin(32.0f * w + 1.2f) * (0.8f + 0.2f * std::sin(wTot * 4.0f));
+                const float breath = 0.08f * std::sin(32.0f * w + 1.2f) * (0.8f + 0.2f * std::sin(wTot * 4.0f));
                 tables[0][static_cast<std::size_t>(i)] = v + breath;
             }
 
@@ -276,13 +276,13 @@ struct SharedTextureSourceBank {
                 float s = 0.0f;
                 for (int h = 1; h <= 28; ++h) {
                     const float fh = static_cast<float>(h);
-                    const float m1 = 0.85f * std::exp(-1.20f * (fh - 1.0f) * (fh - 1.0f));
-                    const float m2 = 0.70f * std::exp(-0.90f * (fh - 2.0f) * (fh - 2.0f));
-                    const float m4 = 0.55f * std::exp(-0.60f * (fh - 4.0f) * (fh - 4.0f));
-                    const float m8 = 0.35f * std::exp(-0.40f * (fh - 8.0f) * (fh - 8.0f));
-                    const float sawAmp = 1.0f / fh;
-                    const float slip = (h % 2 == 1) ? 1.15f : 0.85f;
-                    const float bowMotion = 1.0f + 0.15f * std::cos(wTot * 3.0f + fh * 0.4f);
+                    const float m1 = 0.65f * std::exp(-1.40f * (fh - 1.0f) * (fh - 1.0f));
+                    const float m2 = 0.45f * std::exp(-1.00f * (fh - 2.0f) * (fh - 2.0f));
+                    const float m4 = 0.18f * std::exp(-0.80f * (fh - 4.0f) * (fh - 4.0f));
+                    const float m8 = 0.10f * std::exp(-0.50f * (fh - 8.0f) * (fh - 8.0f));
+                    const float sawAmp = 1.0f / std::pow(fh, 1.20f);
+                    const float slip = (h % 2 == 1) ? 1.10f : 0.90f;
+                    const float bowMotion = 1.0f + 0.12f * std::cos(wTot * 3.0f + fh * 0.4f);
                     s += (sawAmp * slip + m1 + m2 + m4 + m8) * bowMotion * std::sin(fh * w + dispPhase(h));
                 }
                 tables[1][static_cast<std::size_t>(i)] = s;
@@ -294,10 +294,10 @@ struct SharedTextureSourceBank {
                 for (int h = 1; h <= 18; ++h) {
                     const float fh = static_cast<float>(h);
                     const float oddWeight = (h % 2 == 1) ? 1.25f : 0.65f;
-                    const float amp = (1.0f / std::pow(fh, 0.90f)) * oddWeight;
+                    const float amp = (1.0f / std::pow(fh, 1.20f)) * oddWeight;
                     tape += amp * std::sin(fh * w + dispPhase(h));
                 }
-                tables[2][static_cast<std::size_t>(i)] = std::tanh(tape * 1.35f);
+                tables[2][static_cast<std::size_t>(i)] = tape;
             }
 
             // Table 3: Cathedral Rain Cloud / Ethereal Grains
@@ -328,14 +328,13 @@ struct SharedTextureSourceBank {
                 float pad = 0.0f;
                 for (int h = 1; h <= 18; ++h) {
                     const float fh = static_cast<float>(h);
-                    const float rolloff = 1.0f / (1.0f + (fh / 2.8f) * (fh / 2.8f));
-                    const float warmSaw = (1.0f / fh) * rolloff;
-                    const float singingCore = 0.70f * std::exp(-0.75f * (fh - 2.0f) * (fh - 2.0f));
-                    const float evolve = 1.0f + 0.14f * std::sin(wTot * 2.0f + fh * 0.45f);
+                    const float warmSaw = 1.0f / std::pow(fh, 1.20f);
+                    const float singingCore = 0.38f * std::exp(-0.85f * (fh - 2.0f) * (fh - 2.0f));
+                    const float evolve = 1.0f + 0.10f * std::sin(wTot * 2.0f + fh * 0.45f);
                     pad += (warmSaw + singingCore) * evolve * std::sin(fh * w + dispPhase(h));
                 }
                 const float warmSub = 0.28f * std::sin(0.5f * w);
-                tables[5][static_cast<std::size_t>(i)] = std::tanh((pad + warmSub) * 1.25f);
+                tables[5][static_cast<std::size_t>(i)] = pad + warmSub;
             }
         }
 

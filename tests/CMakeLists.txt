@@ -1,6 +1,7 @@
 add_executable(NovaPluginsTests
     NovaPluginsTests.cpp
     NovaSynthRegressionTests.cpp
+    PsychoacousticPadOptimizationTests.cpp
 )
 
 target_link_libraries(NovaPluginsTests PRIVATE
