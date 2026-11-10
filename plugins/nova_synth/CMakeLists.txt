@@ -20,6 +20,18 @@ nova_add_audio_plugin(NovaSynth
         src/ui/DualFilterDeck.h
         src/ui/DualFilterDeck.cpp
         src/ui/DualFilterDeckDrawing.cpp
+        src/ui/JornaCenterStageColumn.h
+        src/ui/JornaCenterStageColumn.cpp
+        src/ui/JornaCenterStageColumnDrawing.cpp
+        src/ui/JornaCenterStageColumnDrawingModes.cpp
+        src/ui/JornaRightColumn.h
+        src/ui/JornaRightColumn.cpp
+        src/ui/JornaRightColumnDrawing.cpp
+        src/ui/JornaRightColumnInteraction.cpp
+        src/ui/JornaBottomFooterBar.h
+        src/ui/JornaBottomFooterBar.cpp
+        src/ui/NovaSynthWorkspacePage.h
+        src/ui/NovaSynthWorkspacePage.cpp
         src/ui/NovaSynthUiHelpers.h
         src/ui/NovaSynthUiHelpers.cpp
         src/ui/JornaSourcesColumn.h
