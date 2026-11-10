@@ -12,4 +12,5 @@ nova_add_audio_plugin(NovaSpace
         src/NovaSpaceProcessor.cpp
         src/NovaSpaceEditor.h
         src/NovaSpaceEditor.cpp
+        src/NovaSpaceEditorDrawing.cpp
 )
