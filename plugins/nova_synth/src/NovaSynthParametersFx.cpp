@@ -194,6 +194,9 @@ void NovaSynthProcessor::appendModulationAndFxParameters(std::vector<std::unique
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{"reverbDecay", 1}, "Space Decay",
         juce::NormalisableRange<float>(0.5f, 25.0f, 0.1f, 0.45f), 6.5f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"reverbPreDelay", 1}, "Space Pre-Delay",
+        juce::NormalisableRange<float>(0.0f, 100.0f, 0.1f), 18.0f));
     params.push_back(std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID{"reverbShimmerPitch", 1}, "Shimmer Pitch",
         juce::StringArray{"+1 Octave", "+2 Octaves", "+1 & +2 Oct", "-1 Octave"}, 0));

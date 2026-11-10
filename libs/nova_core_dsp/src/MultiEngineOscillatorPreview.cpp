@@ -82,7 +82,7 @@ std::vector<float> MultiEngineOscillator::buildWaveformPreview(const Parameters&
                     case 3: val = std::sin(twoPi * u); break; // Sine
                     case 4: val = 0.5f * (2.0f * u - 1.0f) + 0.5f * (2.0f * std::fmod(u + 0.33f, 1.0f) - 1.0f); break; // SuperSaw
                     case 5: val = 2.0f * std::fmod(u * (1.0f + 2.0f * p.shapeMorph), 1.0f) - 1.0f; break; // Hard Sync
-                    case 6: default: val = std::tanh(((2.0f * u - 1.0f) * 0.7f + (2.0f * std::abs(2.0f * (std::fmod(u * 0.5f, 1.0f) - 0.5f)) - 1.0f) * 0.3f) * 1.3f); break; // Velvet Analog Pad
+                    case 6: default: val = (((2.0f * u - 1.0f) * 0.7f + (2.0f * std::abs(2.0f * (std::fmod(u * 0.5f, 1.0f) - 0.5f)) - 1.0f) * 0.3f)) * 0.75f; break; // Velvet Analog Pad
                 }
                 break;
             case EngineType::EvolvingWavetable: {

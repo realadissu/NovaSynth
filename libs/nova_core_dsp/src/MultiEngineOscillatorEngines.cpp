@@ -132,12 +132,11 @@ void MultiEngineOscillator::processOrganicTexture(float slotFreq, float shape, f
             texR = grainSumR * 0.70f + woodR * 0.30f;
             break;
         }
-        case 2: { // Tape Halo: warm Mellotron saturation
+        case 2: { // Tape Halo: clean headroom scaling
             flutterPhase_ += 3.2f * invSr;
             if (flutterPhase_ >= 1.0f) flutterPhase_ -= 1.0f;
-            const float drive = 1.15f + 0.85f * shape;
-            texL = std::tanh(grainSumL * drive) * 0.88f;
-            texR = std::tanh(grainSumR * drive) * 0.88f;
+            texL = grainSumL * 0.75f;
+            texR = grainSumR * 0.75f;
             break;
         }
         case 3: // Cathedral Rain Cloud: crystalline high sheen

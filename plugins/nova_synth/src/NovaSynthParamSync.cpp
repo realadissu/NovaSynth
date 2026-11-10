@@ -220,6 +220,7 @@ void NovaSynthProcessor::syncParametersFromAPVTS() noexcept {
     p.reverbDry     = apvts_.getRawParameterValue("reverbDry")->load();
     p.reverbMix     = apvts_.getRawParameterValue("reverbMix")->load();
     p.reverbDecay   = apvts_.getRawParameterValue("reverbDecay")->load();
+    if (auto* pPd = apvts_.getRawParameterValue("reverbPreDelay")) p.reverbPreDelay = pPd->load();
     p.reverbShimmer = apvts_.getRawParameterValue("reverbShimmer")->load();
     if (auto* pPit = apvts_.getRawParameterValue("reverbShimmerPitch")) {
         p.reverbShimmerPitch = static_cast<int>(pPit->load());

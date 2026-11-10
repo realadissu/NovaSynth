@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include "NovaSynthProcessor.h"
 #include "nova_dsp/synth/WorshipSynthEngine.h"
 #include "../libs/nova_core_dsp/src/OscillatorSharedTables.h"
 #include <cmath>
@@ -223,6 +224,135 @@ TEST(PsychoacousticPadOptimizationTests, HostileSampleRatesAndOddBufferSizesNeve
             engine.reset();
         }
     }
+}
+
+TEST(PsychoacousticPadOptimizationTests, StereoSpreadDecoupledFromDetune) {
+    nova::dsp::MultiEngineOscillator osc;
+    osc.prepare(48000.0);
+
+    auto renderSideToMidRatio = [&](float spreadVal, float detuneVal) {
+        nova::dsp::MultiEngineOscillator::Parameters p;
+        p.engine = nova::dsp::MultiEngineOscillator::EngineType::WarmAnalog;
+        p.modelIndex = 0; // Saw
+        p.spread = spreadVal;
+        p.detune = detuneVal;
+        osc.setParameters(p);
+        osc.triggerNote(220.0f, 0.8f, 42);
+
+        double sumMidSq = 0.0, sumSideSq = 0.0;
+        for (int i = 0; i < 2048; ++i) {
+            float outL = 0.0f, outR = 0.0f;
+            osc.processSample(220.0f, 0.0f, 0.0f, outL, outR);
+            const float M = 0.5f * (outL + outR);
+            const float S = 0.5f * (outL - outR);
+            sumMidSq += static_cast<double>(M * M);
+            sumSideSq += static_cast<double>(S * S);
+        }
+        return static_cast<float>(std::sqrt(sumSideSq / (sumMidSq + 1e-9)));
+    };
+
+    const float wideRatio = renderSideToMidRatio(0.85f, 0.12f);
+    EXPECT_GT(wideRatio, 0.35f) << "High spread must generate wide stereo side energy even at low detune!";
+
+    const float monoRatio = renderSideToMidRatio(0.0f, 0.12f);
+    EXPECT_LT(monoRatio, 0.15f) << "Zero spread must collapse stereo side energy!";
+    EXPECT_GT(wideRatio, monoRatio * 2.5f);
+}
+
+TEST(PsychoacousticPadOptimizationTests, FreeRunningUncorrelatedRandomPhasesAtNoteOn) {
+    nova::dsp::MultiEngineOscillator osc;
+    osc.prepare(48000.0);
+    nova::dsp::MultiEngineOscillator::Parameters p;
+    p.engine = nova::dsp::MultiEngineOscillator::EngineType::WarmAnalog;
+    p.modelIndex = 6; // Velvet Pad
+    p.detune = 0.12f;
+    p.spread = 0.85f;
+    osc.setParameters(p);
+
+    osc.triggerNote(261.63f, 0.8f, 101);
+    for (int u = 0; u < nova::dsp::MultiEngineOscillator::kMaxUnison; ++u) {
+        const float ph = osc.getUnisonPhase(u);
+        EXPECT_GE(ph, 0.0f);
+        EXPECT_LT(ph, 1.0f);
+    }
+    EXPECT_NE(osc.getUnisonPhase(0), osc.getUnisonPhase(1));
+    EXPECT_NE(osc.getUnisonPhase(1), osc.getUnisonPhase(2));
+    EXPECT_NE(osc.getUnisonPhase(2), osc.getUnisonPhase(3));
+    EXPECT_NE(osc.getUnisonPhase(3), osc.getUnisonPhase(4));
+
+    const float firstPh0 = osc.getUnisonPhase(0);
+    osc.triggerNote(261.63f, 0.8f, 202);
+    EXPECT_NE(osc.getUnisonPhase(0), firstPh0);
+}
+
+TEST(PsychoacousticPadOptimizationTests, LinearHeadroomScalingNoTanhFlutterInWarmAnalogAndTexture) {
+    constexpr double kSr = 48000.0;
+    constexpr int kBlock = 512;
+    nova::dsp::WorshipSynthEngine engine;
+    engine.prepare(kSr, kBlock);
+
+    auto renderPolyChord = [&](nova::dsp::MultiEngineOscillator::EngineType eng, int model) {
+        nova::dsp::WorshipSynthEngine::Parameters p;
+        p.activeOscCount = 1;
+        p.oscSlots[0].enabled = true;
+        p.oscSlots[0].engine = eng;
+        p.oscSlots[0].modelIndex = model;
+        p.oscSlots[0].level = 1.0f;
+        p.filter1Enabled = false;
+        p.filter2Enabled = false;
+        p.reverbMix = 0.0f;
+        p.chorusEnabled = false;
+        engine.setParameters(p);
+        engine.snapSmoothersToTarget();
+
+        const int notes[5] = { 36, 43, 48, 55, 60 };
+        for (int n : notes) engine.noteOn(n, 0.85f);
+
+        std::vector<float> bL(kBlock, 0.0f), bR(kBlock, 0.0f);
+        float peak = 0.0f;
+        for (int b = 0; b < 10; ++b) {
+            std::fill(bL.begin(), bL.end(), 0.0f);
+            std::fill(bR.begin(), bR.end(), 0.0f);
+            engine.processBlock(bL.data(), bR.data(), kBlock);
+            for (int i = 0; i < kBlock; ++i) {
+                EXPECT_FALSE(std::isnan(bL[static_cast<std::size_t>(i)]));
+                EXPECT_FALSE(std::isinf(bL[static_cast<std::size_t>(i)]));
+                peak = std::max(peak, std::abs(bL[static_cast<std::size_t>(i)]));
+            }
+        }
+        engine.allNotesOff();
+        engine.reset();
+        return peak;
+    };
+
+    const float peakWarm = renderPolyChord(nova::dsp::MultiEngineOscillator::EngineType::WarmAnalog, 6);
+    EXPECT_GT(peakWarm, 0.10f);
+    EXPECT_LT(peakWarm, 4.0f);
+
+    const float peakTex = renderPolyChord(nova::dsp::MultiEngineOscillator::EngineType::OrganicTexture, 2);
+    EXPECT_GT(peakTex, 0.10f);
+    EXPECT_LT(peakTex, 4.0f);
+}
+
+TEST(PsychoacousticPadOptimizationTests, SundayPianoFoundationPresetSettings) {
+    nova::synth::NovaSynthProcessor processor;
+    processor.prepareToPlay(48000.0, 512);
+
+    auto& pm = processor.getPresetManager();
+    ASSERT_TRUE(pm.loadPresetByName("Sunday Piano Foundation"));
+
+    auto& apvts = processor.getAPVTS();
+    EXPECT_LE(apvts.getRawParameterValue("filterEnvAmount")->load(), 0.04f);
+    EXPECT_LE(apvts.getRawParameterValue("filter2EnvAmount")->load(), 0.04f);
+    EXPECT_FLOAT_EQ(apvts.getRawParameterValue("osc1_detune")->load(), 0.12f);
+    EXPECT_FLOAT_EQ(apvts.getRawParameterValue("osc1_spread")->load(), 0.85f);
+    EXPECT_FLOAT_EQ(apvts.getRawParameterValue("osc2_detune")->load(), 0.12f);
+    EXPECT_FLOAT_EQ(apvts.getRawParameterValue("osc2_spread")->load(), 0.85f);
+    EXPECT_FLOAT_EQ(apvts.getRawParameterValue("chorusEnabled")->load(), 1.0f);
+    EXPECT_FLOAT_EQ(apvts.getRawParameterValue("chorusMix")->load(), 0.45f);
+    EXPECT_FLOAT_EQ(apvts.getRawParameterValue("reverbDry")->load(), 0.50f);
+    EXPECT_FLOAT_EQ(apvts.getRawParameterValue("reverbMix")->load(), 0.55f);
+    EXPECT_FLOAT_EQ(apvts.getRawParameterValue("reverbPreDelay")->load(), 5.0f);
 }
 
 } // namespace

@@ -204,6 +204,7 @@ public:
         float reverbDry          = 1.0f;
         float reverbMix          = 0.42f;
         float reverbDecay        = 6.2f;
+        float reverbPreDelay     = 18.0f;  // 0.0 .. 100.0 ms
         float reverbShimmer      = 0.45f;
         int   reverbShimmerPitch = 0;   // 0: +1 Oct (+12st), 1: +2 Oct (+24st), 2: +1 & +2 Oct, 3: -1 Oct Sub
         float reverbDucking      = 0.25f;

@@ -39,12 +39,13 @@ void MultiEngineOscillator::updateCoefficients() noexcept {
     basePitchRatio_ = std::pow(2.0f, totalSemi / 12.0f);
     const float detuneAmt = std::clamp(params_.detune, 0.0f, 1.0f);
     pluckDelayRatioR_ = std::pow(2.0f, (detuneAmt * 14.0f) / 1200.0f);
+    const float stereoWidth = std::clamp(std::max(params_.spread, detuneAmt * 0.7f), 0.0f, 1.0f);
 
     for (int u = 0; u < kMaxUnison; ++u) {
         const auto idx = static_cast<std::size_t>(u);
         const float cents = (kUnisonDetuneFactors[idx] * 13.5f + driftOffsetsCents_[idx]) * detuneAmt;
         unisonPitchMultipliers_[idx] = std::pow(2.0f, cents / 1200.0f);
-        const float uPan = std::clamp(kUnisonPanPositions[idx] * std::sqrt(detuneAmt), -1.0f, 1.0f);
+        const float uPan = std::clamp(kUnisonPanPositions[idx] * stereoWidth, -1.0f, 1.0f);
         const float panAngle = (uPan + 1.0f) * 0.25f * std::numbers::pi_v<float>;
         unisonPanL_[idx] = std::cos(panAngle);
         unisonPanR_[idx] = std::sin(panAngle);
@@ -83,21 +84,18 @@ void MultiEngineOscillator::triggerNote(float baseFrequencyHz, float velocity, u
     shapeSmoother_.reset(params_.shapeMorph);
     rng_ ^= (seedOffset * 747796405u + 2891336453u);
 
-    if (params_.engine == EngineType::WarmAnalog ||
-        params_.engine == EngineType::EvolvingWavetable ||
-        params_.engine == EngineType::OrganicTexture) {
-        rng_ = rng_ * 1664525u + 1013904223u;
-        phases_[0] = static_cast<float>(rng_ & 0xFFFFu) / 65536.0f;
-    } else {
-        phases_[0] = 0.0f;
-    }
+    const bool isPolyPadEngine = (params_.engine == EngineType::WarmAnalog ||
+                                  params_.engine == EngineType::EvolvingWavetable ||
+                                  params_.engine == EngineType::OrganicTexture);
     driftOffsetsCents_[0] = 0.0f;
-
-    for (int u = 1; u < kMaxUnison; ++u) {
+    for (int u = 0; u < kMaxUnison; ++u) {
+        const auto idx = static_cast<std::size_t>(u);
         rng_ = rng_ * 1664525u + 1013904223u;
-        phases_[static_cast<std::size_t>(u)] = static_cast<float>(rng_ & 0xFFFFu) / 65536.0f;
-        rng_ = rng_ * 1664525u + 1013904223u;
-        driftOffsetsCents_[static_cast<std::size_t>(u)] = ((static_cast<float>(rng_ & 0xFFFFu) / 32767.5f) - 1.0f) * 1.1f;
+        phases_[idx] = isPolyPadEngine ? (static_cast<float>(rng_ & 0xFFFFu) / 65536.0f) : 0.0f;
+        if (u > 0) {
+            rng_ = rng_ * 1664525u + 1013904223u;
+            driftOffsetsCents_[idx] = ((static_cast<float>(rng_ & 0xFFFFu) / 32767.5f) - 1.0f) * 1.1f;
+        }
     }
     updateCoefficients();
 
@@ -314,7 +312,7 @@ void MultiEngineOscillator::processSample(float baseFrequencyHz,
                         const float saw = (2.0f * ph - 1.0f) - polyBlep(ph, dt);
                         const float phSub = std::fmod(ph * 0.5f, 1.0f);
                         const float subTri = 2.0f * std::abs(2.0f * (phSub - 0.5f)) - 1.0f;
-                        wave = std::tanh((saw * (0.60f + 0.30f * shape) + subTri * (0.20f + 0.12f * (1.0f - shape))) * 1.25f);
+                        wave = (saw * (0.60f + 0.30f * shape) + subTri * (0.20f + 0.12f * (1.0f - shape))) * 0.75f;
                         break;
                     }
                     default:

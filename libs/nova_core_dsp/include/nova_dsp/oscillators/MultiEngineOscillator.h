@@ -85,8 +85,12 @@ public:
 
     [[nodiscard]] static std::vector<float> buildWaveformPreview(const Parameters& p, int numPoints = 24);
 
-private:
     static constexpr int kMaxUnison = 5;
+    [[nodiscard]] float getUnisonPhase(int voiceIndex) const noexcept {
+        return (voiceIndex >= 0 && voiceIndex < kMaxUnison) ? phases_[static_cast<std::size_t>(voiceIndex)] : 0.0f;
+    }
+
+private:
     static constexpr int kWtTables = 8;
     static constexpr int kWtFrames = 4;
     static constexpr int kWtSize = 1024;

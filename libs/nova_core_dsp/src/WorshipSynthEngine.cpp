@@ -172,6 +172,7 @@ void WorshipSynthEngine::setParameters(const Parameters& params) noexcept {
     revParams.dry              = std::clamp(params_.reverbDry, 0.0f, 1.0f);
     revParams.mix              = std::clamp(params_.reverbMix + params_.macroShimmer * 0.25f, 0.0f, 1.0f);
     revParams.decaySeconds     = std::clamp(params_.reverbDecay + params_.macroShimmer * 2.5f, 0.4f, 26.0f);
+    revParams.preDelayMs       = std::clamp(params_.reverbPreDelay, 0.0f, 250.0f);
     revParams.shimmerPitchMode = std::clamp(params_.reverbShimmerPitch, 0, 3);
     revParams.shimmerOctave    = std::clamp(params_.reverbShimmer + params_.macroShimmer * 0.50f, 0.0f, 1.0f);
     revParams.shimmerFifth     = 0.0f;
