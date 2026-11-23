@@ -2,11 +2,13 @@
 
 #include "nova_dsp/oscillators/MultiEngineOscillator.h"
 #include "nova_dsp/modulation/AdsrEnvelope.h"
+#include "nova_dsp/modulation/AnalogDriftGenerator.h"
 #include "nova_dsp/modulation/LfoGenerator.h"
 #include "nova_dsp/modulation/ModMatrix.h"
 #include "nova_dsp/filters/StateVariableFilter.h"
 #include "nova_dsp/reverb/DualEngineReverb.h"
 #include "nova_dsp/effects/StereoBbdChorus.h"
+#include "nova_dsp/synth/WorshipSynthAirStage.h"
 #include "nova_dsp/math/OnePoleSmoother.h"
 #include "nova_dsp/math/LockFreeRingBuffer.h"
 #include <array>
@@ -35,60 +37,9 @@ public:
         ChordPulse = 5
     };
 
-    [[nodiscard]] static float getDelayTimeForDivision(float bpm, int divisionIndex) noexcept {
-        const float safeBpm = std::clamp(bpm, 20.0f, 300.0f);
-        const float quarterSec = 60.0f / safeBpm;
-        switch (divisionIndex) {
-            case 0: return quarterSec * 2.0f;          // 1/2
-            case 1: return quarterSec * 1.0f;          // 1/4
-            case 2: return quarterSec * 1.5f;          // 1/4d
-            case 3: return quarterSec * 0.5f;          // 1/8
-            case 4: return quarterSec * 0.75f;         // 1/8d (Dotted 8th - signature Worship delay!)
-            case 5: return quarterSec * (1.0f / 3.0f); // 1/8t
-            case 6: return quarterSec * 0.25f;         // 1/16
-            case 7: return quarterSec * 0.375f;        // 1/16d
-            default: return quarterSec * 0.75f;
-        }
-    }
-
-    [[nodiscard]] static float getArpRateForDivision(float bpm, int divisionIndex) noexcept {
-        const float safeBpm = std::clamp(bpm, 20.0f, 300.0f);
-        const float quarterSec = 60.0f / safeBpm;
-        float noteSec = quarterSec * 0.25f; // 1/16 default
-        switch (divisionIndex) {
-            case 0: noteSec = quarterSec * 1.0f; break;          // 1/4
-            case 1: noteSec = quarterSec * 0.5f; break;          // 1/8
-            case 2: noteSec = quarterSec * 0.75f; break;         // 1/8d
-            case 3: noteSec = quarterSec * (1.0f / 3.0f); break; // 1/8t
-            case 4: noteSec = quarterSec * 0.25f; break;         // 1/16
-            case 5: noteSec = quarterSec * 0.375f; break;        // 1/16d
-            case 6: noteSec = quarterSec * 0.125f; break;        // 1/32
-            default: noteSec = quarterSec * 0.25f; break;
-        }
-        return 1.0f / std::max(0.01f, noteSec);
-    }
-
-    [[nodiscard]] static float getLfoRateForDivision(float bpm, int divisionIndex) noexcept {
-        const float safeBpm = std::clamp(bpm, 20.0f, 300.0f);
-        const float quarterSec = 60.0f / safeBpm;
-        float cycleSec = quarterSec;
-        switch (divisionIndex) {
-            case 0:  cycleSec = quarterSec * 16.0f; break; // 4 Bars
-            case 1:  cycleSec = quarterSec * 8.0f;  break; // 2 Bars
-            case 2:  cycleSec = quarterSec * 4.0f;  break; // 1 Bar
-            case 3:  cycleSec = quarterSec * 3.0f;  break; // 1/2 D
-            case 4:  cycleSec = quarterSec * 2.0f;  break; // 1/2
-            case 5:  cycleSec = quarterSec * 1.5f;  break; // 1/4 D
-            case 6:  cycleSec = quarterSec * 1.0f;  break; // 1/4
-            case 7:  cycleSec = quarterSec * 0.75f; break; // 1/8 D
-            case 8:  cycleSec = quarterSec * 0.5f;  break; // 1/8
-            case 9:  cycleSec = quarterSec * (1.0f / 3.0f); break; // 1/8 T
-            case 10: cycleSec = quarterSec * 0.25f; break; // 1/16
-            case 11: cycleSec = quarterSec * 0.125f; break; // 1/32
-            default: cycleSec = quarterSec; break;
-        }
-        return 1.0f / std::max(0.005f, cycleSec);
-    }
+    [[nodiscard]] static float getDelayTimeForDivision(float bpm, int divisionIndex) noexcept;
+    [[nodiscard]] static float getArpRateForDivision(float bpm, int divisionIndex) noexcept;
+    [[nodiscard]] static float getLfoRateForDivision(float bpm, int divisionIndex) noexcept;
 
     struct Parameters {
         std::array<MultiEngineOscillator::Parameters, kNumOscSlots> oscSlots{};
@@ -96,10 +47,11 @@ public:
 
         // Dual Filters & Shaping
         bool filter1Enabled = true;
-        int filterType = 0;         // 0: LowPass 24, 1: BandPass, 2: HighPass
+        int filterType = 0;         // 0: LowPass 24, 1: BandPass 12, 2: HighPass 24, 3: LowPass 12 (Smooth)
         float filterCutoffHz = 2800.0f;
         float filterResonance = 0.75f;
         float filterEnvAmount = 0.35f;
+        float filterKeyTrack = 0.40f;
         float filterDrive = 0.15f;
 
         bool filter2Enabled = true;
@@ -107,10 +59,12 @@ public:
         float filter2CutoffHz = 3600.0f;
         float filter2Resonance = 0.70f;
         float filter2EnvAmount = 0.0f;
+        float filter2KeyTrack = 0.0f;
         float filter2Drive = 0.0f;
         float vocalCarve = 0.25f;
 
         int filterRoutingMode = 0;  // 0: Serial (1 -> 2), 1: Parallel (1 + 2)
+        float analogDrift = 0.35f;  // 0.0 .. 1.0 per-voice slow analog pitch & cutoff drift
 
         // Envelopes (ENV 1 = Amp, ENV 2 = Filter, ENV 3 = Mod/Morph, ENV 4 = Pitch/Aux)
         AdsrEnvelope::Parameters ampEnv{ 0.45f, 1.40f, 0.82f, 2.20f };
@@ -299,6 +253,8 @@ private:
         StateVariableFilter filterStage2R{};
         StateVariableFilter filter2L{};
         StateVariableFilter filter2R{};
+        AnalogDriftGenerator drift{};
+        int driftSampleCounter = 0;
 
         // Snapshot of voice parameters for Seamless Patch-Remain
         int activeOscCountSnapshot = 3;
@@ -359,6 +315,7 @@ private:
     LfoGenerator lfo3_{};
     LfoGenerator lfo4_{};
     ModMatrix modMatrix_{};
+    WorshipSynthAirStage airStage_{};
     StereoBbdChorus chorus_{};
     DualEngineReverb reverb_{};
 

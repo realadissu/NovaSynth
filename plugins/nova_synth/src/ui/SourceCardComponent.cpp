@@ -9,6 +9,7 @@ namespace nova::synth {
           slotIndex_(slotIndex),
           octKnob_("OCT", "", theme, false),
           semiKnob_("SEMI", "", theme, false),
+          fineKnob_("FINE", "ct", theme, false),
           levelKnob_("LEVEL", "", theme, false),
           morphKnob_("MORPH", "", theme, false),
           unisonKnob_("UNISON", "", theme, true),
@@ -25,6 +26,7 @@ namespace nova::synth {
 
         addAndMakeVisible(octKnob_);
         addAndMakeVisible(semiKnob_);
+        addAndMakeVisible(fineKnob_);
         addAndMakeVisible(levelKnob_);
         addAndMakeVisible(morphKnob_);
         addAndMakeVisible(unisonKnob_);
@@ -45,6 +47,7 @@ namespace nova::synth {
 
         octKnob_.getSlider().setScrollWheelEnabled(false);
         semiKnob_.getSlider().setScrollWheelEnabled(false);
+        fineKnob_.getSlider().setScrollWheelEnabled(false);
         levelKnob_.getSlider().setScrollWheelEnabled(false);
         morphKnob_.getSlider().setScrollWheelEnabled(false);
         unisonKnob_.getSlider().setScrollWheelEnabled(false);
@@ -69,6 +72,7 @@ namespace nova::synth {
 
         octKnob_.attachToParameter(apvts, prefix + "octave");
         semiKnob_.attachToParameter(apvts, prefix + "semi");
+        fineKnob_.attachToParameter(apvts, prefix + "fine");
         levelKnob_.attachToParameter(apvts, prefix + "level");
         panKnob_.attachToParameter(apvts,   prefix + "pan");
         morphKnob_.attachToParameter(apvts, prefix + "shape");
@@ -84,6 +88,7 @@ namespace nova::synth {
         // Repaint visualizer live when parameters change
         octKnob_.getSlider().onValueChange = [this]() { repaint(); };
         semiKnob_.getSlider().onValueChange = [this]() { repaint(); };
+        fineKnob_.getSlider().onValueChange = [this]() { repaint(); };
         levelKnob_.getSlider().onValueChange = [this]() { repaint(); };
         panKnob_.getSlider().onValueChange = [this]() { repaint(); };
         morphKnob_.getSlider().onValueChange = [this]() { repaint(); };
@@ -124,6 +129,7 @@ namespace nova::synth {
 
         octKnob_.setLabel("OCT");
         semiKnob_.setLabel("SEMI");
+        fineKnob_.setLabel("FINE");
         levelKnob_.setLabel("LEVEL");
         panKnob_.setLabel("PAN");
 
@@ -179,6 +185,7 @@ namespace nova::synth {
         if (!exp) {
             octKnob_.setVisible(false);
             semiKnob_.setVisible(false);
+            fineKnob_.setVisible(false);
             levelKnob_.setVisible(false);
             morphKnob_.setVisible(false);
             unisonKnob_.setVisible(false);
@@ -207,6 +214,7 @@ namespace nova::synth {
 
         octKnob_.setVisible(true);
         semiKnob_.setVisible(!isSub && !isNoise);
+        fineKnob_.setVisible(!isSub && !isNoise);
         levelKnob_.setVisible(true);
         panKnob_.setVisible(true);
         morphKnob_.setVisible(true);

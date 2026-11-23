@@ -49,6 +49,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout NovaSynthProcessor::createPa
             juce::ParameterID{prefix + "semi", 1}, namePrefix + "Semitones", -12, 12, 0));
 
         params.push_back(std::make_unique<juce::AudioParameterFloat>(
+            juce::ParameterID{prefix + "fine", 1}, namePrefix + "Fine Tune (Cents)",
+            juce::NormalisableRange<float>(-50.0f, 50.0f, 0.1f), 0.0f));
+
+        params.push_back(std::make_unique<juce::AudioParameterFloat>(
             juce::ParameterID{prefix + "shape", 1}, namePrefix + "Morph / Pos",
             juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.35f));
 
@@ -114,7 +118,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout NovaSynthProcessor::createPa
 
     params.push_back(std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID{"filterType", 1}, "Filter Type",
-        juce::StringArray{"LOW 24 (Warm Ladder)", "BAND 12 (Formant)", "HIGH 24 (Air)"}, 0));
+        juce::StringArray{"LOW 24 (Warm Ladder)", "BAND 12 (Formant)", "HIGH 24 (Air)", "LOW 12 (Smooth)"}, 0));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{"filterCutoffHz", 1}, "Filter Cutoff",
@@ -127,6 +131,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout NovaSynthProcessor::createPa
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{"filterEnvAmount", 1}, "Filter Env Amt",
         juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.35f));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"filterKeyTrack", 1}, "Filter 1 Key Tracking",
+        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.40f));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{"filterDrive", 1}, "Analog Warmth Drive",
@@ -149,6 +157,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout NovaSynthProcessor::createPa
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{"filter2EnvAmount", 1}, "Filter 2 Env Amt",
+        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.0f));
+
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"filter2KeyTrack", 1}, "Filter 2 Key Tracking",
         juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.0f));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(

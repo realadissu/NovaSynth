@@ -110,7 +110,7 @@ void JornaRightColumn::mouseDown(const juce::MouseEvent& event) {
         if (pos.x < fltTypeRect_.getX() + 24) {
             if (activeFilterTab_ == 0) {
                 const int cur = proc_.getCurrentParameters().filterType;
-                const int prev = (cur - 1 + 3) % 3;
+                const int prev = (cur - 1 + 4) % 4;
                 if (auto* p = proc_.getAPVTS().getParameter("filterType")) {
                     p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(prev)));
                 }
@@ -130,7 +130,7 @@ void JornaRightColumn::mouseDown(const juce::MouseEvent& event) {
             if (activeFilterTab_ == 0) {
                 const int cur = proc_.getCurrentParameters().filterType;
                 if (auto* p = proc_.getAPVTS().getParameter("filterType")) {
-                    p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>((cur + 1) % 3)));
+                    p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>((cur + 1) % 4)));
                 }
             } else {
                 const int cur = proc_.getCurrentParameters().filter2Type;
@@ -145,18 +145,19 @@ void JornaRightColumn::mouseDown(const juce::MouseEvent& event) {
         // Center click: Open rich Dropdown Popup Menu
         juce::PopupMenu menu;
         if (activeFilterTab_ == 0) {
-            static constexpr std::array<const char*, 3> kFltNames = {
+            static constexpr std::array<const char*, 4> kFltNames = {
                 "LOW 24 (Warm Analog Ladder / SVF)",
                 "BAND 12 (Vocal Formant Bandpass)",
-                "HIGH 24 (Air Highpass)"
+                "HIGH 24 (Air Highpass)",
+                "LOW 12 (Smooth 2-Pole)"
             };
             const int cur = proc_.getCurrentParameters().filterType;
-            for (int i = 0; i < 3; ++i) {
+            for (int i = 0; i < 4; ++i) {
                 menu.addItem(i + 1, kFltNames[static_cast<std::size_t>(i)], true, i == cur);
             }
             menu.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(localAreaToGlobal(fltTypeRect_)).withStandardItemHeight(28),
                 [this](int res) {
-                    if (res >= 1 && res <= 3) {
+                    if (res >= 1 && res <= 4) {
                         if (auto* p = proc_.getAPVTS().getParameter("filterType")) {
                             p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(res - 1)));
                         }

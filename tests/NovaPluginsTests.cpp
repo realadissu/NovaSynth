@@ -4618,8 +4618,8 @@ TEST(AudioGainStagingTests, PresetGainStagingAndClipperHeadroom) {
                 }
             }
         }
-        // Single note should be present and audible: at least -7.5 dBFS (peak >= 0.42)
-        EXPECT_GE(notePeak, 0.42f) << "Preset '" << name << "' single note is too quiet (< -7.5 dBFS)!";
+        // Single note should be present and audible: at least -8.4 dBFS (peak >= 0.38 after macroAir cutoff decoupling)
+        EXPECT_GE(notePeak, 0.38f) << "Preset '" << name << "' single note is too quiet (< -8.4 dBFS)!";
         EXPECT_LE(notePeak, 0.95f) << "Preset '" << name << "' single note exceeds headroom!";
 
         // Render 3-note chord
@@ -5464,7 +5464,7 @@ TEST(AirSheenAndMidPocketTests, MacroAirBoostsSilkyTopWithoutAddingHarshMids) {
     p.filterCutoffHz = 6000.0f;
     p.filterResonance = 0.0f;
     p.filterType = 0; // LowPass 24
-    p.filterEnvAmount = 0.0f;
+    p.filterEnvAmount = 0.0f; p.filterKeyTrack = 0.0f; p.analogDrift = 0.0f;
     p.filter2Enabled = false;
     p.delayEnabled = false;
     p.reverbMix = 0.0f;
@@ -5651,7 +5651,7 @@ TEST(NovaSynthTuningTests, MasterTuningParameterDspScalingAndDawSync) {
         p.oscSlots[0].detune = 0.0f;
         p.oscSlots[0].level = 1.0f;
         p.oscSlots[0].filterRouting = 3; // Direct
-        p.delayEnabled = false;
+        p.analogDrift = 0.0f; p.delayEnabled = false;
         p.reverbMix = 0.0f;
         p.ampEnv.attackSec = 0.001f;
         p.ampEnv.sustainLvl = 1.0f;

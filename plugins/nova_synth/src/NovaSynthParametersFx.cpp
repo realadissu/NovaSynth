@@ -77,6 +77,10 @@ void NovaSynthProcessor::appendModulationAndFxParameters(std::vector<std::unique
         juce::ParameterID{"macroAir", 1}, "Air Macro",
         juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.30f));
 
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"analogDrift", 1}, "Analog Voice Drift",
+        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.35f));
+
     // Worship Drone Generator
     params.push_back(std::make_unique<juce::AudioParameterBool>(
         juce::ParameterID{"droneEnabled", 1}, "Drone Pad Hold", false));

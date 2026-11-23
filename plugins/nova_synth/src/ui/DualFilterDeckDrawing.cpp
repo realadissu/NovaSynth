@@ -108,10 +108,10 @@ void DualFilterDeck::drawFilterBlock(juce::Graphics& g, juce::Rectangle<int> are
     auto svfType = nova::dsp::StateVariableFilter::Type::LowPass;
     if (fltType == 1) svfType = nova::dsp::StateVariableFilter::Type::BandPass;
     else if (fltType == 2) svfType = nova::dsp::StateVariableFilter::Type::HighPass;
-    else if (fltType == 3) svfType = nova::dsp::StateVariableFilter::Type::Bell;
+    else if (fltNum == 2 && fltType == 3) svfType = nova::dsp::StateVariableFilter::Type::Bell;
 
     const float q = std::max(0.15f, resonance);
-    svf.setParameters(svfType, cutoffHz, q, fltType == 3 ? (resonance * 10.0f - 5.0f) : 0.0f);
+    svf.setParameters(svfType, cutoffHz, q, (fltNum == 2 && fltType == 3) ? (resonance * 10.0f - 5.0f) : 0.0f);
 
     fillPath.startNewSubPath(curveArea.getX(), curveArea.getBottom());
 
@@ -173,7 +173,7 @@ void DualFilterDeck::drawFilterBlock(juce::Graphics& g, juce::Rectangle<int> are
                                                 (logMax - logMin), 0.0f, 1.0f);
         nova::dsp::StateVariableFilter liveSvf;
         liveSvf.prepare(44100.0);
-        liveSvf.setParameters(svfType, effCutoff, q, fltType == 3 ? (resonance * 10.0f - 5.0f) : 0.0f);
+        liveSvf.setParameters(svfType, effCutoff, q, (fltNum == 2 && fltType == 3) ? (resonance * 10.0f - 5.0f) : 0.0f);
 
         // Subtle animated ghost curve
         juce::Path liveCurve;

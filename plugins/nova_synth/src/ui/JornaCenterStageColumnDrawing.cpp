@@ -170,7 +170,8 @@ void JornaCenterStageColumn::drawCenterStageHeader(juce::Graphics& g, const juce
     } else if (centerViewMode_ == 2) {
         g.setFont(theme_.getSectionFont(13.0f));
         g.setColour(juce::Colour(0xff38bdf8));
-        g.drawText(params.filterType == 0 ? "FLT 1: LADDER" : (params.filterType == 1 ? "FLT 1: BP" : "FLT 1: HP"),
+        static constexpr std::array<const char*, 4> kFlt1Types = { "FLT 1: LADDER", "FLT 1: BP", "FLT 1: HP", "FLT 1: LP12" };
+        g.drawText(kFlt1Types[static_cast<std::size_t>(std::clamp(params.filterType, 0, 3))],
                    static_cast<int>(stageRect.getRight() - 130), ty, 120, 22,
                    juce::Justification::centredRight);
     } else if (centerViewMode_ == 3) {

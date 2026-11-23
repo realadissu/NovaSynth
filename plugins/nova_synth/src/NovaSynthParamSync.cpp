@@ -53,6 +53,7 @@ void NovaSynthProcessor::syncParametersFromAPVTS() noexcept {
 
         slot.octaveOffset   = static_cast<int>(apvts_.getRawParameterValue(prefix + "octave")->load());
         slot.semitoneOffset = static_cast<int>(apvts_.getRawParameterValue(prefix + "semi")->load());
+        if (auto* pFn = apvts_.getRawParameterValue(prefix + "fine")) slot.fineCents = pFn->load();
         slot.shapeMorph     = apvts_.getRawParameterValue(prefix + "shape")->load();
         slot.detune         = apvts_.getRawParameterValue(prefix + "detune")->load();
         slot.pan            = apvts_.getRawParameterValue(prefix + "pan")->load();
@@ -75,6 +76,7 @@ void NovaSynthProcessor::syncParametersFromAPVTS() noexcept {
     p.filterCutoffHz   = apvts_.getRawParameterValue("filterCutoffHz")->load();
     p.filterResonance  = apvts_.getRawParameterValue("filterResonance")->load();
     p.filterEnvAmount  = apvts_.getRawParameterValue("filterEnvAmount")->load();
+    if (auto* pKt1 = apvts_.getRawParameterValue("filterKeyTrack")) p.filterKeyTrack = pKt1->load();
     p.filterDrive      = apvts_.getRawParameterValue("filterDrive")->load();
 
     p.filter2Enabled   = apvts_.getRawParameterValue("filter2Enabled")->load() > 0.5f;
@@ -82,11 +84,13 @@ void NovaSynthProcessor::syncParametersFromAPVTS() noexcept {
     p.filter2CutoffHz  = apvts_.getRawParameterValue("filter2CutoffHz")->load();
     p.filter2Resonance = apvts_.getRawParameterValue("filter2Resonance")->load();
     p.filter2EnvAmount = apvts_.getRawParameterValue("filter2EnvAmount")->load();
+    if (auto* pKt2 = apvts_.getRawParameterValue("filter2KeyTrack")) p.filter2KeyTrack = pKt2->load();
     p.filter2Drive     = apvts_.getRawParameterValue("filter2Drive")->load();
     p.vocalCarve       = apvts_.getRawParameterValue("vocalCarve")->load();
     if (auto* pFltMode = apvts_.getRawParameterValue("filterRoutingMode")) {
         p.filterRoutingMode = static_cast<int>(pFltMode->load());
     }
+    if (auto* pDr = apvts_.getRawParameterValue("analogDrift")) p.analogDrift = pDr->load();
 
     if (auto* pDel = apvts_.getRawParameterValue("ampDelay")) p.ampEnv.delaySec = pDel->load();
     p.ampEnv.attackSec     = apvts_.getRawParameterValue("ampAttack")->load();

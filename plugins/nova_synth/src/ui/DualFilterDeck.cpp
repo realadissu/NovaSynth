@@ -12,22 +12,26 @@ DualFilterDeck::DualFilterDeck(NovaSynthProcessor& proc, const nova::ui::NovaThe
       flt1Reso_("RESO", "", theme, false),
       flt1Drive_("DRIVE", "", theme, false),
       flt1EnvAmt_("ENV AMT", "", theme, false),
+      flt1KeyTrack_("KEY TRK", "%", theme, false),
       flt1Warmth_("WARMTH", "", theme, false),
       flt2Cutoff_("CUTOFF", "Hz", theme, false),
       flt2Reso_("RESO", "", theme, false),
       flt2Drive_("DRIVE", "", theme, false),
       flt2EnvAmt_("ENV AMT", "", theme, false),
+      flt2KeyTrack_("KEY TRK", "%", theme, false),
       flt2Carve_("CARVE", "", theme, true) {
     addAndMakeVisible(flt1Cutoff_);
     addAndMakeVisible(flt1Reso_);
     addAndMakeVisible(flt1Drive_);
     addAndMakeVisible(flt1EnvAmt_);
+    addAndMakeVisible(flt1KeyTrack_);
     addAndMakeVisible(flt1Warmth_);
 
     addAndMakeVisible(flt2Cutoff_);
     addAndMakeVisible(flt2Reso_);
     addAndMakeVisible(flt2Drive_);
     addAndMakeVisible(flt2EnvAmt_);
+    addAndMakeVisible(flt2KeyTrack_);
     addAndMakeVisible(flt2Carve_);
 
     auto& apvts = proc_.getAPVTS();
@@ -35,12 +39,14 @@ DualFilterDeck::DualFilterDeck(NovaSynthProcessor& proc, const nova::ui::NovaThe
     flt1Reso_.attachToParameter(apvts,   "filterResonance");
     flt1Drive_.attachToParameter(apvts,  "filterDrive");
     flt1EnvAmt_.attachToParameter(apvts, "filterEnvAmount");
+    flt1KeyTrack_.attachToParameter(apvts, "filterKeyTrack");
     flt1Warmth_.attachToParameter(apvts, "macroWarmth");
 
     flt2Cutoff_.attachToParameter(apvts, "filter2CutoffHz");
     flt2Reso_.attachToParameter(apvts,   "filter2Resonance");
     flt2Drive_.attachToParameter(apvts,  "filter2Drive");
     flt2EnvAmt_.attachToParameter(apvts, "filter2EnvAmount");
+    flt2KeyTrack_.attachToParameter(apvts, "filter2KeyTrack");
     flt2Carve_.attachToParameter(apvts,  "vocalCarve");
 }
 
@@ -101,21 +107,23 @@ void DualFilterDeck::resized() {
 
     const int knobH = std::clamp(getHeight() - 86, 56, 72);
     const int knobY = getHeight() - knobH - 8;
-    const int knobW = (fltW - 14) / 5;
+    const int knobW = (fltW - 14) / 6;
 
     // Filter 1 Knobs
     flt1Cutoff_.setBounds(flt1X + 4, knobY, knobW, knobH);
     flt1Reso_.setBounds(flt1X + 4 + knobW, knobY, knobW, knobH);
     flt1Drive_.setBounds(flt1X + 4 + knobW * 2, knobY, knobW, knobH);
     flt1EnvAmt_.setBounds(flt1X + 4 + knobW * 3, knobY, knobW, knobH);
-    flt1Warmth_.setBounds(flt1X + 4 + knobW * 4, knobY, knobW, knobH);
+    flt1KeyTrack_.setBounds(flt1X + 4 + knobW * 4, knobY, knobW, knobH);
+    flt1Warmth_.setBounds(flt1X + 4 + knobW * 5, knobY, knobW, knobH);
 
     // Filter 2 Knobs
     flt2Cutoff_.setBounds(flt2X + 4, knobY, knobW, knobH);
     flt2Reso_.setBounds(flt2X + 4 + knobW, knobY, knobW, knobH);
     flt2Drive_.setBounds(flt2X + 4 + knobW * 2, knobY, knobW, knobH);
     flt2EnvAmt_.setBounds(flt2X + 4 + knobW * 3, knobY, knobW, knobH);
-    flt2Carve_.setBounds(flt2X + 4 + knobW * 4, knobY, knobW, knobH);
+    flt2KeyTrack_.setBounds(flt2X + 4 + knobW * 4, knobY, knobW, knobH);
+    flt2Carve_.setBounds(flt2X + 4 + knobW * 5, knobY, knobW, knobH);
 }
 
 void DualFilterDeck::mouseDown(const juce::MouseEvent& e) {
@@ -240,10 +248,11 @@ void DualFilterDeck::openFilterTypeMenu(int fltNum, juce::Rectangle<int> rect) {
         const auto params = proc_.getCurrentParameters();
         m.addItem(1, "Lowpass 24dB", true, params.filterType == 0);
         m.addItem(2, "Bandpass 12dB", true, params.filterType == 1);
-        m.addItem(3, "Highpass 12dB", true, params.filterType == 2);
+        m.addItem(3, "Highpass 24dB", true, params.filterType == 2);
+        m.addItem(4, "Lowpass 12dB (Smooth)", true, params.filterType == 3);
         m.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(localAreaToGlobal(rect)).withStandardItemHeight(28),
             [this](int res) {
-                if (res >= 1 && res <= 3) {
+                if (res >= 1 && res <= 4) {
                     if (auto* p = proc_.getAPVTS().getParameter("filterType")) {
                         p->setValueNotifyingHost(p->convertTo0to1(static_cast<float>(res - 1)));
                     }
@@ -273,7 +282,8 @@ juce::String DualFilterDeck::getFilterTypeName(int fltNum, int type) {
         switch (type) {
             case 0: return "LOW 24";
             case 1: return "BAND 12";
-            case 2: return "HIGH 12";
+            case 2: return "HIGH 24";
+            case 3: return "LOW 12";
             default: return "LOW 24";
         }
     } else {

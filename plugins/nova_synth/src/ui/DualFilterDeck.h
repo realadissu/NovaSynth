@@ -43,12 +43,14 @@ private:
     nova::ui::ArcKnob flt1Reso_;
     nova::ui::ArcKnob flt1Drive_;
     nova::ui::ArcKnob flt1EnvAmt_;
+    nova::ui::ArcKnob flt1KeyTrack_;
     nova::ui::ArcKnob flt1Warmth_;
 
     nova::ui::ArcKnob flt2Cutoff_;
     nova::ui::ArcKnob flt2Reso_;
     nova::ui::ArcKnob flt2Drive_;
     nova::ui::ArcKnob flt2EnvAmt_;
+    nova::ui::ArcKnob flt2KeyTrack_;
     nova::ui::ArcKnob flt2Carve_;
 
     juce::Rectangle<int> flt1TypeRect_;

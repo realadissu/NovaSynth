@@ -23,6 +23,7 @@ FxRackPanel::FxRackPanel(NovaSynthProcessor& proc, const nova::ui::NovaTheme& th
       macroMotion_("MOTION", "", theme, true),
       macroShimmer_("SHIMMER", "", theme, true),
       macroAir_("AIR", "", theme, false),
+      analogDrift_("DRIFT", "%", theme, true),
       masterGain_("OUTPUT", "dB", theme, false) {
     auto& apvts = proc_.getAPVTS();
     delaySwing_.attachToParameter(apvts, "delaySwing");
@@ -40,6 +41,7 @@ FxRackPanel::FxRackPanel(NovaSynthProcessor& proc, const nova::ui::NovaTheme& th
     macroShimmer_.attachToParameter(apvts, "macroShimmer");
     macroAir_.attachToParameter(apvts, "macroAir");
 
+    analogDrift_.attachToParameter(apvts, "analogDrift");
     masterGain_.attachToParameter(apvts, "masterGainDb");
 
     addAndMakeVisible(delaySwing_);
@@ -57,6 +59,7 @@ FxRackPanel::FxRackPanel(NovaSynthProcessor& proc, const nova::ui::NovaTheme& th
     addAndMakeVisible(macroShimmer_);
     addAndMakeVisible(macroAir_);
 
+    addAndMakeVisible(analogDrift_);
     addAndMakeVisible(masterGain_);
 
     startTimerHz(30);
@@ -185,15 +188,15 @@ void FxRackPanel::resized() {
         macroAir_.setBounds(r.getX() + 4 + 3 * kw, knobTop, kw, knobH);
     }
 
-    // Card 4: Master (1 Knob)
+    // Card 4: Master (2 Knobs: Analog Drift + Output)
     {
         auto r = cardMasterRect_;
         masterVisRect_ = juce::Rectangle<int>(r.getX() + 6, r.getY() + 27, r.getWidth() - 12, visH);
         const int knobTop = masterVisRect_.getBottom() + 6;
         const int knobH = r.getBottom() - knobTop - 4;
-        const int kw = std::min(r.getWidth() - 8, knobH);
-        const int kx = r.getX() + (r.getWidth() - kw) / 2;
-        masterGain_.setBounds(kx, knobTop, kw, knobH);
+        const int kw = (r.getWidth() - 8) / 2;
+        analogDrift_.setBounds(r.getX() + 4, knobTop, kw, knobH);
+        masterGain_.setBounds(r.getX() + 4 + kw, knobTop, kw, knobH);
     }
 }
 

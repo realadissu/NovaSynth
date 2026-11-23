@@ -2,6 +2,7 @@
 
 #include "nova_dsp/math/OnePoleSmoother.h"
 #include "nova_dsp/filters/StateVariableFilter.h"
+#include "nova_dsp/oscillators/StereoNoiseGenerator.h"
 #include <array>
 #include <vector>
 #include <cstdint>
@@ -134,6 +135,7 @@ private:
     std::array<float, kMaxUnison> superPhasesOct_{};
     std::array<float, kMaxUnison> driftOffsetsCents_{};
     uint32_t rng_ = 0x9E3779B9u;
+    StereoNoiseGenerator noiseGen_{};
 
     // Organic Texture / Formant / Granular states
     struct TextureGrain {

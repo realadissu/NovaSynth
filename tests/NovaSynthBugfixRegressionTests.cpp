@@ -77,9 +77,9 @@ std::pair<std::vector<float>, std::vector<float>> renderOsc(
     p.activeOscCount = 1;
     p.oscSlots[0] = { true, 0, nova::dsp::MultiEngineOscillator::EngineType::WarmAnalog, 3, 0, 0, 0, 0.0f, 0.0f, 0.0f, 1.0f };
     p.filter1Enabled = flt1Enabled; p.filterType = 0; p.filterCutoffHz = cutoffHz;
-    p.filterResonance = reso; p.filterEnvAmount = 0.0f; p.filterDrive = 0.0f;
+    p.filterResonance = reso; p.filterEnvAmount = 0.0f; p.filterKeyTrack = 0.0f; p.filterDrive = 0.0f;
     p.filter2Enabled = false; p.lfo1Depth = 0.0f; p.chorusEnabled = false;
-    p.delayEnabled = false; p.reverbMix = 0.0f; p.macroWarmth = warmth; p.macroAir = 0.30f;
+    p.delayEnabled = false; p.reverbMix = 0.0f; p.macroWarmth = warmth; p.macroAir = 0.30f; p.analogDrift = 0.0f;
     p.ampEnv.attackSec = 0.001f; p.ampEnv.decaySec = 0.05f; p.ampEnv.sustainLvl = 1.0f;
     engine.setParameters(p);
     engine.snapSmoothersToTarget();

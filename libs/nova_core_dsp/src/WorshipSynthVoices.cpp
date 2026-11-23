@@ -240,7 +240,8 @@ void WorshipSynthEngine::startVoice(int midiNote, float velocity, bool isDrone, 
     }
 
     // Reset voice filter states only if voice was idle, to prevent clicks when retriggering active voices
-    if (!chosen->active) {
+    const bool wasActive = chosen->active;
+    if (!wasActive) {
         chosen->filterL.reset();
         chosen->filterR.reset();
         chosen->filterStage2L.reset();
@@ -259,6 +260,13 @@ void WorshipSynthEngine::startVoice(int midiNote, float velocity, bool isDrone, 
     chosen->baseFreqHz = midiNoteToHz(midiNote, params_.masterTuningHz);
     chosen->velocity = std::clamp(velocity, 0.05f, 1.0f);
     chosen->ageCounter = ++voiceCounter_;
+    const uint32_t driftSeed = static_cast<uint32_t>(chosen->ageCounter * 2246822519u)
+                             ^ static_cast<uint32_t>(midiNote * 3266489917u)
+                             ^ 0x9E3779B9u;
+    chosen->drift.trigger(driftSeed, !wasActive);
+    if (!wasActive) {
+        chosen->driftSampleCounter = 0;
+    }
 
     chosen->activeOscCountSnapshot = params_.activeOscCount;
     chosen->oscNormSnapshot = (chosen->activeOscCountSnapshot > 1)

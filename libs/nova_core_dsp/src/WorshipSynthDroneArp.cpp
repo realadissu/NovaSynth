@@ -4,6 +4,61 @@
 
 namespace nova::dsp {
 
+float WorshipSynthEngine::getDelayTimeForDivision(float bpm, int divisionIndex) noexcept {
+    const float safeBpm = std::clamp(bpm, 20.0f, 300.0f);
+    const float quarterSec = 60.0f / safeBpm;
+    switch (divisionIndex) {
+        case 0: return quarterSec * 2.0f;          // 1/2
+        case 1: return quarterSec * 1.0f;          // 1/4
+        case 2: return quarterSec * 1.5f;          // 1/4d
+        case 3: return quarterSec * 0.5f;          // 1/8
+        case 4: return quarterSec * 0.75f;         // 1/8d (Dotted 8th - signature Worship delay!)
+        case 5: return quarterSec * (1.0f / 3.0f); // 1/8t
+        case 6: return quarterSec * 0.25f;         // 1/16
+        case 7: return quarterSec * 0.375f;        // 1/16d
+        default: return quarterSec * 0.75f;
+    }
+}
+
+float WorshipSynthEngine::getArpRateForDivision(float bpm, int divisionIndex) noexcept {
+    const float safeBpm = std::clamp(bpm, 20.0f, 300.0f);
+    const float quarterSec = 60.0f / safeBpm;
+    float noteSec = quarterSec * 0.25f; // 1/16 default
+    switch (divisionIndex) {
+        case 0: noteSec = quarterSec * 1.0f; break;          // 1/4
+        case 1: noteSec = quarterSec * 0.5f; break;          // 1/8
+        case 2: noteSec = quarterSec * 0.75f; break;         // 1/8d
+        case 3: noteSec = quarterSec * (1.0f / 3.0f); break; // 1/8t
+        case 4: noteSec = quarterSec * 0.25f; break;         // 1/16
+        case 5: noteSec = quarterSec * 0.375f; break;        // 1/16d
+        case 6: noteSec = quarterSec * 0.125f; break;        // 1/32
+        default: noteSec = quarterSec * 0.25f; break;
+    }
+    return 1.0f / std::max(0.01f, noteSec);
+}
+
+float WorshipSynthEngine::getLfoRateForDivision(float bpm, int divisionIndex) noexcept {
+    const float safeBpm = std::clamp(bpm, 20.0f, 300.0f);
+    const float quarterSec = 60.0f / safeBpm;
+    float cycleSec = quarterSec;
+    switch (divisionIndex) {
+        case 0:  cycleSec = quarterSec * 16.0f; break; // 4 Bars
+        case 1:  cycleSec = quarterSec * 8.0f;  break; // 2 Bars
+        case 2:  cycleSec = quarterSec * 4.0f;  break; // 1 Bar
+        case 3:  cycleSec = quarterSec * 3.0f;  break; // 1/2 D
+        case 4:  cycleSec = quarterSec * 2.0f;  break; // 1/2
+        case 5:  cycleSec = quarterSec * 1.5f;  break; // 1/4 D
+        case 6:  cycleSec = quarterSec * 1.0f;  break; // 1/4
+        case 7:  cycleSec = quarterSec * 0.75f; break; // 1/8 D
+        case 8:  cycleSec = quarterSec * 0.5f;  break; // 1/8
+        case 9:  cycleSec = quarterSec * (1.0f / 3.0f); break; // 1/8 T
+        case 10: cycleSec = quarterSec * 0.25f; break; // 1/16
+        case 11: cycleSec = quarterSec * 0.125f; break; // 1/32
+        default: cycleSec = quarterSec; break;
+    }
+    return 1.0f / std::max(0.005f, cycleSec);
+}
+
 void WorshipSynthEngine::triggerDrone(bool triggered) noexcept {
     if (droneTriggered_ != triggered) {
         droneTriggered_ = triggered;

@@ -1,15 +1,11 @@
 #include "nova_dsp/synth/WorshipSynthEngine.h"
+#include "nova_dsp/synth/WorshipSynthFilterHelper.h"
 #include <cmath>
 #include <algorithm>
 
 namespace nova::dsp {
 
 namespace {
-inline float tubeSat(float x) noexcept {
-    const float x2 = x * x;
-    return (x * (27.0f + x2) / (27.0f + 9.0f * x2));
-}
-
 constexpr std::array<ModMatrix::Destination, 8> kSlotShapeDests{
     ModMatrix::Destination::Osc1Shape, ModMatrix::Destination::Osc2Shape,
     ModMatrix::Destination::Osc3Shape, ModMatrix::Destination::Osc4Shape,
@@ -118,10 +114,9 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
         polyHeadroomSmoother_.setTargetValue(targetPolyScale);
 
         const float flt1Drive = params_.filterDrive, flt2Drive = params_.filter2Drive;
-        const bool flt1DriveActive = (flt1Drive > 0.01f), flt2DriveActive = (flt2Drive > 0.01f);
         const float flt1DriveGain = 1.0f + flt1Drive * 2.2f, flt2DriveGain = 1.0f + flt2Drive * 2.2f;
-        const float flt1DriveComp = flt1DriveActive ? (1.0f / std::sqrt(1.0f + flt1Drive * 1.4f)) : 1.0f;
-        const float flt2DriveComp = flt2DriveActive ? (1.0f / std::sqrt(1.0f + flt2Drive * 1.4f)) : 1.0f;
+        const float flt1DriveComp = (flt1Drive > 0.01f) ? (1.0f / std::sqrt(1.0f + flt1Drive * 1.4f)) : 1.0f;
+        const float flt2DriveComp = (flt2Drive > 0.01f) ? (1.0f / std::sqrt(1.0f + flt2Drive * 1.4f)) : 1.0f;
 
         bool fltEnvAsAmp = false, modEnvAsAmp = false, auxEnvAsAmp = false;
         float fltBothWeight = 0.0f, flt1OnlyWeight = 0.0f;
@@ -210,6 +205,13 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
                 const ModMatrix::VoiceSources vSources{ ampEnvVal, fltEnvVal, modEnvVal, auxEnvVal, v.velocity };
                 const auto voiceOffsets = modMatrix_.evaluateVoice(vSources);
 
+                if ((++v.driftSampleCounter & 15) == 0) {
+                    v.drift.stepControlRate(16);
+                }
+                const float effDrift = std::clamp(params_.analogDrift * (0.85f + 0.45f * params_.macroMotion), 0.0f, 1.30f);
+                const float voicePitchDriftSemi = v.drift.getPitchDriftCents(effDrift) * 0.01f;
+                const float voiceCutoffDriftFactor = v.drift.getCutoffDriftFactor(effDrift);
+
                 float voiceFlt1L = 0.0f, voiceFlt1R = 0.0f;
                 float voiceFlt2L = 0.0f, voiceFlt2R = 0.0f;
                 float voiceBothL = 0.0f, voiceBothR = 0.0f;
@@ -234,7 +236,7 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
                     const float slotPitchMod = (sIdx < 8) ? voiceOffsets.offsets[static_cast<std::size_t>(kSlotPitchDests[sIdx])] : 0.0f;
                     const float slotLevelMod = (sIdx < 8) ? voiceOffsets.offsets[static_cast<std::size_t>(kSlotLevelDests[sIdx])] : 0.0f;
 
-                    const float vPitch = pitchMod + slotPitchMod * 24.0f;
+                    const float vPitch = pitchMod + voicePitchDriftSemi + slotPitchMod * 24.0f;
                     float oL = 0.0f, oR = 0.0f;
                     v.oscs[static_cast<std::size_t>(i)].processSample(v.baseFreqHz, vPitch, sMod, oL, oR, slotLevelMod);
 
@@ -253,55 +255,18 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
                 }
 
                 float flt1InL = voiceFlt1L + voiceBothL, flt1InR = voiceFlt1R + voiceBothR;
+                const bool updateFilterCoeffs = ((s & 15) == 0);
 
-                if (params_.filter1Enabled) {
-                    const float voiceResoMod = voiceOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::FilterResonance)] * 0.5f;
-                    const float voiceCutMod = voiceOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::FilterCutoff)] * 3.6f;
-                    const float effReso = std::clamp(params_.filterResonance + voiceResoMod, 0.35f, 6.0f);
-                    const bool isFourPoleLadder = (params_.filterType == 0 || params_.filterType == 2);
-                    const bool antiHowl = (params_.filterResonance <= 0.25f);
-
-                    if ((s & 15) == 0) {
-                        const float envOctaves = fltEnvVal * params_.filterEnvAmount * 2.1f;
-                        const float voiceCutoff = std::clamp(baseCutoff * std::exp2(envOctaves + voiceCutMod), 40.0f, static_cast<float>(sampleRate_ * 0.46));
-                        auto svfType = StateVariableFilter::Type::LowPass;
-                        if (params_.filterType == 1) svfType = StateVariableFilter::Type::BandPass;
-                        else if (params_.filterType == 2) svfType = StateVariableFilter::Type::HighPass;
-
-                        if (isFourPoleLadder) {
-                            constexpr float kButterQ1 = 0.5411961f;
-                            constexpr float kButterQ2 = 1.3065630f;
-                            const float resoExcess = std::max(0.0f, effReso - 0.35f);
-                            const float r = resoExcess / (1.0f + 0.14f * resoExcess);
-                            const float stageQ1 = std::clamp(kButterQ1 + 0.45f * r, kButterQ1, 2.20f);
-                            const float stageQ2 = std::clamp(kButterQ2 + 0.72f * r, kButterQ2, 3.80f);
-                            v.filterL.setParameters(svfType, voiceCutoff, stageQ1);
-                            v.filterR.setParameters(svfType, voiceCutoff, stageQ1);
-                            v.filterStage2L.setParameters(svfType, voiceCutoff, stageQ2);
-                            v.filterStage2R.setParameters(svfType, voiceCutoff, stageQ2);
-                        } else {
-                            const float maxQ = antiHowl ? 0.60f : 6.0f;
-                            const float svfQ = std::clamp(effReso, 0.35f, maxQ);
-                            v.filterL.setParameters(svfType, voiceCutoff, svfQ);
-                            v.filterR.setParameters(svfType, voiceCutoff, svfQ);
-                        }
-                        v.flt1ResComp = 1.0f / std::sqrt(1.0f + 0.35f * std::max(0.0f, effReso - 0.707f));
-                    }
-
-                    if (flt1DriveActive) {
-                        flt1InL = tubeSat(flt1InL * flt1DriveGain) * flt1DriveComp;
-                        flt1InR = tubeSat(flt1InR * flt1DriveGain) * flt1DriveComp;
-                    }
-
-                    flt1InL = v.filterL.processSample(flt1InL);
-                    flt1InR = v.filterR.processSample(flt1InR);
-                    if (isFourPoleLadder) {
-                        flt1InL = v.filterStage2L.processSample(flt1InL);
-                        flt1InR = v.filterStage2R.processSample(flt1InR);
-                    }
-                    flt1InL *= v.flt1ResComp;
-                    flt1InR *= v.flt1ResComp;
-                }
+                synth_filter::Filter1Context f1Ctx{
+                    params_.filter1Enabled, params_.filterType, baseCutoff, params_.filterResonance,
+                    params_.filterEnvAmount, params_.filterKeyTrack, flt1Drive, flt1DriveGain, flt1DriveComp,
+                    v.baseFreqHz, fltEnvVal,
+                    voiceOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::FilterCutoff)] * 3.6f,
+                    voiceOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::FilterResonance)] * 0.5f,
+                    voiceCutoffDriftFactor, sampleRate_, updateFilterCoeffs
+                };
+                synth_filter::processFilter1(f1Ctx, v.filterL, v.filterR, v.filterStage2L, v.filterStage2R,
+                                             v.flt1ResComp, flt1InL, flt1InR);
 
                 const bool isParallel = (params_.filterRoutingMode == 1);
                 const float flt1DirectL = isParallel ? flt1InL : (flt1InL * (1.0f - bothFraction));
@@ -309,41 +274,16 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
                 float flt2InL = isParallel ? (voiceFlt2L + voiceBothL) : (voiceFlt2L + flt1InL * bothFraction);
                 float flt2InR = isParallel ? (voiceFlt2R + voiceBothR) : (voiceFlt2R + flt1InR * bothFraction);
 
-                if (params_.filter2Enabled) {
-                    const float voiceResoMod2 = voiceOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::Filter2Resonance)] * 0.5f;
-                    const float voiceCutMod2 = voiceOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::Filter2Cutoff)] * 3.6f;
-                    const float effReso2 = std::clamp(params_.filter2Resonance + voiceResoMod2, 0.35f, 6.0f);
-                    const bool antiHowl2 = (params_.filter2Resonance <= 0.25f);
-                    if ((s & 15) == 0) {
-                        const float envOctaves2 = fltEnvVal * params_.filter2EnvAmount * 2.1f;
-                        const float voiceCutoff2 = std::clamp(baseCutoff2 * std::exp2(envOctaves2 + voiceCutMod2), 40.0f, static_cast<float>(sampleRate_ * 0.46));
-                        auto svf2Type = StateVariableFilter::Type::LowPass;
-                        float bellGainDb = 0.0f, f2Q = effReso2, f2Cutoff = voiceCutoff2;
-                        if (params_.filter2Type == 1) svf2Type = StateVariableFilter::Type::BandPass;
-                        else if (params_.filter2Type == 2) svf2Type = StateVariableFilter::Type::HighPass;
-                        else if (params_.filter2Type == 3) {
-                            svf2Type = StateVariableFilter::Type::Bell;
-                            const float cutoffOpen = (baseCutoff > 800.0f) ? std::clamp((baseCutoff - 800.0f) / 3200.0f, 0.0f, 1.0f) : 0.0f;
-                            const float swellBoost = cutoffOpen * (0.35f + 0.65f * std::max(modWheel_, 1.0f - params_.macroWarmth));
-                            const float effCarve = std::clamp(params_.vocalCarve + vocalCarveMod + swellBoost * 0.45f, 0.0f, 1.0f);
-                            bellGainDb = -14.0f * effCarve;
-                            f2Q = 0.88f; // Covers 450 Hz to 1200 Hz pocket
-                            f2Cutoff = (params_.filter2CutoffHz >= 450.0f && params_.filter2CutoffHz <= 1200.0f) ? voiceCutoff2 : 720.0f;
-                        }
-                        if (params_.filter2Type != 3 && antiHowl2) f2Q = std::clamp(f2Q, 0.35f, 0.60f);
-                        v.filter2L.setParameters(svf2Type, f2Cutoff, f2Q, bellGainDb);
-                        v.filter2R.setParameters(svf2Type, f2Cutoff, f2Q, bellGainDb);
-                        v.flt2ResComp = 1.0f / std::sqrt(1.0f + 0.30f * std::max(0.0f, effReso2 - 0.707f));
-                    }
-
-                    if (flt2DriveActive) {
-                        flt2InL = tubeSat(flt2InL * flt2DriveGain) * flt2DriveComp;
-                        flt2InR = tubeSat(flt2InR * flt2DriveGain) * flt2DriveComp;
-                    }
-
-                    flt2InL = v.filter2L.processSample(flt2InL) * v.flt2ResComp;
-                    flt2InR = v.filter2R.processSample(flt2InR) * v.flt2ResComp;
-                }
+                synth_filter::Filter2Context f2Ctx{
+                    params_.filter2Enabled, params_.filter2Type, baseCutoff, baseCutoff2, params_.filter2CutoffHz,
+                    params_.filter2Resonance, params_.filter2EnvAmount, params_.filter2KeyTrack,
+                    flt2Drive, flt2DriveGain, flt2DriveComp, params_.vocalCarve, vocalCarveMod,
+                    params_.macroWarmth, modWheel_, v.baseFreqHz, fltEnvVal,
+                    voiceOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::Filter2Cutoff)] * 3.6f,
+                    voiceOffsets.offsets[static_cast<std::size_t>(ModMatrix::Destination::Filter2Resonance)] * 0.5f,
+                    voiceCutoffDriftFactor, sampleRate_, updateFilterCoeffs
+                };
+                synth_filter::processFilter2(f2Ctx, v.filter2L, v.filter2R, v.flt2ResComp, flt2InL, flt2InR);
 
                 const float velGain = v.isArpVoice ? (v.velocity * (0.15f + 0.85f * v.velocity)) : (0.40f + 0.60f * v.velocity);
                 const float droneScale = v.isDroneVoice ? (params_.droneLevel * 0.70f) : polyHeadroom;
@@ -364,6 +304,7 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
                 synthR = mid - side;
             }
 
+            airStage_.processSample(synthL, synthR, (s & 15) == 0);
             chorus_.process(synthL, synthR, synthL, synthR);
 
             droneToneSmoother_.setTargetValue(std::clamp(params_.droneTone, 0.0f, 1.0f));

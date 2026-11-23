@@ -29,6 +29,7 @@ void MultiEngineOscillator::prepare(double sampleRate) {
         formantFiltersL_[i].prepare(sampleRate_);
         formantFiltersR_[i].prepare(sampleRate_);
     }
+    noiseGen_.prepare(sampleRate_);
     lastFormantShape_ = -999.0f; lastFormantModel_ = -1;
     (void)getWavetableBank(); (void)getTextureSourceBank();
     updateCoefficients(); reset();
@@ -81,6 +82,7 @@ void MultiEngineOscillator::reset() noexcept {
         formantFiltersL_[i].reset();
         formantFiltersR_[i].reset();
     }
+    noiseGen_.reset();
     lastFormantShape_ = -999.0f; lastFormantModel_ = -1;
     for (int g = 0; g < kNumGrains; ++g) {
         auto& gr = grains_[static_cast<std::size_t>(g)];
@@ -101,6 +103,7 @@ void MultiEngineOscillator::reset() noexcept {
 void MultiEngineOscillator::triggerNote(float baseFrequencyHz, float velocity, uint32_t seedOffset) noexcept {
     shapeSmoother_.reset(params_.shapeMorph);
     rng_ ^= (seedOffset * 747796405u + 2891336453u);
+    noiseGen_.trigger(seedOffset);
 
     const bool isPolyPadEngine = (params_.engine == EngineType::WarmAnalog ||
                                   params_.engine == EngineType::EvolvingWavetable ||

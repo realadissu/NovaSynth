@@ -342,44 +342,7 @@ void MultiEngineOscillator::processSubOscillator(float slotFreq, float shape, fl
 }
 
 void MultiEngineOscillator::processNoiseTransient(float shape, float invSr, float& sigL, float& sigR) noexcept {
-    // Noise / Transient: Pink noise with tilt filter + air sizzle
-    rng_ = rng_ * 1664525u + 1013904223u;
-    const float white = ((static_cast<float>(rng_ & 0xFFFFu) / 32767.5f) - 1.0f);
-
-    // 1-pole low-pass / pinking filter
-    const float pinkCoeff = 0.15f + 0.70f * shape;
-    texFilterState1_ = texFilterState1_ + pinkCoeff * (white - texFilterState1_);
-
-    // High-pass component for air / transient sparkle
-    const float air = white - texFilterState1_;
-    float noiseSig = (texFilterState1_ * (1.0f - shape * 0.5f) + air * shape * 0.8f) * 0.55f;
-
-    switch (params_.modelIndex) {
-        case 0: noiseSig = texFilterState1_ * 0.65f; break;
-        case 1: noiseSig = (std::abs(white) > (0.90f - shape * 0.12f)) ? (white * 1.6f) : (white * 0.08f); break;
-        case 2:
-            texFilterState2_ += 0.42f * (white - texFilterState2_);
-            noiseSig = (white - texFilterState2_) * 0.52f;
-            break;
-        case 3: {
-            constexpr float twoPi = 2.0f * std::numbers::pi_v<float>;
-            const float clickDurSec = std::clamp(params_.duration > 0.001f ? params_.duration : (0.035f + 0.065f * shape), 0.015f, 0.150f);
-            const float clickProgress = phases_[0];
-            if (phases_[0] < 1.0f) phases_[0] += invSr / clickDurSec;
-
-            const float clickEnv = (clickProgress < 1.0f) ? std::exp(-clickProgress * (4.5f + shape * 3.5f)) : 0.0f;
-            texFilterState2_ += 0.55f * (white - texFilterState2_);
-            texFilterState1_ += 0.16f * (white - texFilterState1_);
-            const float clickSine = std::sin(twoPi * std::min(1.0f, clickProgress) * 18.0f) * (1.0f - std::min(1.0f, clickProgress));
-            noiseSig = ((white - texFilterState2_) * 1.6f + texFilterState1_ * 2.2f + clickSine * 0.55f) * clickEnv * 2.2f;
-            noiseSig += texFilterState1_ * 0.045f * (0.25f + 0.75f * shape);
-            break;
-        }
-        default: break;
-    }
-
-    sigL = noiseSig;
-    sigR = noiseSig;
+    noiseGen_.processSample(params_.modelIndex, shape, params_.duration, invSr, sigL, sigR);
 }
 
 } // namespace nova::dsp

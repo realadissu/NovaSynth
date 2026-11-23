@@ -31,6 +31,7 @@ public:
     [[nodiscard]] bool isPinned() const noexcept { return isPinned_; }
     [[nodiscard]] const nova::ui::ArcKnob& getOctKnob() const noexcept { return octKnob_; }
     [[nodiscard]] const nova::ui::ArcKnob& getSemiKnob() const noexcept { return semiKnob_; }
+    [[nodiscard]] const nova::ui::ArcKnob& getFineKnob() const noexcept { return fineKnob_; }
     [[nodiscard]] const nova::ui::ArcKnob& getLevelKnob() const noexcept { return levelKnob_; }
     [[nodiscard]] const nova::ui::ArcKnob& getPanKnob() const noexcept { return panKnob_; }
     [[nodiscard]] const nova::ui::ArcKnob& getMorphKnob() const noexcept { return morphKnob_; }
@@ -97,10 +98,9 @@ private:
     bool isExpanded_ = false;
     bool isPinned_ = false;
 
-    nova::ui::ArcKnob octKnob_, semiKnob_, levelKnob_, morphKnob_, unisonKnob_, panKnob_;
+    nova::ui::ArcKnob octKnob_, semiKnob_, fineKnob_, levelKnob_, morphKnob_, unisonKnob_, panKnob_;
     nova::ui::ArcKnob rateKnob_, scatterKnob_, durKnob_, warpKnob_;
     nova::ui::ArcKnob loopStartKnob_, loopEndKnob_, loopXfadeKnob_;
-
     enum class DragMarker { None, Start, LoopStart, LoopEnd };
     DragMarker activeDragMarker_ = DragMarker::None;
 

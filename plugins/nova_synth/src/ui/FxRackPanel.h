@@ -46,6 +46,7 @@ private:
     nova::ui::ArcKnob macroShimmer_;
     nova::ui::ArcKnob macroAir_;
 
+    nova::ui::ArcKnob analogDrift_;
     nova::ui::ArcKnob masterGain_;
 
     juce::Rectangle<int> cardDelayRect_;

@@ -96,24 +96,28 @@ namespace nova::synth {
                 scatterKnob_.setBounds(rightX + (kw + 4) * 3, yRow1, kw, kh);
                 rateKnob_.setBounds(rightX + (kw + 4) * 4, yRow1, kw, kh);
 
-                octKnob_.setBounds(rightX, yRow2, kw, kh);
-                semiKnob_.setBounds(rightX + (kw + 4), yRow2, kw, kh);
-                durKnob_.setBounds(rightX + (kw + 4) * 2, yRow2, kw, kh);
-                warpKnob_.setBounds(rightX + (kw + 4) * 3, yRow2, kw, kh);
-                panKnob_.setBounds(rightX + (kw + 4) * 4, yRow2, kw, kh);
+                const int kw6 = (rightW - 20) / 6;
+                octKnob_.setBounds(rightX, yRow2, kw6, kh);
+                semiKnob_.setBounds(rightX + (kw6 + 4), yRow2, kw6, kh);
+                fineKnob_.setBounds(rightX + (kw6 + 4) * 2, yRow2, kw6, kh);
+                durKnob_.setBounds(rightX + (kw6 + 4) * 3, yRow2, kw6, kh);
+                warpKnob_.setBounds(rightX + (kw6 + 4) * 4, yRow2, kw6, kh);
+                panKnob_.setBounds(rightX + (kw6 + 4) * 5, yRow2, kw6, kh);
 
                 // Bottom Sleek Spread Slider
                 spreadSlider_.setBounds(rightX, getHeight() - 23, rightW, 18);
             } else if (isWT) {
+                const int kw5 = (rightW - 16) / 5;
                 const int kw = (rightW - 12) / 4;
                 const int kh = (getHeight() - 56) / 2;
                 const int yRow1 = 26;
                 const int yRow2 = 26 + kh + 4;
 
-                octKnob_.setBounds(rightX, yRow1, kw, kh);
-                semiKnob_.setBounds(rightX + kw + 4, yRow1, kw, kh);
-                levelKnob_.setBounds(rightX + (kw + 4) * 2, yRow1, kw, kh);
-                panKnob_.setBounds(rightX + (kw + 4) * 3, yRow1, kw, kh);
+                octKnob_.setBounds(rightX, yRow1, kw5, kh);
+                semiKnob_.setBounds(rightX + kw5 + 4, yRow1, kw5, kh);
+                fineKnob_.setBounds(rightX + (kw5 + 4) * 2, yRow1, kw5, kh);
+                levelKnob_.setBounds(rightX + (kw5 + 4) * 3, yRow1, kw5, kh);
+                panKnob_.setBounds(rightX + (kw5 + 4) * 4, yRow1, kw5, kh);
 
                 morphKnob_.setBounds(rightX, yRow2, kw, kh);
                 warpKnob_.setBounds(rightX + kw + 4, yRow2, kw, kh);
@@ -127,12 +131,13 @@ namespace nova::synth {
                     wavePillRects_[static_cast<std::size_t>(i)] = juce::Rectangle<int>(rightX + i * (pillW + gap), 26, pillW, 20);
                 }
 
-                const int kw4 = (rightW - 12) / 4;
+                const int kw5 = (rightW - 16) / 5;
                 const int kh = (getHeight() - 56) / 2;
-                octKnob_.setBounds(rightX, 50, kw4, kh);
-                semiKnob_.setBounds(rightX + kw4 + 4, 50, kw4, kh);
-                levelKnob_.setBounds(rightX + (kw4 + 4) * 2, 50, kw4, kh);
-                panKnob_.setBounds(rightX + (kw4 + 4) * 3, 50, kw4, kh);
+                octKnob_.setBounds(rightX, 50, kw5, kh);
+                semiKnob_.setBounds(rightX + kw5 + 4, 50, kw5, kh);
+                fineKnob_.setBounds(rightX + (kw5 + 4) * 2, 50, kw5, kh);
+                levelKnob_.setBounds(rightX + (kw5 + 4) * 3, 50, kw5, kh);
+                panKnob_.setBounds(rightX + (kw5 + 4) * 4, 50, kw5, kh);
 
                 const int kw3 = (rightW - 8) / 3;
                 morphKnob_.setBounds(rightX, 50 + kh + 2, kw3, kh);
@@ -163,12 +168,14 @@ namespace nova::synth {
                 unisonKnob_.setBounds(rightX + (kw5 + 4) * 3, 74, kw5, kh);
                 panKnob_.setBounds(rightX + (kw5 + 4) * 4, 74, kw5, kh);
             } else if (isPluck) {
+                const int kw5 = (rightW - 16) / 5;
                 const int kw = (rightW - 12) / 4;
                 const int kh = (getHeight() - 56) / 2;
-                octKnob_.setBounds(rightX, 26, kw, kh);
-                semiKnob_.setBounds(rightX + kw + 4, 26, kw, kh);
-                levelKnob_.setBounds(rightX + (kw + 4) * 2, 26, kw, kh);
-                panKnob_.setBounds(rightX + (kw + 4) * 3, 26, kw, kh);
+                octKnob_.setBounds(rightX, 26, kw5, kh);
+                semiKnob_.setBounds(rightX + kw5 + 4, 26, kw5, kh);
+                fineKnob_.setBounds(rightX + (kw5 + 4) * 2, 26, kw5, kh);
+                levelKnob_.setBounds(rightX + (kw5 + 4) * 3, 26, kw5, kh);
+                panKnob_.setBounds(rightX + (kw5 + 4) * 4, 26, kw5, kh);
 
                 morphKnob_.setBounds(rightX, 26 + kh + 4, kw, kh);
                 unisonKnob_.setBounds(rightX + kw + 4, 26 + kh + 4, kw, kh);
@@ -188,12 +195,13 @@ namespace nova::synth {
                 const int kh = (getHeight() - 56) / 2;
                 const int yRow2 = 50 + kh + 2;
 
-                // Row 1: Tuning & Output (4 equal columns: OCT, SEMI, LEVEL, PAN)
-                const int kw4 = (rightW - 12) / 4;
-                octKnob_.setBounds(rightX, yRow1, kw4, kh);
-                semiKnob_.setBounds(rightX + kw4 + 4, yRow1, kw4, kh);
-                levelKnob_.setBounds(rightX + (kw4 + 4) * 2, yRow1, kw4, kh);
-                panKnob_.setBounds(rightX + (kw4 + 4) * 3, yRow1, kw4, kh);
+                // Row 1: Tuning & Output (5 equal columns: OCT, SEMI, FINE, LEVEL, PAN)
+                const int kw5 = (rightW - 16) / 5;
+                octKnob_.setBounds(rightX, yRow1, kw5, kh);
+                semiKnob_.setBounds(rightX + kw5 + 4, yRow1, kw5, kh);
+                fineKnob_.setBounds(rightX + (kw5 + 4) * 2, yRow1, kw5, kh);
+                levelKnob_.setBounds(rightX + (kw5 + 4) * 3, yRow1, kw5, kh);
+                panKnob_.setBounds(rightX + (kw5 + 4) * 4, yRow1, kw5, kh);
 
                 // Row 2: Sample Shaping & Looping (6 equal columns: START, LOOP ST, LOOP END, XFADE, SPREAD, DETUNE)
                 const int kw6 = (rightW - 20) / 6;

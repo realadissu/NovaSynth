@@ -49,10 +49,10 @@ void JornaRightColumn::paint(juce::Graphics& g) {
     g.drawRoundedRectangle(fltTypeRect_.toFloat(), 4.0f, 1.0f);
 
     if (activeFilterTab_ == 0) {
-        static constexpr std::array<const char*, 3> kFltNames = { "LOW 24", "BAND 12", "HIGH 24" };
+        static constexpr std::array<const char*, 4> kFltNames = { "LOW 24", "BAND 12", "HIGH 24", "LOW 12" };
         g.setFont(theme_.getSectionFont(13.0f));
         g.setColour(theme_.textPrimary);
-        g.drawText("<  " + juce::String(kFltNames[static_cast<std::size_t>(std::clamp(params.filterType, 0, 2))]) + "  >",
+        g.drawText("<  " + juce::String(kFltNames[static_cast<std::size_t>(std::clamp(params.filterType, 0, 3))]) + "  >",
                    fltTypeRect_, juce::Justification::centred);
     } else {
         static constexpr std::array<const char*, 4> kFlt2Names = { "LOW 24", "BAND 12", "HIGH 24", "CARVE BELL" };
