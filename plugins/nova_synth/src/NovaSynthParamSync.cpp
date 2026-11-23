@@ -207,6 +207,7 @@ void NovaSynthProcessor::syncParametersFromAPVTS() noexcept {
     if (auto* pMix = apvts_.getRawParameterValue("chorusMix")) p.chorusMix = pMix->load();
     if (auto* pRate = apvts_.getRawParameterValue("chorusRateHz")) p.chorusRateHz = pRate->load();
     if (auto* pDepth = apvts_.getRawParameterValue("chorusDepth")) p.chorusDepth = pDepth->load();
+    if (auto* pWarmth = apvts_.getRawParameterValue("chorusWarmth")) p.chorusWarmth = pWarmth->load();
 
     p.delayEnabled  = apvts_.getRawParameterValue("delayEnabled")->load() > 0.5f;
     if (auto* pDs = apvts_.getRawParameterValue("delaySync")) p.delaySync = pDs->load() > 0.5f;

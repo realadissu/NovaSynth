@@ -160,6 +160,9 @@ void NovaSynthProcessor::appendModulationAndFxParameters(std::vector<std::unique
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{"chorusDepth", 1}, "Chorus Depth",
         juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.65f));
+    params.push_back(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{"chorusWarmth", 1}, "Chorus Warmth",
+        juce::NormalisableRange<float>(0.0f, 1.0f, 0.01f), 0.60f));
 
     // Embedded Stereo Tape / Ping-Pong Delay
     params.push_back(std::make_unique<juce::AudioParameterBool>(

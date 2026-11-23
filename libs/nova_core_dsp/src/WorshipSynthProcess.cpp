@@ -269,13 +269,16 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
                         else if (params_.filterType == 2) svfType = StateVariableFilter::Type::HighPass;
 
                         if (isFourPoleLadder) {
-                            const float maxQ = antiHowl ? 0.60f : 2.45f;
-                            const float stageQ = std::clamp(std::sqrt(effReso), 0.50f, maxQ);
-                            const float cutStage2 = std::clamp(voiceCutoff * 1.03f, 40.0f, static_cast<float>(sampleRate_ * 0.46));
-                            v.filterL.setParameters(svfType, voiceCutoff, stageQ);
-                            v.filterR.setParameters(svfType, voiceCutoff, stageQ);
-                            v.filterStage2L.setParameters(svfType, cutStage2, stageQ);
-                            v.filterStage2R.setParameters(svfType, cutStage2, stageQ);
+                            constexpr float kButterQ1 = 0.5411961f;
+                            constexpr float kButterQ2 = 1.3065630f;
+                            const float resoExcess = std::max(0.0f, effReso - 0.35f);
+                            const float r = resoExcess / (1.0f + 0.14f * resoExcess);
+                            const float stageQ1 = std::clamp(kButterQ1 + 0.45f * r, kButterQ1, 2.20f);
+                            const float stageQ2 = std::clamp(kButterQ2 + 0.72f * r, kButterQ2, 3.80f);
+                            v.filterL.setParameters(svfType, voiceCutoff, stageQ1);
+                            v.filterR.setParameters(svfType, voiceCutoff, stageQ1);
+                            v.filterStage2L.setParameters(svfType, voiceCutoff, stageQ2);
+                            v.filterStage2R.setParameters(svfType, voiceCutoff, stageQ2);
                         } else {
                             const float maxQ = antiHowl ? 0.60f : 6.0f;
                             const float svfQ = std::clamp(effReso, 0.35f, maxQ);

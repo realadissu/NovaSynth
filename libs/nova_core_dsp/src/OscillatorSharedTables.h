@@ -333,7 +333,7 @@ struct SharedTextureSourceBank {
                     const float evolve = 1.0f + 0.10f * std::sin(wTot * 2.0f + fh * 0.45f);
                     pad += (warmSaw + singingCore) * evolve * std::sin(fh * w + dispPhase(h));
                 }
-                const float warmSub = 0.28f * std::sin(0.5f * w);
+                const float warmSub = 0.28f * std::sin(4.0f * wTot);
                 tables[5][static_cast<std::size_t>(i)] = pad + warmSub;
             }
         }

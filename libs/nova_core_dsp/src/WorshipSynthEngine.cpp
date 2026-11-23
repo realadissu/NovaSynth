@@ -40,9 +40,8 @@ WorshipSynthEngine::WorshipSynthEngine() {
     modMatrix_.setSlot(0, ModMatrix::Source::Lfo1,        ModMatrix::Destination::FilterCutoff, 0.35f, true);
     modMatrix_.setSlot(1, ModMatrix::Source::Lfo2,        ModMatrix::Destination::Osc1Shape,    0.25f, true);
     modMatrix_.setSlot(2, ModMatrix::Source::MacroMotion, ModMatrix::Destination::Osc2Shape,    0.40f, true);
-    modMatrix_.setSlot(3, ModMatrix::Source::MacroWarmth, ModMatrix::Destination::FilterCutoff, -0.35f, true);
-    modMatrix_.setSlot(4, ModMatrix::Source::MacroWarmth, ModMatrix::Destination::VocalCarve,   -0.30f, true);
-    modMatrix_.setSlot(5, ModMatrix::Source::ModWheel,    ModMatrix::Destination::VocalCarve,    0.35f, true);
+    modMatrix_.setSlot(3, ModMatrix::Source::MacroWarmth, ModMatrix::Destination::VocalCarve,   -0.30f, true);
+    modMatrix_.setSlot(4, ModMatrix::Source::ModWheel,    ModMatrix::Destination::VocalCarve,    0.35f, true);
 }
 
 void WorshipSynthEngine::prepare(double sampleRate, int maxBlockSize) {

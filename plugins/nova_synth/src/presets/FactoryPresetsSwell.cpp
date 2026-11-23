@@ -123,7 +123,7 @@ void registerFactoryPresetsSwell(nova::plugin::PresetManager& presetManager_) {
          {"fltAttack", 0.42f}, {"fltDecay", 1.8f}, {"fltSustain", 0.56f}, {"fltRelease", 1.35f},
          {"modAttack", 0.50f}, {"modDecay", 1.8f}, {"modSustain", 0.88f}, {"modRelease", 1.38f},
          {"lfo1RateHz", 0.24f}, {"lfo1Depth", 0.16f},
-         {"lfo4Waveform", 6.0f}, {"lfo4Sync", 1.0f}, {"lfo4SyncDiv", 10.0f}, {"lfo4Depth", 0.45f},
+         {"lfo4Shape", 4.0f}, {"lfo4Sync", 1.0f}, {"lfo4SyncDiv", 10.0f}, {"lfo4Depth", 0.45f},
          {"chorusEnabled", 1.0f}, {"chorusMode", 1.0f}, {"chorusMix", 0.42f}, {"chorusRateHz", 0.55f}, {"chorusDepth", 0.48f},
          {"macroWarmth", 0.50f}, {"macroMotion", 0.30f}, {"macroShimmer", 0.0f}, {"macroAir", 0.35f},
          {"delayEnabled", 1.0f}, {"delaySync", 1.0f}, {"delaySyncDiv", 4.0f}, {"delayMix", 0.15f}, {"delayFeedback", 0.22f},

@@ -100,6 +100,10 @@ private:
 
     void updateCoefficients() noexcept;
 
+    [[nodiscard]] float computeTextureGrainRate(int model, int grainIdx, float randBipolar, float sprayAmt, float& outAmp) const noexcept;
+    void triggerSamplePlayback(float baseFrequencyHz) noexcept;
+    void triggerPhysicalPluck(float baseFrequencyHz, float velocity) noexcept;
+
     void processOrganicTexture(float slotFreq, float shape, float invSr, float& sigL, float& sigR) noexcept;
     void processPhysicalPluck(float slotFreq, float shape, float invSr, float& sigL, float& sigR) noexcept;
     void processSubOscillator(float slotFreq, float shape, float invSr, float& sigL, float& sigR) noexcept;
@@ -114,6 +118,10 @@ private:
     std::array<float, kMaxUnison> unisonPitchMultipliers_{ 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
     std::array<float, kMaxUnison> unisonPanL_{ 0.7071f, 0.7071f, 0.7071f, 0.7071f, 0.7071f };
     std::array<float, kMaxUnison> unisonPanR_{ 0.7071f, 0.7071f, 0.7071f, 0.7071f, 0.7071f };
+    std::array<float, kMaxUnison> superDetuneRatio2_{ 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };
+    std::array<float, kMaxUnison> superDetuneRatioOct_{ 2.0f, 2.0f, 2.0f, 2.0f, 2.0f };
+    double sampleDetuneRatioL_ = 1.0;
+    double sampleDetuneRatioR_ = 1.0;
     float basePitchRatio_ = 1.0f;
     float pluckDelayRatioR_ = 1.0f;
     float lastPitchModSemitones_ = -999.0f;
@@ -121,6 +129,9 @@ private:
 
     // Unison phases & slow analog drift states
     std::array<float, kMaxUnison> phases_{};
+    std::array<float, kMaxUnison> subPhases_{};
+    std::array<float, kMaxUnison> superPhases2_{};
+    std::array<float, kMaxUnison> superPhasesOct_{};
     std::array<float, kMaxUnison> driftOffsetsCents_{};
     uint32_t rng_ = 0x9E3779B9u;
 
@@ -167,6 +178,9 @@ private:
     double samplePlayhead_ = 0.0;
     double sampleDirection_ = 1.0;
     bool sampleFinished_ = false;
+    double samplePlayheadR_ = 0.0;
+    double sampleDirectionR_ = 1.0;
+    bool sampleFinishedR_ = false;
 };
 
 } // namespace nova::dsp

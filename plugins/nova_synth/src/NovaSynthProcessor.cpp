@@ -242,8 +242,7 @@ void NovaSynthProcessor::onPresetLoaded() {
         mm.setSlot(0, nova::dsp::ModMatrix::Source::Lfo1,        nova::dsp::ModMatrix::Destination::FilterCutoff, 0.35f, true);
         mm.setSlot(1, nova::dsp::ModMatrix::Source::Lfo2,        nova::dsp::ModMatrix::Destination::Osc1Shape,    0.25f, true);
         mm.setSlot(2, nova::dsp::ModMatrix::Source::MacroMotion, nova::dsp::ModMatrix::Destination::Osc2Shape,    0.40f, true);
-        mm.setSlot(3, nova::dsp::ModMatrix::Source::MacroWarmth, nova::dsp::ModMatrix::Destination::FilterCutoff, -0.35f, true);
-        mm.setSlot(4, nova::dsp::ModMatrix::Source::ModWheel,    nova::dsp::ModMatrix::Destination::FilterCutoff, 0.45f, true);
+        mm.setSlot(3, nova::dsp::ModMatrix::Source::ModWheel,    nova::dsp::ModMatrix::Destination::FilterCutoff, 0.45f, true);
     }
 }
 

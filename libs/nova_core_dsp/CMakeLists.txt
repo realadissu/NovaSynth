@@ -4,6 +4,7 @@ add_library(nova_core_dsp STATIC
     src/MultiEngineOscillator.cpp
     src/MultiEngineOscillatorEngines.cpp
     src/MultiEngineOscillatorPreview.cpp
+    src/MultiEngineOscillatorSample.cpp
     src/SampleBankData.cpp
     src/WorshipSynthDroneArp.cpp
     src/WorshipSynthEngine.cpp

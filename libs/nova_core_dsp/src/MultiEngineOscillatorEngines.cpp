@@ -7,6 +7,27 @@
 
 namespace nova::dsp {
 
+float MultiEngineOscillator::computeTextureGrainRate(int model,
+                                                      int grainIdx,
+                                                      float randBipolar,
+                                                      float sprayAmt,
+                                                      float& outAmp) const noexcept {
+    const float microDetune = randBipolar * (0.0025f + 0.0125f * sprayAmt);
+    outAmp = 1.0f;
+    switch (model) {
+        case 0: return 1.0f + microDetune * 1.05f;
+        case 1: return 1.0f + microDetune * 1.15f;
+        case 2: return 1.0f + microDetune * 1.25f;
+        case 3:
+            if ((grainIdx & 7) == 3) { outAmp = 0.24f; return 4.0f * (1.0f + microDetune); }
+            if ((grainIdx & 3) == 0) { outAmp = 0.45f; return 2.0f * (1.0f + microDetune); }
+            return 1.0f + microDetune;
+        case 4: return 1.0f + microDetune * 1.30f;
+        case 5:
+        default: return 1.0f + microDetune * 0.90f;
+    }
+}
+
 void MultiEngineOscillator::processOrganicTexture(float slotFreq, float shape, float invSr, float& sigL, float& sigR) noexcept {
     const auto& texBank = getTextureSourceBank();
     const int model = std::clamp(params_.modelIndex, 0, SharedTextureSourceBank::kTexTables - 1);
@@ -15,7 +36,20 @@ void MultiEngineOscillator::processOrganicTexture(float slotFreq, float shape, f
     // Playback increment: 512 samples per waveform cycle in the 4096-sample buffer
     const float baseInc = std::min(400.0f, slotFreq * 512.0f * invSr);
     constexpr float twoPi = 2.0f * std::numbers::pi_v<float>;
-    constexpr std::array<float, 5> kRainHarmonics = { 1.0f, 1.5f, 2.0f, 3.0f, 4.0f };
+    const float sprayAmt = std::clamp(params_.detune, 0.0f, 1.0f);
+    const float rateAmt = std::clamp(params_.rate, 0.0f, 1.0f);
+    const float scatterAmt = std::clamp(params_.scatter, 0.0f, 1.0f);
+    const float effShape = std::clamp(shape, 0.0f, 1.0f);
+
+    texGrainPhase_ += (0.08f + 0.65f * rateAmt) * invSr;
+    if (texGrainPhase_ >= 1.0f) texGrainPhase_ -= 1.0f;
+
+    float flutterMult = 1.0f;
+    if (model == 2) {
+        flutterPhase_ += (1.6f + 3.2f * rateAmt) * invSr;
+        if (flutterPhase_ >= 1.0f) flutterPhase_ -= 1.0f;
+        flutterMult = 1.0f + 0.0025f * std::sin(twoPi * flutterPhase_) * (0.4f + 0.6f * rateAmt);
+    }
 
     float grainSumL = 0.0f, grainSumR = 0.0f;
 
@@ -23,20 +57,21 @@ void MultiEngineOscillator::processOrganicTexture(float slotFreq, float shape, f
         auto& gr = grains_[static_cast<std::size_t>(g)];
 
         // Hann window: 0.5 * (1 - cos(2*pi * age / length))
-        const float normAge = gr.age / gr.lengthSamples;
+        const float normAge = std::clamp(gr.age / gr.lengthSamples, 0.0f, 1.0f);
         const float win = 0.5f * (1.0f - std::cos(twoPi * normAge));
         const float s = readTextureHermite(activeTable, gr.pos);
-        const float sWin = s * win * gr.amp;
+        const float nyquistGuard = (slotFreq * gr.rate * invSr < 0.45f) ? 1.0f : 0.0f;
+        const float sWin = s * win * gr.amp * nyquistGuard;
 
         grainSumL += sWin * gr.panL;
         grainSumR += gr.panR * sWin;
 
         // Advance playhead
-        gr.pos += gr.rate * baseInc;
+        gr.pos += std::min(400.0f, gr.rate * flutterMult * baseInc);
         if (gr.pos >= 4096.0f) gr.pos = std::fmod(gr.pos, 4096.0f);
         else if (gr.pos < 0.0f) gr.pos = std::fmod(gr.pos, 4096.0f) + 4096.0f;
 
-        gr.age += 1.0f;
+        gr.age += (0.45f + 1.10f * rateAmt);
         if (gr.age >= gr.lengthSamples) {
             // Respawn grain
             rng_ = rng_ * 1664525u + 1013904223u;
@@ -50,24 +85,16 @@ void MultiEngineOscillator::processOrganicTexture(float slotFreq, float shape, f
             gr.lengthSamples = std::clamp(durSec * static_cast<float>(sampleRate_) * (0.80f + 0.40f * r1), 400.0f, 24000.0f);
             gr.age = 0.0f;
 
-            // Scatter playhead position
-            const float scatterOffset = params_.scatter * r2 * 4096.0f;
-            gr.pos = std::fmod(gr.pos + scatterOffset + 512.0f, 4096.0f);
+            // Scatter playhead around POS + slow drift
+            const float basePos = std::fmod((effShape + texGrainPhase_) * 4096.0f, 4096.0f);
+            gr.pos = std::fmod(basePos + scatterAmt * r2 * 4096.0f, 4096.0f);
 
             // Stereo pan spread
             const float uPan = std::clamp((r3 * 2.0f - 1.0f) * params_.spread, -1.0f, 1.0f);
             const float panAngle = (uPan + 1.0f) * 0.25f * std::numbers::pi_v<float>;
             gr.panL = std::cos(panAngle);
             gr.panR = std::sin(panAngle);
-            gr.amp = 1.0f;
-
-            switch (model) {
-                case 0: gr.rate = (g % 4 == 0) ? 2.0f : ((g % 4 == 1) ? 0.5f : (1.0f + ((r3 * 2.0f - 1.0f) * 0.004f))); break;
-                case 1: gr.rate = (g % 4 == 0) ? 0.5f : (1.0f + ((r3 * 2.0f - 1.0f) * 0.005f)); break;
-                case 2: gr.rate = (g % 4 == 0) ? 1.5f : ((g % 4 == 1) ? 2.0f : 1.0f); break;
-                case 3: gr.rate = kRainHarmonics[static_cast<std::size_t>(g % 5)]; break;
-                case 4: default: gr.rate = (g % 3 == 0) ? 2.0f : ((g % 3 == 1) ? 1.5f : 1.0f); break;
-            }
+            gr.rate = computeTextureGrainRate(model, g, r3 * 2.0f - 1.0f, sprayAmt, gr.amp);
         }
     }
 
@@ -78,7 +105,6 @@ void MultiEngineOscillator::processOrganicTexture(float slotFreq, float shape, f
 
     switch (model) {
         case 0: { // Ambient Choir Breath: gentle acoustic vocal tract formant body (/u/ -> /o/ -> /a/ -> /i/)
-            const float effShape = std::clamp(shape, 0.0f, 1.0f);
             if (std::abs(effShape - lastFormantShape_) > 0.002f || lastFormantModel_ != 0) {
                 lastFormantShape_ = effShape;
                 lastFormantModel_ = 0;
@@ -132,25 +158,90 @@ void MultiEngineOscillator::processOrganicTexture(float slotFreq, float shape, f
             texR = grainSumR * 0.70f + woodR * 0.30f;
             break;
         }
-        case 2: { // Tape Halo: clean headroom scaling
-            flutterPhase_ += 3.2f * invSr;
-            if (flutterPhase_ >= 1.0f) flutterPhase_ -= 1.0f;
+        case 2: // Tape Halo: clean headroom scaling
             texL = grainSumL * 0.75f;
             texR = grainSumR * 0.75f;
             break;
-        }
         case 3: // Cathedral Rain Cloud: crystalline high sheen
             texL = grainSumL * 0.95f;
             texR = grainSumR * 0.95f;
             break;
-        case 4: default: // Warm Wind & Air Swell
+        case 4: // Warm Wind & Air Swell
             texL = grainSumL * 0.90f;
             texR = grainSumR * 0.90f;
             break;
+        case 5:
+        default: // Velvet Warmth Pad
+            texL = grainSumL * 0.95f;
+            texR = grainSumR * 0.95f;
+            break;
+    }
+
+    if (model != 0) {
+        const float tiltCutHz = 680.0f + effShape * effShape * 11500.0f;
+        const float wTilt = twoPi * tiltCutHz * invSr;
+        const float lpAlpha = std::clamp(wTilt / (1.0f + wTilt), 0.02f, 0.98f);
+        texFilterState1_ += lpAlpha * (texL - texFilterState1_);
+        texFilterState2_ += lpAlpha * (texR - texFilterState2_);
+        const float airLift = std::max(0.0f, effShape - 0.5f) * 0.45f;
+        texL = texFilterState1_ + (texL - texFilterState1_) * airLift;
+        texR = texFilterState2_ + (texR - texFilterState2_) * airLift;
     }
 
     sigL = texL;
     sigR = texR;
+}
+
+void MultiEngineOscillator::triggerPhysicalPluck(float baseFrequencyHz, float velocity) noexcept {
+    const float freq = std::clamp(baseFrequencyHz * basePitchRatio_, 25.0f, 4000.0f);
+    const int periodSamples = std::clamp(static_cast<int>(sampleRate_ / freq), 8, kMaxStringDelay - 8);
+    const float velScale = std::clamp(0.35f + 0.65f * velocity, 0.1f, 1.0f);
+    const float pluckHardness = std::clamp(params_.shapeMorph, 0.05f, 0.95f);
+    const float srF = static_cast<float>(sampleRate_);
+    float smoothExcL = 0.0f;
+    switch (params_.modelIndex) {
+        case 0:
+            for (int i = 0; i < periodSamples; ++i) {
+                rng_ = rng_ * 1664525u + 1013904223u;
+                const float nL = (static_cast<float>(rng_ & 0xFFFFu) / 32767.5f) - 1.0f;
+                const float win = std::sin(std::numbers::pi_v<float> * static_cast<float>(i) / static_cast<float>(periodSamples));
+                smoothExcL += (0.35f + 0.55f * pluckHardness) * (nL - smoothExcL);
+                const float body = std::sin(2.0f * std::numbers::pi_v<float> * static_cast<float>(i) / static_cast<float>(periodSamples));
+                stringDelayL_[static_cast<std::size_t>(i)] = stringDelayR_[static_cast<std::size_t>(i)] = (smoothExcL * 1.5f + body * 0.70f) * win * velScale;
+            }
+            break;
+        case 1:
+            for (int i = 0; i < periodSamples; ++i) {
+                rng_ = rng_ * 1664525u + 1013904223u;
+                const float nL = (static_cast<float>(rng_ & 0xFFFFu) / 32767.5f) - 1.0f;
+                const float win = std::pow(std::sin(std::numbers::pi_v<float> * static_cast<float>(i) / static_cast<float>(periodSamples)), 1.8f);
+                smoothExcL += (0.16f + 0.45f * pluckHardness) * (nL - smoothExcL);
+                const float body = std::sin(std::numbers::pi_v<float> * static_cast<float>(i) / static_cast<float>(periodSamples));
+                stringDelayL_[static_cast<std::size_t>(i)] = stringDelayR_[static_cast<std::size_t>(i)] = (smoothExcL * 0.85f + body * 1.35f) * win * velScale;
+            }
+            break;
+        case 2:
+            modalPhases_.fill(0.0f);
+            modalAmplitudes_ = { 0.95f * velScale, (0.55f + 0.30f * pluckHardness) * velScale, (0.35f + 0.25f * pluckHardness) * velScale, (0.20f + 0.20f * pluckHardness) * velScale };
+            modalDecays_ = { 1.0f - (12.0f / (srF * (0.8f + pluckHardness * 1.8f))), 1.0f - (28.0f / (srF * (0.5f + pluckHardness * 1.2f))),
+                             1.0f - (55.0f / (srF * (0.3f + pluckHardness * 0.8f))), 1.0f - (90.0f / (srF * (0.2f + pluckHardness * 0.5f))) };
+            for (int i = 0; i < periodSamples; ++i) {
+                const float click = (i < 8) ? ((8 - i) * 0.12f * velScale) : 0.0f;
+                stringDelayL_[static_cast<std::size_t>(i)] = stringDelayR_[static_cast<std::size_t>(i)] = click;
+            }
+            break;
+        case 3: default:
+            modalPhases_.fill(0.0f);
+            modalAmplitudes_ = { 0.90f * velScale, 0.65f * velScale, (0.45f + 0.35f * pluckHardness) * velScale, (0.25f + 0.30f * pluckHardness) * velScale };
+            modalDecays_ = { 1.0f - (4.0f / (srF * (1.5f + pluckHardness * 2.5f))), 1.0f - (9.0f / (srF * (1.2f + pluckHardness * 2.0f))),
+                             1.0f - (18.0f / (srF * (0.8f + pluckHardness * 1.5f))), 1.0f - (35.0f / (srF * (0.5f + pluckHardness * 1.0f))) };
+            for (int i = 0; i < periodSamples; ++i) {
+                const float chimeClick = (i < 5) ? ((5 - i) * 0.15f * velScale) : 0.0f;
+                stringDelayL_[static_cast<std::size_t>(i)] = stringDelayR_[static_cast<std::size_t>(i)] = chimeClick;
+            }
+            break;
+    }
+    stringWritePos_ = 0; stringLpStateL_ = 0.0f; stringLpStateR_ = 0.0f;
 }
 
 void MultiEngineOscillator::processPhysicalPluck(float slotFreq, float shape, float invSr, float& sigL, float& sigR) noexcept {
@@ -289,108 +380,6 @@ void MultiEngineOscillator::processNoiseTransient(float shape, float invSr, floa
 
     sigL = noiseSig;
     sigR = noiseSig;
-}
-
-void MultiEngineOscillator::processSamplePlayback(float slotFreq, float& sigL, float& sigR) noexcept {
-    if (sampleFinished_ || activeSampleZone_ == nullptr) return;
-    const auto& smp = SampleBank::getSample(params_.modelIndex);
-    const auto* zone = activeSampleZone_;
-    if (zone->pcmL == nullptr || zone->numSamples <= 8) return;
-
-    const float detuneCents = std::clamp(params_.scatter, 0.0f, 1.0f) * 50.0f;
-    const float detuneRatio = std::pow(2.0f, detuneCents / 1200.0f);
-    const double playbackRate = (static_cast<double>(slotFreq) * static_cast<double>(detuneRatio) / static_cast<double>(zone->rootFrequencyHz)) * (smp.sampleRate / sampleRate_);
-    const double step = playbackRate * sampleDirection_;
-
-    const int numS = zone->numSamples;
-    const double lStart = std::clamp(static_cast<double>(params_.sampleLoopStart), 0.0, 0.98) * static_cast<double>(numS - 4);
-    double lEnd = std::clamp(static_cast<double>(params_.sampleLoopEnd), 0.02, 1.0) * static_cast<double>(numS - 4);
-    if (lEnd < lStart + 100.0) lEnd = std::min(static_cast<double>(numS - 4), lStart + 100.0);
-    const double loopLen = lEnd - lStart;
-
-    const double xfadeUser = static_cast<double>(std::clamp(params_.sampleCrossfade, 0.0f, 0.25f));
-    const double xfadeLen = std::max(16.0, std::min(loopLen * 0.25, xfadeUser * loopLen));
-
-    const int16_t* pcmL = zone->pcmL;
-    const int16_t* pcmR = (zone->pcmR != nullptr) ? zone->pcmR : zone->pcmL;
-    const float spreadAmt = std::clamp(params_.detune, 0.0f, 1.0f);
-    const double rightDelay = static_cast<double>(spreadAmt * 0.015f * sampleRate_);
-
-    float rawL = 0.0f, rawR = 0.0f;
-
-    switch (params_.sampleLoopMode) {
-        case 0: { // One-Shot (No Looping)
-            if (samplePlayhead_ >= numS - 4 || samplePlayhead_ < 0.0) {
-                sampleFinished_ = true;
-                return;
-            }
-            rawL = readSampleHermite(pcmL, numS, samplePlayhead_);
-            rawR = readSampleHermite(pcmR, numS, std::max(0.0, samplePlayhead_ - rightDelay));
-            samplePlayhead_ += step;
-            break;
-        }
-        case 1: { // Forward Loop with Equal-Power Crossfade
-            if (samplePlayhead_ < lStart || samplePlayhead_ < lEnd - xfadeLen) {
-                rawL = readSampleHermite(pcmL, numS, samplePlayhead_);
-                rawR = readSampleHermite(pcmR, numS, std::max(0.0, samplePlayhead_ - rightDelay));
-            } else if (samplePlayhead_ < lEnd) {
-                const double t = (samplePlayhead_ - (lEnd - xfadeLen)) / xfadeLen;
-                const float angle = static_cast<float>(t * (std::numbers::pi * 0.5));
-                const float g1 = std::cos(angle), g2 = std::sin(angle);
-                const double secPlayhead = lStart + (samplePlayhead_ - (lEnd - xfadeLen));
-                const float p1L = readSampleHermite(pcmL, numS, samplePlayhead_), p1R = readSampleHermite(pcmR, numS, std::max(0.0, samplePlayhead_ - rightDelay));
-                const float p2L = readSampleHermite(pcmL, numS, secPlayhead), p2R = readSampleHermite(pcmR, numS, std::max(0.0, secPlayhead - rightDelay));
-                rawL = p1L * g1 + p2L * g2;
-                rawR = p1R * g1 + p2R * g2;
-            } else {
-                samplePlayhead_ = (lStart + xfadeLen) + std::fmod(samplePlayhead_ - lEnd, loopLen);
-                rawL = readSampleHermite(pcmL, numS, samplePlayhead_);
-                rawR = readSampleHermite(pcmR, numS, std::max(0.0, samplePlayhead_ - rightDelay));
-            }
-            samplePlayhead_ += step;
-            break;
-        }
-        case 2: { // Ping-Pong Loop (<->)
-            if (sampleDirection_ > 0.0 && samplePlayhead_ >= lEnd) {
-                sampleDirection_ = -1.0;
-                samplePlayhead_ = lEnd - (samplePlayhead_ - lEnd);
-            } else if (sampleDirection_ <= 0.0 && samplePlayhead_ <= lStart) {
-                sampleDirection_ = 1.0;
-                samplePlayhead_ = lStart + (lStart - samplePlayhead_);
-            }
-            rawL = readSampleHermite(pcmL, numS, samplePlayhead_);
-            rawR = readSampleHermite(pcmR, numS, std::max(0.0, samplePlayhead_ - rightDelay));
-            samplePlayhead_ += playbackRate * sampleDirection_;
-            break;
-        }
-        case 3: { // Reverse Loop (<-) with Equal-Power Crossfade
-            if (samplePlayhead_ > lEnd || samplePlayhead_ > lStart + xfadeLen) {
-                rawL = readSampleHermite(pcmL, numS, samplePlayhead_);
-                rawR = readSampleHermite(pcmR, numS, std::max(0.0, samplePlayhead_ - rightDelay));
-            } else if (samplePlayhead_ > lStart) {
-                const double t = ((lStart + xfadeLen) - samplePlayhead_) / xfadeLen;
-                const float angle = static_cast<float>(t * (std::numbers::pi * 0.5));
-                const float g1 = std::cos(angle), g2 = std::sin(angle);
-                const double secPlayhead = lEnd - ((lStart + xfadeLen) - samplePlayhead_);
-                const float p1L = readSampleHermite(pcmL, numS, samplePlayhead_), p1R = readSampleHermite(pcmR, numS, std::max(0.0, samplePlayhead_ - rightDelay));
-                const float p2L = readSampleHermite(pcmL, numS, secPlayhead), p2R = readSampleHermite(pcmR, numS, std::max(0.0, secPlayhead - rightDelay));
-                rawL = p1L * g1 + p2L * g2;
-                rawR = p1R * g1 + p2R * g2;
-            } else {
-                samplePlayhead_ = (lEnd - xfadeLen) - std::fmod(lStart - samplePlayhead_, loopLen);
-                rawL = readSampleHermite(pcmL, numS, samplePlayhead_);
-                rawR = readSampleHermite(pcmR, numS, std::max(0.0, samplePlayhead_ - rightDelay));
-            }
-            samplePlayhead_ += step;
-            break;
-        }
-    }
-
-    const float mid = 0.5f * (rawL + rawR);
-    const float side = 0.5f * (rawL - rawR);
-    const float smpModelScale = (params_.modelIndex == 7) ? 4.2f : 1.0f;
-    sigL = (mid + spreadAmt * side) * smpModelScale;
-    sigR = (mid - spreadAmt * side) * smpModelScale;
 }
 
 } // namespace nova::dsp

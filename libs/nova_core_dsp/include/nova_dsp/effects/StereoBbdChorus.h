@@ -54,7 +54,7 @@ public:
         writePos_ = 0;
         phase1_ = 0.0f;
         phase2_ = 0.25f;
-        phase3_ = 0.50f;
+        phase3_ = 2.0f / 3.0f;
         lpStateL_ = 0.0f;
         lpStateR_ = 0.0f;
         mixSmoother_.prepare(sampleRate_, 25.0f);
@@ -67,7 +67,7 @@ public:
         writePos_ = 0;
         phase1_ = 0.0f;
         phase2_ = 0.25f;
-        phase3_ = 0.50f;
+        phase3_ = 2.0f / 3.0f;
         lpStateL_ = 0.0f;
         lpStateR_ = 0.0f;
         mixSmoother_.reset(params_.enabled ? std::clamp(params_.mix, 0.0f, 1.0f) : 0.0f);
@@ -104,6 +104,9 @@ public:
 
         float delaySamplesL = 0.0f;
         float delaySamplesR = 0.0f;
+        float wetL = 0.0f;
+        float wetR = 0.0f;
+        bool wetReady = false;
         const float sr = static_cast<float>(sampleRate_);
 
         switch (params_.mode) {
@@ -169,6 +172,8 @@ public:
                 if (phase1_ >= 1.0f) phase1_ -= 1.0f;
                 phase2_ += static_cast<float>(fastRate * invSampleRate_);
                 if (phase2_ >= 1.0f) phase2_ -= 1.0f;
+                phase3_ += static_cast<float>(slowRate * invSampleRate_);
+                if (phase3_ >= 1.0f) phase3_ -= 1.0f;
 
                 constexpr float p120 = 1.0f / 3.0f;
                 constexpr float p240 = 2.0f / 3.0f;
@@ -177,17 +182,35 @@ public:
                     return 2.0f * std::abs(2.0f * (p - std::floor(p + 0.5f))) - 1.0f;
                 };
 
-                const float slow1 = triWave(phase1_);
-                const float slow2 = triWave(phase1_ + p120);
-                const float fast1 = std::sin(twoPi * phase2_);
+                const float slow0 = triWave(phase1_);
+                const float slow1 = triWave(phase1_ + p120);
+                const float slow2 = triWave(phase3_);
+                const float fast0 = std::sin(twoPi * phase2_);
+                const float fast1 = std::sin(twoPi * (phase2_ + p120));
                 const float fast2 = std::sin(twoPi * (phase2_ + p240));
 
                 const float baseDelayMs = 5.2f;
                 const float modSlowMs = 1.8f * depthScale;
                 const float modFastMs = 0.45f * depthScale;
+                const float maxD = static_cast<float>(kBufferSize - 8);
+                const float d0 = std::clamp((baseDelayMs + modSlowMs * slow0 + modFastMs * fast0) * 0.001f * sr, 4.0f, maxD);
+                const float d1 = std::clamp((baseDelayMs + modSlowMs * slow1 + modFastMs * fast1) * 0.001f * sr, 4.0f, maxD);
+                const float d2 = std::clamp((baseDelayMs + modSlowMs * slow2 + modFastMs * fast2) * 0.001f * sr, 4.0f, maxD);
 
-                delaySamplesL = (baseDelayMs + modSlowMs * slow1 + modFastMs * fast1) * 0.001f * sr;
-                delaySamplesR = (baseDelayMs + modSlowMs * slow2 + modFastMs * fast2) * 0.001f * sr;
+                delaySamplesL = d0;
+                delaySamplesR = d2;
+
+                const float t0L = readInterpolated(bufferL_.data(), d0);
+                const float t1L = readInterpolated(bufferL_.data(), d1);
+                const float t2L = readInterpolated(bufferL_.data(), d2);
+                const float t0R = readInterpolated(bufferR_.data(), d0);
+                const float t1R = readInterpolated(bufferR_.data(), d1);
+                const float t2R = readInterpolated(bufferR_.data(), d2);
+
+                // Balanced 3-phase L/C/R matrix (keeps unity headroom <= 1.12 wet sum)
+                wetL = 0.68f * t0L + 0.36f * t1L + 0.08f * t2L;
+                wetR = 0.08f * t0R + 0.36f * t1R + 0.68f * t2R;
+                wetReady = true;
                 break;
             }
 
@@ -209,19 +232,19 @@ public:
             }
         }
 
-        // Clamp delay times within circular buffer bounds
-        constexpr float minDelaySamples = 4.0f;
-        const float maxDelaySamples = static_cast<float>(kBufferSize - 8);
-        delaySamplesL = std::clamp(delaySamplesL, minDelaySamples, maxDelaySamples);
-        delaySamplesR = std::clamp(delaySamplesR, minDelaySamples, maxDelaySamples);
+        if (!wetReady) {
+            constexpr float minDelaySamples = 4.0f;
+            const float maxDelaySamples = static_cast<float>(kBufferSize - 8);
+            delaySamplesL = std::clamp(delaySamplesL, minDelaySamples, maxDelaySamples);
+            delaySamplesR = std::clamp(delaySamplesR, minDelaySamples, maxDelaySamples);
 
-        // Read interpolated wet samples from BBD lines
-        float wetL = readInterpolated(bufferL_.data(), delaySamplesL);
-        float wetR = readInterpolated(bufferR_.data(), delaySamplesR);
+            wetL = readInterpolated(bufferL_.data(), delaySamplesL);
+            wetR = readInterpolated(bufferR_.data(), delaySamplesR);
+        }
 
-        // In Dimension D and Solina, subtle cross-coupling enhances 3D immersion
-        if (params_.mode == Mode::DimensionD || params_.mode == Mode::SolinaEnsemble) {
-            const float cross = (params_.mode == Mode::DimensionD) ? 0.22f : 0.15f;
+        // In Dimension D, subtle cross-coupling enhances 3D immersion
+        if (params_.mode == Mode::DimensionD) {
+            constexpr float cross = 0.22f;
             const float tempL = wetL * (1.0f - cross) + wetR * cross;
             const float tempR = wetR * (1.0f - cross) + wetL * cross;
             wetL = tempL;
@@ -284,7 +307,7 @@ private:
 
     float phase1_ = 0.0f;
     float phase2_ = 0.25f;
-    float phase3_ = 0.50f;
+    float phase3_ = 2.0f / 3.0f;
 
     float lpStateL_ = 0.0f;
     float lpStateR_ = 0.0f;

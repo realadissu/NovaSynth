@@ -137,7 +137,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout NovaSynthProcessor::createPa
 
     params.push_back(std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID{"filter2Type", 1}, "Filter 2 Type",
-        juce::StringArray{"LOW 24 (Warm Ladder)", "BAND 12 (Formant)", "HIGH 24 (Air)", "VOCAL CARVE (Bell Notch)"}, 0));
+        juce::StringArray{"LOW 12 (Warm SVF)", "BAND 12 (Formant)", "HIGH 12 (Air)", "VOCAL CARVE (Bell Notch)"}, 0));
 
     params.push_back(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{"filter2CutoffHz", 1}, "Filter 2 Cutoff",
