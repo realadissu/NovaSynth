@@ -101,7 +101,6 @@ private:
 
     void updateCoefficients() noexcept;
 
-    [[nodiscard]] float computeTextureGrainRate(int model, int grainIdx, float randBipolar, float sprayAmt, float& outAmp) const noexcept;
     void triggerSamplePlayback(float baseFrequencyHz) noexcept;
     void triggerPhysicalPluck(float baseFrequencyHz, float velocity) noexcept;
 
@@ -137,18 +136,11 @@ private:
     uint32_t rng_ = 0x9E3779B9u;
     StereoNoiseGenerator noiseGen_{};
 
-    // Organic Texture / Formant / Granular states
-    struct TextureGrain {
-        float pos = 0.0f;
-        float rate = 1.0f;
-        float lengthSamples = 1200.0f;
-        float age = 0.0f;
-        float panL = 0.7071f;
-        float panR = 0.7071f;
-        float amp = 1.0f;
-    };
-    static constexpr int kNumGrains = 16;
-    std::array<TextureGrain, kNumGrains> grains_{};
+    // Organic Texture PADsynth dual-playhead & formant states
+    double padPosPrimary_ = 0.0;
+    double padPosSecondary_ = 21845.0;
+    double padDetuneRatioPrimary_ = 1.0;
+    double padDetuneRatioSecondary_ = 1.0;
 
     // 3-Band Fixed-Frequency Formant Filter Bank
     std::array<StateVariableFilter, 3> formantFiltersL_{};
@@ -159,9 +151,7 @@ private:
     float texFilterState1_ = 0.0f;
     float texFilterState2_ = 0.0f;
     float texGrainPhase_ = 0.0f;
-    float texGrainPhase2_ = 0.0f;
     float flutterPhase_ = 0.0f;
-    float rainScatterTimer_ = 0.0f;
 
     // Physical Modeling Pluck / String Waveguide buffer (pre-allocated in prepare)
     std::vector<float> stringDelayL_{};

@@ -6,6 +6,8 @@ add_library(nova_core_dsp STATIC
     src/MultiEngineOscillatorEngines.cpp
     src/MultiEngineOscillatorPreview.cpp
     src/MultiEngineOscillatorSample.cpp
+    src/PadSynthBank.cpp
+    src/PadSynthProfiles.cpp
     src/SampleBankData.cpp
     src/StereoNoiseGenerator.cpp
     src/WorshipSynthAirStage.cpp

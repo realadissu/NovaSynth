@@ -2,8 +2,8 @@
 #include "NovaSynthProcessor.h"
 #include "nova_dsp/synth/WorshipSynthEngine.h"
 #include "nova_dsp/oscillators/MultiEngineOscillator.h"
+#include "nova_dsp/oscillators/PadSynthBank.h"
 #include "nova_dsp/effects/StereoBbdChorus.h"
-#include "../libs/nova_core_dsp/src/OscillatorSharedTables.h"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -21,6 +21,18 @@ namespace {
         imag -= static_cast<double>(buf[i]) * std::sin(angle);
     }
     return static_cast<float>(2.0 * std::hypot(real, imag) / static_cast<double>(n));
+}
+
+[[nodiscard]] float measureBandRms(const float* buf, int n, double sr, float centerHz, float halfWidthHz) noexcept {
+    const double df = sr / static_cast<double>(n);
+    const int kMin = std::max(1, static_cast<int>(std::floor((centerHz - halfWidthHz) / df)));
+    const int kMax = std::min(n / 2 - 1, static_cast<int>(std::ceil((centerHz + halfWidthHz) / df)));
+    double powerSum = 0.0;
+    for (int k = kMin; k <= kMax; ++k) {
+        const float m = measureMag(buf, n, sr, static_cast<float>(k * df));
+        powerSum += 0.5 * static_cast<double>(m) * static_cast<double>(m);
+    }
+    return static_cast<float>(std::sqrt(powerSum));
 }
 
 [[nodiscard]] float computeMean(const std::vector<float>& buf) noexcept {
@@ -152,43 +164,32 @@ TEST(NovaSynthBugfixRegressionTests, SuperSawMultiHasIndependentDetunedPhasesNot
 }
 
 TEST(NovaSynthBugfixRegressionTests, OrganicTextureVelvetTableDcFreeAndNoForcedOrganFifths) {
-    const auto& velvetTable = nova::dsp::getTextureSourceBank().tables[5];
-    constexpr int kTexN = nova::dsp::SharedTextureSourceBank::kTexSize;
-    double dcSum = 0.0, real = 0.0, imag = 0.0;
-    for (int i = 0; i < kTexN; ++i) {
-        const float s = velvetTable[static_cast<std::size_t>(i)];
-        dcSum += static_cast<double>(s);
-        const double ang = 2.0 * std::numbers::pi_v<double> * 4.0 * static_cast<double>(i) / static_cast<double>(kTexN);
-        real += static_cast<double>(s) * std::cos(ang);
-        imag -= static_cast<double>(s) * std::sin(ang);
-    }
-    EXPECT_LT(std::abs(dcSum / static_cast<double>(kTexN)), 0.005);
-    EXPECT_GT(2.0 * std::hypot(real, imag) / static_cast<double>(kTexN), 0.05);
+    const auto& velvetZone = nova::dsp::getPadSynthBank().getZone(5, 2);
+    constexpr int kTexN = nova::dsp::PadSynthBank::kTableSize;
+    EXPECT_LT(std::abs(computeMean(velvetZone.left)), 0.005f);
+    EXPECT_LT(std::abs(computeMean(velvetZone.right)), 0.005f);
+    EXPECT_NEAR(computeRms(velvetZone.left), nova::dsp::PadSynthBank::kTargetRms, 0.02f);
+    EXPECT_GT(measureBandRms(velvetZone.left.data(), kTexN, nova::dsp::PadSynthBank::kRefSampleRate, 130.81f, 16.0f), 0.05f);
 
-    constexpr double kSr = 48000.0;
-    constexpr int kN = 24000;
-    constexpr float kF0 = 261.63f;
+    constexpr double kSr = 48000.0; constexpr int kN = 16384; constexpr float kF0 = 261.63f;
     auto renderTex = [&](int model) {
         nova::dsp::MultiEngineOscillator::Parameters p{};
         p.enabled = true; p.engine = nova::dsp::MultiEngineOscillator::EngineType::OrganicTexture;
-        p.modelIndex = model; p.detune = 0.20f; p.scatter = 0.10f; p.duration = 0.50f;
-        p.shapeMorph = 0.50f; p.level = 1.0f;
+        p.modelIndex = model; p.detune = 0.20f; p.scatter = 0.10f; p.duration = 0.50f; p.shapeMorph = 0.50f; p.level = 1.0f;
         const auto [l, r] = renderOsc(p, kF0, kSr, kN, 42u);
         std::vector<float> mono(kN);
         for (int i = 0; i < kN; ++i) mono[static_cast<std::size_t>(i)] = 0.5f * (l[static_cast<std::size_t>(i)] + r[static_cast<std::size_t>(i)]);
         return mono;
     };
-
-    for (int model : { 2, 4, 5 }) {
+    for (int model : { 0, 1, 2, 4, 5 }) {
         const auto mono = renderTex(model);
-        const float magFund = measureMag(mono.data(), kN, kSr, kF0);
-        const float magFifth = measureMag(mono.data(), kN, kSr, kF0 * 1.5f);
+        const float magFund = measureBandRms(mono.data(), kN, kSr, kF0, 16.0f);
         EXPECT_GT(magFund, 0.02f);
-        EXPECT_LT(magFifth, magFund * 0.15f) << "OrganicTexture model " << model << " emits forced 1.5x fifth";
+        EXPECT_LT(measureBandRms(mono.data(), kN, kSr, kF0 * 1.5f, 16.0f), magFund * 0.15f) << "model=" << model;
     }
     const auto rain = renderTex(3);
-    EXPECT_LT(measureMag(rain.data(), kN, kSr, kF0 * 1.5f), measureMag(rain.data(), kN, kSr, kF0) * 0.15f);
-    EXPECT_GT(measureMag(rain.data(), kN, kSr, kF0 * 2.0f), 0.015f);
+    EXPECT_LT(measureBandRms(rain.data(), kN, kSr, kF0 * 1.5f, 16.0f), measureBandRms(rain.data(), kN, kSr, kF0, 16.0f) * 0.15f);
+    EXPECT_GT(measureBandRms(rain.data(), kN, kSr, kF0 * 2.0f, 16.0f), 0.04f);
 }
 
 TEST(NovaSynthBugfixRegressionTests, DeadParametersNowActiveInOscillatorsChorusAndPreset47) {

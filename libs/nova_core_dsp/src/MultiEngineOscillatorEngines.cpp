@@ -1,195 +1,141 @@
 #include "nova_dsp/oscillators/MultiEngineOscillator.h"
+#include "nova_dsp/oscillators/PadSynthBank.h"
 #include "nova_dsp/oscillators/SampleBank.h"
-#include "OscillatorSharedTables.h"
 #include <cmath>
 #include <algorithm>
 #include <numbers>
 
 namespace nova::dsp {
 
-float MultiEngineOscillator::computeTextureGrainRate(int model,
-                                                      int grainIdx,
-                                                      float randBipolar,
-                                                      float sprayAmt,
-                                                      float& outAmp) const noexcept {
-    const float microDetune = randBipolar * (0.0025f + 0.0125f * sprayAmt);
-    outAmp = 1.0f;
-    switch (model) {
-        case 0: return 1.0f + microDetune * 1.05f;
-        case 1: return 1.0f + microDetune * 1.15f;
-        case 2: return 1.0f + microDetune * 1.25f;
-        case 3:
-            if ((grainIdx & 7) == 3) { outAmp = 0.24f; return 4.0f * (1.0f + microDetune); }
-            if ((grainIdx & 3) == 0) { outAmp = 0.45f; return 2.0f * (1.0f + microDetune); }
-            return 1.0f + microDetune;
-        case 4: return 1.0f + microDetune * 1.30f;
-        case 5:
-        default: return 1.0f + microDetune * 0.90f;
-    }
-}
-
 void MultiEngineOscillator::processOrganicTexture(float slotFreq, float shape, float invSr, float& sigL, float& sigR) noexcept {
-    const auto& texBank = getTextureSourceBank();
-    const int model = std::clamp(params_.modelIndex, 0, SharedTextureSourceBank::kTexTables - 1);
-    const auto& activeTable = texBank.tables[static_cast<std::size_t>(model)];
+    const auto& padBank = getPadSynthBank();
+    const int model = std::clamp(params_.modelIndex, 0, PadSynthBank::kNumModels - 1);
 
-    // Playback increment: 512 samples per waveform cycle in the 4096-sample buffer
-    const float baseInc = std::min(400.0f, slotFreq * 512.0f * invSr);
     constexpr float twoPi = 2.0f * std::numbers::pi_v<float>;
-    const float sprayAmt = std::clamp(params_.detune, 0.0f, 1.0f);
+    constexpr double kWrapSpan = static_cast<double>(PadSynthBank::kTableSize) * 8.0;
+    const float sr = static_cast<float>(sampleRate_);
     const float rateAmt = std::clamp(params_.rate, 0.0f, 1.0f);
     const float scatterAmt = std::clamp(params_.scatter, 0.0f, 1.0f);
     const float effShape = std::clamp(shape, 0.0f, 1.0f);
+    const float warpAmt = std::clamp(params_.warp, 0.0f, 1.0f);
+    const float durAmt = std::clamp(params_.duration, 0.0f, 1.0f);
 
-    texGrainPhase_ += (0.08f + 0.65f * rateAmt) * invSr;
+    const double baseIncZ0 = (static_cast<double>(slotFreq) / static_cast<double>(PadSynthBank::kZoneRootHz[0]))
+                           * (PadSynthBank::kRefSampleRate / sampleRate_);
+
+    texGrainPhase_ += (0.07f + 0.55f * rateAmt) * invSr;
     if (texGrainPhase_ >= 1.0f) texGrainPhase_ -= 1.0f;
 
-    float flutterMult = 1.0f;
-    if (model == 2) {
-        flutterPhase_ += (1.6f + 3.2f * rateAmt) * invSr;
+    const float driftSin = std::sin(twoPi * texGrainPhase_);
+    double driftMult = 1.0 + 0.00085 * static_cast<double>(driftSin) * (0.35 + 0.65 * static_cast<double>(rateAmt));
+    if (model == 2) { // Tape Halo & Flutter: warm wow + organic tape flutter
+        flutterPhase_ += (3.2f + 4.2f * rateAmt) * invSr;
         if (flutterPhase_ >= 1.0f) flutterPhase_ -= 1.0f;
-        flutterMult = 1.0f + 0.0025f * std::sin(twoPi * flutterPhase_) * (0.4f + 0.6f * rateAmt);
+        const double fltSin = static_cast<double>(std::sin(twoPi * flutterPhase_));
+        driftMult = 1.0 + (0.0026 * static_cast<double>(driftSin) + 0.0016 * fltSin)
+                        * (0.45 + 0.55 * static_cast<double>(rateAmt));
     }
 
-    float grainSumL = 0.0f, grainSumR = 0.0f;
+    float p1L = 0.0f, p1R = 0.0f, p2L = 0.0f, p2R = 0.0f;
+    PadSynthBank::sampleZoneCrossfaded(padBank, model, slotFreq, padPosPrimary_, p1L, p1R);
+    PadSynthBank::sampleZoneCrossfaded(padBank, model, slotFreq, padPosSecondary_, p2L, p2R);
 
-    for (int g = 0; g < kNumGrains; ++g) {
-        auto& gr = grains_[static_cast<std::size_t>(g)];
+    padPosPrimary_ += baseIncZ0 * padDetuneRatioPrimary_ * driftMult;
+    if (padPosPrimary_ >= kWrapSpan) padPosPrimary_ -= kWrapSpan;
+    padPosSecondary_ += baseIncZ0 * padDetuneRatioSecondary_ / driftMult;
+    if (padPosSecondary_ >= kWrapSpan) padPosSecondary_ -= kWrapSpan;
 
-        // Hann window: 0.5 * (1 - cos(2*pi * age / length))
-        const float normAge = std::clamp(gr.age / gr.lengthSamples, 0.0f, 1.0f);
-        const float win = 0.5f * (1.0f - std::cos(twoPi * normAge));
-        const float s = readTextureHermite(activeTable, gr.pos);
-        const float nyquistGuard = (slotFreq * gr.rate * invSr < 0.45f) ? 1.0f : 0.0f;
-        const float sWin = s * win * gr.amp * nyquistGuard;
+    const float swayAngle = scatterAmt * 0.65f * driftSin;
+    const float cosSway = std::cos(swayAngle);
+    const float sinSway = std::sin(swayAngle);
+    const float rot2L = p2L * cosSway - p2R * sinSway;
+    const float rot2R = p2L * sinSway + p2R * cosSway;
 
-        grainSumL += sWin * gr.panL;
-        grainSumR += gr.panR * sWin;
+    const float durMix = 0.55f + 0.45f * durAmt;
+    const float invNorm = 1.0f / std::sqrt(1.0f + durMix * durMix);
+    float texL = (p1L + rot2L * durMix) * invNorm;
+    float texR = (p1R + rot2R * durMix) * invNorm;
 
-        // Advance playhead
-        gr.pos += std::min(400.0f, gr.rate * flutterMult * baseInc);
-        if (gr.pos >= 4096.0f) gr.pos = std::fmod(gr.pos, 4096.0f);
-        else if (gr.pos < 0.0f) gr.pos = std::fmod(gr.pos, 4096.0f) + 4096.0f;
-
-        gr.age += (0.45f + 1.10f * rateAmt);
-        if (gr.age >= gr.lengthSamples) {
-            // Respawn grain
-            rng_ = rng_ * 1664525u + 1013904223u;
-            const float r1 = static_cast<float>(rng_ & 0xFFFFu) / 65536.0f;
-            rng_ = rng_ * 1664525u + 1013904223u;
-            const float r2 = static_cast<float>(rng_ & 0xFFFFu) / 65536.0f;
-            rng_ = rng_ * 1664525u + 1013904223u;
-            const float r3 = static_cast<float>(rng_ & 0xFFFFu) / 65536.0f;
-
-            const float durSec = 0.035f + 0.35f * params_.duration;
-            gr.lengthSamples = std::clamp(durSec * static_cast<float>(sampleRate_) * (0.80f + 0.40f * r1), 400.0f, 24000.0f);
-            gr.age = 0.0f;
-
-            // Scatter playhead around POS + slow drift
-            const float basePos = std::fmod((effShape + texGrainPhase_) * 4096.0f, 4096.0f);
-            gr.pos = std::fmod(basePos + scatterAmt * r2 * 4096.0f, 4096.0f);
-
-            // Stereo pan spread
-            const float uPan = std::clamp((r3 * 2.0f - 1.0f) * params_.spread, -1.0f, 1.0f);
-            const float panAngle = (uPan + 1.0f) * 0.25f * std::numbers::pi_v<float>;
-            gr.panL = std::cos(panAngle);
-            gr.panR = std::sin(panAngle);
-            gr.rate = computeTextureGrainRate(model, g, r3 * 2.0f - 1.0f, sprayAmt, gr.amp);
-        }
+    if (warpAmt > 0.005f && slotFreq * 2.0f < sr * 0.44f) {
+        float octL = 0.0f, octR = 0.0f;
+        double octPos = padPosSecondary_ * 2.0 + 21845.0;
+        if (octPos >= kWrapSpan) octPos = std::fmod(octPos, kWrapSpan);
+        PadSynthBank::sampleZoneCrossfaded(padBank, model, slotFreq * 2.0f, octPos, octL, octR);
+        const float nyqGuard = std::clamp((0.42f * sr - 2.0f * slotFreq) / (0.10f * sr), 0.0f, 1.0f);
+        const float haloAmt = warpAmt * 0.52f * nyqGuard;
+        const float baseAtten = 1.0f / std::sqrt(1.0f + haloAmt * haloAmt);
+        texL = texL * baseAtten + octR * haloAmt;
+        texR = texR * baseAtten + octL * haloAmt;
     }
 
-    constexpr float kGrainNorm = 0.22f;
-    grainSumL *= kGrainNorm;
-    grainSumR *= kGrainNorm;
-    float texL = grainSumL, texR = grainSumR;
-
-    switch (model) {
-        case 0: { // Ambient Choir Breath: gentle acoustic vocal tract formant body (/u/ -> /o/ -> /a/ -> /i/)
-            if (std::abs(effShape - lastFormantShape_) > 0.002f || lastFormantModel_ != 0) {
-                lastFormantShape_ = effShape;
-                lastFormantModel_ = 0;
-                float f1Hz = 320.0f, f2Hz = 800.0f, f3Hz = 2400.0f;
-                float q1 = 1.2f, q2 = 1.4f, q3 = 1.2f;
-                if (effShape < 0.333f) {
-                    const float t = effShape / 0.333f;
-                    f1Hz = 320.0f + t * (500.0f - 320.0f);
-                    f2Hz = 800.0f + t * (1000.0f - 800.0f);
-                    f3Hz = 2400.0f + t * (2500.0f - 2400.0f);
-                } else if (effShape < 0.667f) {
-                    const float t = (effShape - 0.333f) / 0.334f;
-                    f1Hz = 500.0f + t * (750.0f - 500.0f);
-                    f2Hz = 1000.0f + t * (1250.0f - 1000.0f);
-                    f3Hz = 2500.0f + t * (2700.0f - 2500.0f);
-                    q1 = 1.2f + t * 0.2f; q2 = 1.4f + t * 0.2f;
-                } else {
-                    const float t = (effShape - 0.667f) / 0.333f;
-                    f1Hz = 750.0f + t * (320.0f - 750.0f);
-                    f2Hz = 1250.0f + t * (2200.0f - 1250.0f);
-                    f3Hz = 2700.0f + t * (3000.0f - 2700.0f);
-                }
-                formantFiltersL_[0].setParameters(StateVariableFilter::Type::BandPass, f1Hz, q1);
-                formantFiltersL_[1].setParameters(StateVariableFilter::Type::BandPass, f2Hz, q2);
-                formantFiltersL_[2].setParameters(StateVariableFilter::Type::BandPass, f3Hz, q3);
-                formantFiltersR_[0].setParameters(StateVariableFilter::Type::BandPass, f1Hz, q1);
-                formantFiltersR_[1].setParameters(StateVariableFilter::Type::BandPass, f2Hz, q2);
-                formantFiltersR_[2].setParameters(StateVariableFilter::Type::BandPass, f3Hz, q3);
-            }
-            const float f1L = formantFiltersL_[0].processSample(grainSumL), f2L = formantFiltersL_[1].processSample(grainSumL), f3L = formantFiltersL_[2].processSample(grainSumL);
-            const float f1R = formantFiltersR_[0].processSample(grainSumR), f2R = formantFiltersR_[1].processSample(grainSumR), f3R = formantFiltersR_[2].processSample(grainSumR);
-            const float formL = f1L * 0.45f + f2L * 0.40f + f3L * 0.30f, formR = f1R * 0.45f + f2R * 0.40f + f3R * 0.30f;
-            texL = (grainSumL * 0.72f + formL * 0.35f) * 1.06f;
-            texR = (grainSumR * 0.72f + formR * 0.35f) * 1.06f;
-            break;
+    if (model == 0) { // Ambient Choir Breath: 3-band vowel formant morph (/u/ -> /o/ -> /a/ -> /i/)
+        float f1Hz = 320.0f, f2Hz = 760.0f, f3Hz = 2300.0f;
+        float q1 = 2.4f, q2 = 2.8f, q3 = 2.2f;
+        if (effShape < 0.333f) {
+            const float t = effShape / 0.333f;
+            f1Hz = 320.0f + t * (460.0f - 320.0f);
+            f2Hz = 760.0f + t * (920.0f - 760.0f);
+            f3Hz = 2300.0f + t * (2480.0f - 2300.0f);
+        } else if (effShape < 0.667f) {
+            const float t = (effShape - 0.333f) / 0.334f;
+            f1Hz = 460.0f + t * (720.0f - 460.0f);
+            f2Hz = 920.0f + t * (1180.0f - 920.0f);
+            f3Hz = 2480.0f + t * (2680.0f - 2480.0f);
+            q1 = 2.4f + t * 0.2f;
+            q2 = 2.8f + t * 0.2f;
+            q3 = 2.2f + t * 0.2f;
+        } else {
+            const float t = (effShape - 0.667f) / 0.333f;
+            f1Hz = 720.0f + t * (300.0f - 720.0f);
+            f2Hz = 1180.0f + t * (2150.0f - 1180.0f);
+            f3Hz = 2680.0f + t * (2950.0f - 2680.0f);
+            q1 = 2.6f - t * 0.1f;
+            q2 = 3.0f + t * 0.2f;
+            q3 = 2.4f + t * 0.2f;
         }
-        case 1: { // Bowed Cello: gentle warm body resonances (110, 220, 440 Hz)
-            if (lastFormantModel_ != 1) {
-                lastFormantModel_ = 1;
-                lastFormantShape_ = -999.0f;
-                const float freqs[3] = { 110.0f, 220.0f, 440.0f }, qs[3] = { 1.2f, 1.4f, 1.3f };
-                for (int i = 0; i < 3; ++i) {
-                    formantFiltersL_[static_cast<std::size_t>(i)].setParameters(StateVariableFilter::Type::BandPass, freqs[i], qs[i]);
-                    formantFiltersR_[static_cast<std::size_t>(i)].setParameters(StateVariableFilter::Type::BandPass, freqs[i], qs[i]);
-                }
-            }
-            const float f1L = formantFiltersL_[0].processSample(grainSumL), f2L = formantFiltersL_[1].processSample(grainSumL), f3L = formantFiltersL_[2].processSample(grainSumL);
-            const float f1R = formantFiltersR_[0].processSample(grainSumR), f2R = formantFiltersR_[1].processSample(grainSumR), f3R = formantFiltersR_[2].processSample(grainSumR);
-            const float woodL = f1L * 0.45f + f2L * 0.35f + f3L * 0.25f, woodR = f1R * 0.45f + f2R * 0.35f + f3R * 0.25f;
-            texL = grainSumL * 0.70f + woodL * 0.30f;
-            texR = grainSumR * 0.70f + woodR * 0.30f;
-            break;
-        }
-        case 2: // Tape Halo: clean headroom scaling
-            texL = grainSumL * 0.75f;
-            texR = grainSumR * 0.75f;
-            break;
-        case 3: // Cathedral Rain Cloud: crystalline high sheen
-            texL = grainSumL * 0.95f;
-            texR = grainSumR * 0.95f;
-            break;
-        case 4: // Warm Wind & Air Swell
-            texL = grainSumL * 0.90f;
-            texR = grainSumR * 0.90f;
-            break;
-        case 5:
-        default: // Velvet Warmth Pad
-            texL = grainSumL * 0.95f;
-            texR = grainSumR * 0.95f;
-            break;
-    }
 
-    if (model != 0) {
-        const float tiltCutHz = 680.0f + effShape * effShape * 11500.0f;
+        if (std::abs(effShape - lastFormantShape_) > 0.002f || lastFormantModel_ != 0) {
+            lastFormantShape_ = effShape;
+            lastFormantModel_ = 0;
+            formantFiltersL_[0].setParameters(StateVariableFilter::Type::BandPass, f1Hz, q1);
+            formantFiltersL_[1].setParameters(StateVariableFilter::Type::BandPass, f2Hz, q2);
+            formantFiltersL_[2].setParameters(StateVariableFilter::Type::BandPass, f3Hz, q3);
+            formantFiltersR_[0].setParameters(StateVariableFilter::Type::BandPass, f1Hz, q1);
+            formantFiltersR_[1].setParameters(StateVariableFilter::Type::BandPass, f2Hz, q2);
+            formantFiltersR_[2].setParameters(StateVariableFilter::Type::BandPass, f3Hz, q3);
+        }
+
+        const float f1L = formantFiltersL_[0].processSample(texL) / q1;
+        const float f2L = formantFiltersL_[1].processSample(texL) / q2;
+        const float f3L = formantFiltersL_[2].processSample(texL) / q3;
+        const float f1R = formantFiltersR_[0].processSample(texR) / q1;
+        const float f2R = formantFiltersR_[1].processSample(texR) / q2;
+        const float f3R = formantFiltersR_[2].processSample(texR) / q3;
+        const float w1 = 0.85f - 0.35f * effShape;
+        const float w2 = 0.40f + 1.20f * effShape;
+        const float w3 = 0.08f + 0.48f * effShape;
+        const float formL = f1L * w1 + f2L * w2 + f3L * w3;
+        const float formR = f1R * w1 + f2R * w2 + f3R * w3;
+        texL = (texL * 0.30f + formL * 0.70f) * 1.08f;
+        texR = (texR * 0.30f + formR * 0.70f) * 1.08f;
+    } else {
+        const float tiltCutHz = 550.0f + effShape * effShape * 11500.0f;
         const float wTilt = twoPi * tiltCutHz * invSr;
         const float lpAlpha = std::clamp(wTilt / (1.0f + wTilt), 0.02f, 0.98f);
         texFilterState1_ += lpAlpha * (texL - texFilterState1_);
         texFilterState2_ += lpAlpha * (texR - texFilterState2_);
-        const float airLift = std::max(0.0f, effShape - 0.5f) * 0.45f;
-        texL = texFilterState1_ + (texL - texFilterState1_) * airLift;
-        texR = texFilterState2_ + (texR - texFilterState2_) * airLift;
+        const float presenceMix = std::clamp((effShape - 0.35f) * 1.15f, 0.0f, 0.75f);
+        const float tiltGainComp = 1.0f + (1.0f - effShape) * 0.12f;
+        texL = (texFilterState1_ + (texL - texFilterState1_) * presenceMix) * tiltGainComp;
+        texR = (texFilterState2_ + (texR - texFilterState2_) * presenceMix) * tiltGainComp;
     }
 
-    sigL = texL;
-    sigR = texR;
+    const float mid = 0.5f * (texL + texR);
+    const float side = 0.5f * (texL - texR);
+    const float width = std::clamp(params_.spread, 0.0f, 1.0f);
+    const float monoComp = 1.0f + 0.35f * (1.0f - width);
+    sigL = (mid + side * width) * monoComp * 0.68f;
+    sigR = (mid - side * width) * monoComp * 0.68f;
 }
 
 void MultiEngineOscillator::triggerPhysicalPluck(float baseFrequencyHz, float velocity) noexcept {

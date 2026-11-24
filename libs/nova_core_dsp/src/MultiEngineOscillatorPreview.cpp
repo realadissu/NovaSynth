@@ -1,4 +1,5 @@
 #include "nova_dsp/oscillators/MultiEngineOscillator.h"
+#include "nova_dsp/oscillators/PadSynthBank.h"
 #include "nova_dsp/oscillators/SampleBank.h"
 #include "OscillatorSharedTables.h"
 #include <cmath>
@@ -100,10 +101,13 @@ std::vector<float> MultiEngineOscillator::buildWaveformPreview(const Parameters&
                 break;
             }
             case EngineType::OrganicTexture: {
-                const auto& texBank = getTextureSourceBank();
-                const int model = std::clamp(p.modelIndex, 0, SharedTextureSourceBank::kTexTables - 1);
-                const int idx = std::clamp(static_cast<int>(u * static_cast<float>(SharedTextureSourceBank::kTexSize - 1)), 0, SharedTextureSourceBank::kTexSize - 1);
-                val = texBank.tables[static_cast<std::size_t>(model)][static_cast<std::size_t>(idx)];
+                const auto& padBank = getPadSynthBank();
+                const int model = std::clamp(p.modelIndex, 0, PadSynthBank::kNumModels - 1);
+                const auto& zone = padBank.getZone(model, 2);
+                const int offset = static_cast<int>(std::clamp(p.shapeMorph, 0.0f, 1.0f) * 4096.0f);
+                const int step = std::max(1, 512 / static_cast<int>(pts.size()));
+                const int idx = (offset + i * step) & PadSynthBank::kTableMask;
+                val = zone.left[static_cast<std::size_t>(idx)];
                 break;
             }
             case EngineType::PhysicalPluckModal:

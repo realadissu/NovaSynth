@@ -308,7 +308,7 @@ TEST(PresetManagerTests, SwitchingPresetSilencesActiveVoicesAndTailsImmediately)
 
     auto& pm = processor.getPresetManager();
     // 1. Load an ambient preset with huge decay and lush shimmer
-    ASSERT_TRUE(pm.loadPresetByName("Celestial Horizon"));
+    ASSERT_TRUE(pm.loadPresetByName("Cathedral Vocal Halo"));
 
     juce::AudioBuffer<float> buffer(2, 512);
     juce::MidiBuffer midi;
@@ -5713,7 +5713,7 @@ TEST(NovaSynthTuningAndSampleTests, SwellPedalPresetsAndSampleAuditVerification)
         EXPECT_GE(p.reverbDucking, 0.25f) << "Reverb ducking too low on " << name.toStdString();
     }
 
-    // 3. Measure low-swell vs high-swell via MIDI CC 11 (Expression Pedal) on Deep Analog Swell & Velvet Piano Cushion
+    // 3. Measure low-swell vs high-swell via MIDI CC 11 (Expression Pedal) on Warm Mellotron Choir & Velvet Piano Cushion
     juce::AudioBuffer<float> buf(2, 512);
     auto measureSwellRms = [&](int cc11Value) {
         proc.triggerPanic();
@@ -5739,7 +5739,7 @@ TEST(NovaSynthTuningAndSampleTests, SwellPedalPresetsAndSampleAuditVerification)
         return std::sqrt(sumSq / static_cast<float>(std::max(1, totalSamples)));
     };
 
-    for (const auto& swellPresetName : { juce::String("Deep Analog Swell"), juce::String("Velvet Piano Cushion") }) {
+    for (const auto& swellPresetName : { juce::String("Warm Mellotron Choir"), juce::String("Velvet Piano Cushion") }) {
         ASSERT_TRUE(pm.loadPresetByName(swellPresetName));
         const float rmsLowPedal  = measureSwellRms(0);
         const float rmsHighPedal = measureSwellRms(127);

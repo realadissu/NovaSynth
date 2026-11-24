@@ -1,4 +1,5 @@
 #include "nova_dsp/oscillators/MultiEngineOscillator.h"
+#include "nova_dsp/oscillators/PadSynthBank.h"
 #include "nova_dsp/oscillators/SampleBank.h"
 #include "OscillatorSharedTables.h"
 #include <cmath>
@@ -31,7 +32,7 @@ void MultiEngineOscillator::prepare(double sampleRate) {
     }
     noiseGen_.prepare(sampleRate_);
     lastFormantShape_ = -999.0f; lastFormantModel_ = -1;
-    (void)getWavetableBank(); (void)getTextureSourceBank();
+    (void)getWavetableBank(); (void)getPadSynthBank();
     updateCoefficients(); reset();
 }
 
@@ -65,6 +66,10 @@ void MultiEngineOscillator::updateCoefficients() noexcept {
     const double halfSampleCents = static_cast<double>(scatterAmt) * 25.0;
     sampleDetuneRatioL_ = std::pow(2.0, -halfSampleCents / 1200.0);
     sampleDetuneRatioR_ = std::pow(2.0, +halfSampleCents / 1200.0);
+
+    const double halfPadCents = static_cast<double>(detuneAmt) * 9.0 + static_cast<double>(scatterAmt) * 3.0;
+    padDetuneRatioPrimary_ = std::pow(2.0, -halfPadCents / 1200.0);
+    padDetuneRatioSecondary_ = std::pow(2.0, +halfPadCents / 1200.0);
 }
 
 void MultiEngineOscillator::reset() noexcept {
@@ -76,21 +81,14 @@ void MultiEngineOscillator::reset() noexcept {
     superPhasesOct_.fill(0.0f);
     driftOffsetsCents_.fill(0.0f);
     texFilterState1_ = 0.0f; texFilterState2_ = 0.0f;
-    texGrainPhase_ = 0.0f;   texGrainPhase2_ = 0.0f;
-    flutterPhase_ = 0.0f;    rainScatterTimer_ = 0.0f;
+    texGrainPhase_ = 0.0f;   flutterPhase_ = 0.0f;
+    padPosPrimary_ = 0.0;    padPosSecondary_ = 21845.0;
     for (std::size_t i = 0; i < formantFiltersL_.size(); ++i) {
         formantFiltersL_[i].reset();
         formantFiltersR_[i].reset();
     }
     noiseGen_.reset();
     lastFormantShape_ = -999.0f; lastFormantModel_ = -1;
-    for (int g = 0; g < kNumGrains; ++g) {
-        auto& gr = grains_[static_cast<std::size_t>(g)];
-        gr.pos = static_cast<float>(g * (4096 / kNumGrains));
-        gr.rate = 1.0f; gr.lengthSamples = 2400.0f;
-        gr.age = static_cast<float>(g) * (2400.0f / static_cast<float>(kNumGrains));
-        gr.panL = 0.7071f; gr.panR = 0.7071f; gr.amp = 1.0f;
-    }
     std::fill(stringDelayL_.begin(), stringDelayL_.end(), 0.0f);
     std::fill(stringDelayR_.begin(), stringDelayR_.end(), 0.0f);
     stringWritePos_ = 0; stringLpStateL_ = 0.0f; stringLpStateR_ = 0.0f;
@@ -125,29 +123,26 @@ void MultiEngineOscillator::triggerNote(float baseFrequencyHz, float velocity, u
     }
     updateCoefficients();
 
-    texGrainPhase_ = 0.0f; texGrainPhase2_ = 0.25f; rainScatterTimer_ = 0.0f;
+    texGrainPhase_ = 0.0f;
     texFilterState1_ = 0.0f; texFilterState2_ = 0.0f;
 
     if (params_.engine == EngineType::OrganicTexture) {
-        const float basePos = std::clamp(params_.shapeMorph, 0.0f, 1.0f) * 4096.0f;
-        const float sprayAmt = std::clamp(params_.detune, 0.0f, 1.0f);
-        const float scatterAmt = std::clamp(params_.scatter, 0.0f, 1.0f);
-        for (int g = 0; g < kNumGrains; ++g) {
-            auto& gr = grains_[static_cast<std::size_t>(g)];
-            rng_ = rng_ * 1664525u + 1013904223u; const float r1 = static_cast<float>(rng_ & 0xFFFFu) / 65536.0f;
-            rng_ = rng_ * 1664525u + 1013904223u; const float r2 = static_cast<float>(rng_ & 0xFFFFu) / 65536.0f;
-            rng_ = rng_ * 1664525u + 1013904223u; const float r3 = static_cast<float>(rng_ & 0xFFFFu) / 65536.0f;
+        constexpr double kWrapSpan = static_cast<double>(PadSynthBank::kTableSize) * 8.0;
+        rng_ = rng_ * 1664525u + 1013904223u;
+        const double r1 = static_cast<double>(rng_ & 0xFFFFu) / 65536.0;
+        rng_ = rng_ * 1664525u + 1013904223u;
+        const double r2 = static_cast<double>(rng_ & 0xFFFFu) / 65536.0;
+        rng_ = rng_ * 1664525u + 1013904223u;
+        const float r3 = static_cast<float>(rng_ & 0xFFFFu) / 65536.0f;
+        rng_ = rng_ * 1664525u + 1013904223u;
+        const float r4 = static_cast<float>(rng_ & 0xFFFFu) / 65536.0f;
 
-            const float durSec = 0.035f + 0.35f * params_.duration;
-            gr.lengthSamples = std::clamp(durSec * static_cast<float>(sampleRate_) * (0.80f + 0.40f * r1), 400.0f, 24000.0f);
-            gr.age = gr.lengthSamples * (static_cast<float>(g) / static_cast<float>(kNumGrains));
-            gr.pos = std::fmod(basePos + r2 * 4096.0f * (0.15f + 0.85f * scatterAmt), 4096.0f);
-
-            const float uPan = std::clamp((static_cast<float>(g) / static_cast<float>(kNumGrains - 1) * 2.0f - 1.0f) * params_.spread, -1.0f, 1.0f);
-            const float panAngle = (uPan + 1.0f) * 0.25f * std::numbers::pi_v<float>;
-            gr.panL = std::cos(panAngle); gr.panR = std::sin(panAngle);
-            gr.rate = computeTextureGrainRate(params_.modelIndex, g, r3 * 2.0f - 1.0f, sprayAmt, gr.amp);
-        }
+        padPosPrimary_ = r1 * kWrapSpan;
+        padPosSecondary_ = std::fmod(
+            padPosPrimary_ + (0.28 + 0.44 * r2) * static_cast<double>(PadSynthBank::kTableSize),
+            kWrapSpan);
+        texGrainPhase_ = r3;
+        flutterPhase_ = r4;
     }
 
     if (params_.engine == EngineType::SamplePlayback || params_.sourceType == 4) {

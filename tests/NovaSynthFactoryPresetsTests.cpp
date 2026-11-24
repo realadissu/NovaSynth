@@ -144,15 +144,15 @@ TEST(NovaSynthFactoryPresetsTests, CleanDropdownStructureAndGuardrails) {
     EXPECT_EQ(pm.getCurrentPresetCategory(), "Warm Pads");
 
     const std::vector<std::pair<juce::String, juce::String>> expectedRoster = {
-        { "Velvet Piano Cushion", "Warm Pads" },
-        { "Warm Prophet Pad",     "Warm Pads" },
-        { "Juno Silk Pad",        "Warm Pads" },
-        { "Deep Analog Swell",    "Warm Pads" },
-        { "OB-6 Airy Cloud",      "Airy & Shimmer" },
-        { "Silky Breath Pad",     "Airy & Shimmer" },
-        { "Celestial Horizon",    "Airy & Shimmer" },
-        { "Soft Shimmer Halo",    "Airy & Shimmer" },
-        { "Init Patch",           "Utility" }
+        { "Velvet Piano Cushion",   "Warm Pads" },
+        { "Warm Prophet Pad",       "Warm Pads" },
+        { "Velvet Bowed Strings",   "Warm Pads" },
+        { "Warm Mellotron Choir",   "Warm Pads" },
+        { "OB-6 Airy Cloud",        "Airy & Shimmer" },
+        { "Crystal Glass Cloud",    "Airy & Shimmer" },
+        { "Cathedral Vocal Halo",   "Airy & Shimmer" },
+        { "Ethereal Strings & Air", "Airy & Shimmer" },
+        { "Init Patch",             "Utility" }
     };
     for (std::size_t i = 0; i < expectedRoster.size(); ++i) {
         EXPECT_EQ(factoryPresets[i]->name, expectedRoster[i].first);
@@ -283,25 +283,25 @@ TEST(NovaSynthFactoryPresetsTests, SpectralBalanceAiryVsWarmAndControlledMidrang
     };
 
     const auto velvet = analyzePreset("Velvet Piano Cushion");
-    const auto deep   = analyzePreset("Deep Analog Swell");
+    const auto choir  = analyzePreset("Warm Mellotron Choir");
     const auto ob6    = analyzePreset("OB-6 Airy Cloud");
-    const auto breath = analyzePreset("Silky Breath Pad");
+    const auto halo   = analyzePreset("Cathedral Vocal Halo");
 
     const float airRatioVelvet = velvet.rmsAir / (velvet.rmsTotal + 1e-9f);
-    const float airRatioDeep   = deep.rmsAir / (deep.rmsTotal + 1e-9f);
+    const float airRatioChoir  = choir.rmsAir / (choir.rmsTotal + 1e-9f);
     const float airRatioOb6    = ob6.rmsAir / (ob6.rmsTotal + 1e-9f);
-    const float airRatioBreath = breath.rmsAir / (breath.rmsTotal + 1e-9f);
+    const float airRatioHalo   = halo.rmsAir / (halo.rmsTotal + 1e-9f);
 
-    EXPECT_GT(airRatioOb6,    airRatioDeep * 2.5f);
-    EXPECT_GT(airRatioBreath, airRatioDeep * 2.5f);
-    EXPECT_GT(airRatioOb6,    airRatioVelvet * 1.5f);
-    EXPECT_GT(airRatioBreath, airRatioVelvet * 1.5f);
+    EXPECT_GT(airRatioOb6,  airRatioChoir * 2.5f);
+    EXPECT_GT(airRatioHalo, airRatioChoir * 2.5f);
+    EXPECT_GT(airRatioOb6,  airRatioVelvet * 1.5f);
+    EXPECT_GT(airRatioHalo, airRatioVelvet * 1.5f);
 
     for (const auto& [label, m] : std::array<std::pair<const char*, SpectralMetrics>, 4>{{
              { "Velvet Piano Cushion", velvet },
-             { "Deep Analog Swell", deep },
+             { "Warm Mellotron Choir", choir },
              { "OB-6 Airy Cloud", ob6 },
-             { "Silky Breath Pad", breath } }}) {
+             { "Cathedral Vocal Halo", halo } }}) {
         EXPECT_GT(m.rmsFundament, 0.01f) << label;
         EXPECT_LT(m.rmsHarshMid, m.rmsFundament)
             << "1-2.5 kHz harsh midrange must remain controlled below 80-250 Hz fundament on " << label;

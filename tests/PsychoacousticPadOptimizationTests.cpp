@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include "NovaSynthProcessor.h"
 #include "nova_dsp/synth/WorshipSynthEngine.h"
+#include "nova_dsp/oscillators/PadSynthBank.h"
 #include "../libs/nova_core_dsp/src/OscillatorSharedTables.h"
 #include <cmath>
 #include <numbers>
@@ -147,7 +148,7 @@ TEST(PsychoacousticPadOptimizationTests, DynamicPianoPocketCouplesWithCutoffAndS
 
 TEST(PsychoacousticPadOptimizationTests, WavetableAndTexturePadModelsExhibitNaturalHarmonicRolloff) {
     const auto& wtBank = nova::dsp::getWavetableBank();
-    const auto& texBank = nova::dsp::getTextureSourceBank();
+    const auto& padBank = nova::dsp::getPadSynthBank();
 
     // Check Pad wavetables: 0 (Worship Harmonics), 2 (Strings), 3 (Choir), 6 (Brass)
     const int padTables[] = { 0, 2, 3, 6 };
@@ -167,20 +168,26 @@ TEST(PsychoacousticPadOptimizationTests, WavetableAndTexturePadModelsExhibitNatu
         }
     }
 
-    // Check Texture pad tables: 0 (Breath), 1 (Cello), 2 (Tape), 5 (Velvet Pad)
+    // Check PADsynth OrganicTexture models: 0 (Choir), 1 (Cello), 2 (Tape), 5 (Velvet Pad)
     const int padTex[] = { 0, 1, 2, 5 };
-    for (int t : padTex) {
-        float peak = 0.0f, sumSq = 0.0f;
-        for (int i = 0; i < nova::dsp::SharedTextureSourceBank::kTexSize; ++i) {
-            const float s = texBank.tables[static_cast<std::size_t>(t)][static_cast<std::size_t>(i)];
-            EXPECT_FALSE(std::isnan(s));
-            EXPECT_FALSE(std::isinf(s));
-            peak = std::max(peak, std::abs(s));
-            sumSq += s * s;
+    for (int m : padTex) {
+        for (int z = 0; z < nova::dsp::PadSynthBank::kNumZones; ++z) {
+            const auto& zone = padBank.getZone(m, z);
+            for (const auto* ch : { zone.left.data(), zone.right.data() }) {
+                float peak = 0.0f, sumSq = 0.0f;
+                for (int i = 0; i < nova::dsp::PadSynthBank::kTableSize; ++i) {
+                    const float s = ch[i];
+                    EXPECT_FALSE(std::isnan(s));
+                    EXPECT_FALSE(std::isinf(s));
+                    peak = std::max(peak, std::abs(s));
+                    sumSq += s * s;
+                }
+                const float rms = std::sqrt(sumSq / static_cast<float>(nova::dsp::PadSynthBank::kTableSize));
+                EXPECT_NEAR(rms, nova::dsp::PadSynthBank::kTargetRms, 0.03f)
+                    << "PADsynth model " << m << " zone " << z << " RMS should be ~0.48";
+                EXPECT_LE(peak, 3.0f);
+            }
         }
-        const float rms = std::sqrt(sumSq / static_cast<float>(nova::dsp::SharedTextureSourceBank::kTexSize));
-        EXPECT_NEAR(rms, 0.50f, 0.03f) << "Texture table " << t << " RMS should be ~0.50";
-        EXPECT_LE(peak, 2.5f);
     }
 }
 
