@@ -24,11 +24,9 @@ NovaSynthProcessor::NovaSynthProcessor()
 
 
 void NovaSynthProcessor::registerFactoryPresets() {
-    registerFactoryPresetsPads(presetManager_);
-    registerFactoryPresetsPlucks(presetManager_);
-    registerFactoryPresetsLeads(presetManager_);
-    registerFactoryPresetsAcoustic(presetManager_);
-    registerFactoryPresetsSwell(presetManager_);
+    registerFactoryPresetsWarmPads(presetManager_);
+    registerFactoryPresetsAiryPads(presetManager_);
+    registerFactoryPresetsUtility(presetManager_);
 }
 
 void NovaSynthProcessor::prepareToPlay(double sampleRate, int samplesPerBlock) {

@@ -6,11 +6,8 @@ class PresetManager;
 
 namespace nova::synth {
 
-void registerFactoryPresetsPads(nova::plugin::PresetManager& presetManager_);
-void registerFactoryPresetsPlucks(nova::plugin::PresetManager& presetManager_);
-void registerFactoryPresetsLeads(nova::plugin::PresetManager& presetManager_);
-void registerFactoryPresetsAcoustic(nova::plugin::PresetManager& presetManager_);
-void registerFactoryPresetsSwell(nova::plugin::PresetManager& presetManager_);
+void registerFactoryPresetsWarmPads(nova::plugin::PresetManager& presetManager_);
+void registerFactoryPresetsAiryPads(nova::plugin::PresetManager& presetManager_);
+void registerFactoryPresetsUtility(nova::plugin::PresetManager& presetManager_);
 
 } // namespace nova::synth
-

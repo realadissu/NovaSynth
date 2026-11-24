@@ -6,6 +6,7 @@ add_executable(NovaPluginsTests
     NovaSynthBugfixRegressionTests.cpp
     NovaSynthPadLivelinessTests.cpp
     NovaSynthAirAndNoiseTests.cpp
+    NovaSynthFactoryPresetsTests.cpp
 )
 
 target_link_libraries(NovaPluginsTests PRIVATE

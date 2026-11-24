@@ -84,11 +84,9 @@ nova_add_audio_plugin(NovaSynth
         src/ui/SourceCardVisualizers.cpp
         src/ui/SourceCardWaveforms.cpp
         src/presets/FactoryPresets.h
-        src/presets/FactoryPresetsPads.cpp
-        src/presets/FactoryPresetsPlucks.cpp
-        src/presets/FactoryPresetsLeads.cpp
-        src/presets/FactoryPresetsAcoustic.cpp
-        src/presets/FactoryPresetsSwell.cpp
+        src/presets/FactoryPresetsWarmPads.cpp
+        src/presets/FactoryPresetsAiryPads.cpp
+        src/presets/FactoryPresetsUtility.cpp
         src/presets/NovaSynthArpPresets.cpp
         src/MacDockIcon.h
         src/MacDockIcon.mm

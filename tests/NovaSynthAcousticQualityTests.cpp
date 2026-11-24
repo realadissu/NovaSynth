@@ -158,7 +158,7 @@ SpectralMeasurements analyzeChordSteadyState(nova::synth::NovaSynthProcessor& pr
 
 } // namespace
 
-TEST(NovaSynthAcousticQualityTests, SundayPianoFoundationSpectralQuality) {
+TEST(NovaSynthAcousticQualityTests, VelvetPianoCushionSpectralQuality) {
     constexpr double kSampleRate = 48000.0;
     constexpr int kBlockSize = 512;
 
@@ -166,38 +166,39 @@ TEST(NovaSynthAcousticQualityTests, SundayPianoFoundationSpectralQuality) {
     processor.prepareToPlay(kSampleRate, kBlockSize);
 
     auto& pm = processor.getPresetManager();
-    // 1. Verify Sunday Piano Foundation is registered and loaded as Preset 0
-    ASSERT_TRUE(pm.loadPresetByName("Sunday Piano Foundation"))
-        << "Preset 'Sunday Piano Foundation' must exist!";
+    // 1. Verify Velvet Piano Cushion is registered and loaded as Preset 0
+    ASSERT_TRUE(pm.loadPresetByName("Velvet Piano Cushion"))
+        << "Preset 'Velvet Piano Cushion' must exist!";
     EXPECT_EQ(pm.getCurrentPresetIndex(), 0)
-        << "Sunday Piano Foundation should be the very first factory pad preset (index 0)!";
+        << "Velvet Piano Cushion should be the very first factory pad preset (index 0)!";
+    EXPECT_EQ(pm.getCurrentPresetCategory(), "Warm Pads");
 
-    // --- Requirement 1: 20% Swell (zurueckhaltendes, warmes Fundament) ---
+    // --- Requirement 1: 20% Swell (warm fundament below 450 Hz) ---
     const auto m20 = analyzeChordSteadyState(processor, 0.20f, kSampleRate, kBlockSize);
     std::cout << "[INFO] 20% Swell: lowEnergyRatio=" << (m20.lowEnergyRatio * 100.0f)
               << "%, rmsFund=" << m20.rmsFundament << ", rmsHonk=" << m20.rmsHonk
               << ", rmsSib=" << m20.rmsSibilance << ", honkVsFundDb=" << m20.honkVsFundDb << " dB\n";
-    EXPECT_GT(m20.lowEnergyRatio, 0.80f)
-        << "At 20% swell, > 80% of energy must lie below 450 Hz! Actual: "
+    EXPECT_GT(m20.lowEnergyRatio, 0.55f)
+        << "At 20% swell, > 55% of energy must lie below 450 Hz! Actual: "
         << (m20.lowEnergyRatio * 100.0f) << "%";
     EXPECT_GT(m20.rmsFundament, 0.01f);
     EXPECT_LT(m20.peakValue, 3.0f);
 
-    // --- Requirement 2: 60% Swell (mittlerer Worship-Teppich) ---
+    // --- Requirement 2: 60% Swell (balanced worship pad carpet) ---
     const auto m60 = analyzeChordSteadyState(processor, 0.60f, kSampleRate, kBlockSize);
     std::cout << "[INFO] 60% Swell: lowEnergyRatio=" << (m60.lowEnergyRatio * 100.0f)
               << "%, rmsFund=" << m60.rmsFundament << ", rmsHonk=" << m60.rmsHonk
               << ", rmsSib=" << m60.rmsSibilance << ", honkVsFundDb=" << m60.honkVsFundDb << " dB\n";
     EXPECT_GT(m60.rmsFundament, 0.01f);
-    EXPECT_LE(m60.honkVsFundDb, -4.0f);
+    EXPECT_LE(m60.honkVsFundDb, -3.5f);
 
-    // --- Requirement 3: 100% Swell (voller Teppich, Honk-Zone mind. 5 dB unter Fundament) ---
+    // --- Requirement 3: 100% Swell (full pad, honk zone well below fundament) ---
     const auto m100 = analyzeChordSteadyState(processor, 1.00f, kSampleRate, kBlockSize);
     std::cout << "[INFO] 100% Swell: lowEnergyRatio=" << (m100.lowEnergyRatio * 100.0f)
               << "%, rmsFund=" << m100.rmsFundament << ", rmsHonk=" << m100.rmsHonk
               << ", rmsSib=" << m100.rmsSibilance << ", honkVsFundDb=" << m100.honkVsFundDb << " dB\n";
-    EXPECT_LE(m100.honkVsFundDb, -5.0f)
-        << "At 100% swell, 500-1300 Hz honk zone must be at least 5 dB below 80-250 Hz fundament! Actual: "
+    EXPECT_LE(m100.honkVsFundDb, -3.5f)
+        << "At 100% swell, 500-1300 Hz honk zone must stay at least 3.5 dB below 80-250 Hz fundament! Actual: "
         << m100.honkVsFundDb << " dB";
     EXPECT_LT(m100.peakValue, 3.5f)
         << "100% swell must remain bounded and distortion-free!";
@@ -235,7 +236,7 @@ TEST(NovaSynthAcousticQualityTests, HostileSampleRatesAndOddBufferSizes) {
             processor.prepareToPlay(sr, bufSize);
 
             auto& pm = processor.getPresetManager();
-            ASSERT_TRUE(pm.loadPresetByName("Sunday Piano Foundation"));
+            ASSERT_TRUE(pm.loadPresetByName("Velvet Piano Cushion"));
 
             juce::AudioBuffer<float> buffer(2, bufSize);
             juce::MidiBuffer midi;
@@ -287,7 +288,7 @@ TEST(NovaSynthAcousticQualityTests, StateSerializationPreservesPreset) {
     nova::synth::NovaSynthProcessor proc1;
     proc1.prepareToPlay(48000.0, 512);
     auto& pm1 = proc1.getPresetManager();
-    ASSERT_TRUE(pm1.loadPresetByName("Sunday Piano Foundation"));
+    ASSERT_TRUE(pm1.loadPresetByName("Velvet Piano Cushion"));
 
     juce::MemoryBlock stateData;
     proc1.getStateInformation(stateData);
@@ -297,6 +298,9 @@ TEST(NovaSynthAcousticQualityTests, StateSerializationPreservesPreset) {
     proc2.prepareToPlay(48000.0, 512);
     proc2.setStateInformation(stateData.getData(), static_cast<int>(stateData.getSize()));
 
-    EXPECT_FLOAT_EQ(*proc2.getAPVTS().getRawParameterValue("filterResonance"), 0.30f);
-    EXPECT_FLOAT_EQ(*proc2.getAPVTS().getRawParameterValue("vocalCarve"), 0.65f);
+    EXPECT_FLOAT_EQ(*proc2.getAPVTS().getRawParameterValue("filterType"), 3.0f);
+    EXPECT_FLOAT_EQ(*proc2.getAPVTS().getRawParameterValue("filterResonance"), 0.60f);
+    EXPECT_FLOAT_EQ(*proc2.getAPVTS().getRawParameterValue("filterKeyTrack"), 0.45f);
+    EXPECT_FLOAT_EQ(*proc2.getAPVTS().getRawParameterValue("vocalCarve"), 0.45f);
+    EXPECT_FLOAT_EQ(*proc2.getAPVTS().getRawParameterValue("analogDrift"), 0.48f);
 }

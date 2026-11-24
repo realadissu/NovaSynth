@@ -244,9 +244,9 @@ TEST(NovaSynthBugfixRegressionTests, DeadParametersNowActiveInOscillatorsChorusA
     nova::synth::NovaSynthProcessor proc;
     proc.prepareToPlay(kSr, 512);
     ASSERT_NE(proc.getAPVTS().getParameter("chorusWarmth"), nullptr);
-    ASSERT_TRUE(proc.getPresetManager().loadPresetByName("Sunday Piano Foundation"));
+    ASSERT_TRUE(proc.getPresetManager().loadPresetByName("Velvet Piano Cushion"));
     proc.syncParametersFromAPVTS();
-    EXPECT_NEAR(proc.getCurrentParameters().chorusWarmth, 0.80f, 1e-3f);
+    EXPECT_NEAR(proc.getCurrentParameters().chorusWarmth, 0.72f, 1e-3f);
 
     if (auto* cw = proc.getAPVTS().getParameter("chorusWarmth")) cw->setValueNotifyingHost(cw->convertTo0to1(0.25f));
     juce::MemoryBlock state;
@@ -257,15 +257,16 @@ TEST(NovaSynthBugfixRegressionTests, DeadParametersNowActiveInOscillatorsChorusA
     proc2.syncParametersFromAPVTS();
     EXPECT_NEAR(proc2.getCurrentParameters().chorusWarmth, 0.25f, 1e-3f);
 
-    bool foundAnthem = false;
     for (const auto& preset : proc.getPresetManager().getAllPresets()) {
-        if (preset.name == "Holy Forever Anthem Pad") {
-            foundAnthem = true;
-            EXPECT_EQ(preset.parameterValues.count("lfo4Waveform"), 0u);
-            EXPECT_EQ(preset.parameterValues.count("lfo4Shape"), 1u);
+        EXPECT_EQ(preset.parameterValues.count("lfo4Waveform"), 0u) << preset.name;
+        for (const auto& kv : preset.parameterValues) {
+            EXPECT_NE(proc.getAPVTS().getParameter(kv.first), nullptr)
+                << "Unknown APVTS param '" << kv.first << "' in preset '" << preset.name << "'";
         }
     }
-    ASSERT_TRUE(foundAnthem && proc.getPresetManager().loadPresetByName("Holy Forever Anthem Pad"));
+    if (auto* pLfo4 = proc.getAPVTS().getParameter("lfo4Shape")) {
+        pLfo4->setValueNotifyingHost(pLfo4->convertTo0to1(4.0f));
+    }
     proc.syncParametersFromAPVTS();
     EXPECT_EQ(proc.getCurrentParameters().lfo4Shape, nova::dsp::LfoGenerator::Shape::PulseGate);
 }
@@ -298,8 +299,10 @@ TEST(NovaSynthBugfixRegressionTests, FourPoleFilter1ButterworthMinus3dBAndNoDoub
     checkNoDupSlot(defaultEngine.getModMatrix());
     nova::synth::NovaSynthProcessor proc;
     proc.prepareToPlay(48000.0, 512);
-    ASSERT_TRUE(proc.getPresetManager().loadPresetByName("Bethel Shimmer Cloud"));
-    checkNoDupSlot(proc.getEngine().getModMatrix());
+    for (int i = 0; i < static_cast<int>(proc.getPresetManager().getAllPresets().size()); ++i) {
+        proc.getPresetManager().loadPresetByIndex(i);
+        checkNoDupSlot(proc.getEngine().getModMatrix());
+    }
 
     const float dbWarmth1 = 20.0f * std::log10(renderFilterRms(true, 702.6f, 0.30f, 1.0f) / std::max(1e-6f, rmsBypass));
     EXPECT_GE(dbWarmth1, -3.8f); EXPECT_LE(dbWarmth1, -2.2f);
