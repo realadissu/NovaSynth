@@ -304,6 +304,8 @@ void ModulationHubPanel::showDestinationMenu(std::size_t slotIdx, juce::Rectangl
     fxMenu.addItem(40, "Reverb Cloud Mix"); fxMenu.addItem(41, "Shimmer Amount");
     fxMenu.addItem(42, "Delay Mix"); fxMenu.addItem(43, "Delay Feedback");
     fxMenu.addItem(44, "Stereo Pan Spread");
+    fxMenu.addItem(45, "Swell Volume (Pre-FX)");
+    fxMenu.addItem(46, "Air Amount");
     m.addSubMenu("Effects & Space", fxMenu);
 
     m.showMenuAsync(juce::PopupMenu::Options().withTargetScreenArea(localAreaToGlobal(targetRect)),
@@ -368,6 +370,8 @@ void ModulationHubPanel::showDestinationMenu(std::size_t slotIdx, juce::Rectangl
                 case 42: dst = nova::dsp::ModMatrix::Destination::DelayMix; break;
                 case 43: dst = nova::dsp::ModMatrix::Destination::DelayFeedback; break;
                 case 44: dst = nova::dsp::ModMatrix::Destination::PanSpread; break;
+                case 45: dst = nova::dsp::ModMatrix::Destination::SwellGain; break;
+                case 46: dst = nova::dsp::ModMatrix::Destination::AirAmount; break;
                 default: break;
             }
             auto& mm = proc_.getModMatrix();

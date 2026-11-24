@@ -278,6 +278,7 @@ private:
     void updateDroneVoices() noexcept;
     void stepArpeggiator(int numSamples) noexcept;
     void processMasterEffectsChain(float* outLeft, float* outRight, int numSamples) noexcept;
+    [[nodiscard]] float computeTargetSwellGain() const noexcept;
 
     double sampleRate_ = 48000.0;
     Parameters params_{};
@@ -333,6 +334,7 @@ private:
     OnePoleSmoother cutoff2Smoother_{};
     OnePoleSmoother masterGainSmoother_{};
     OnePoleSmoother polyHeadroomSmoother_{};
+    OnePoleSmoother swellGainSmoother_{};
 
     LockFreeRingBuffer<float, 2048> visualizerRingBuffer_{};
 

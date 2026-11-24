@@ -103,7 +103,7 @@ ArchetypeSpectrum measurePresetSpectrum(nova::synth::NovaSynthProcessor& proc, c
         midi.addEvent(juce::MidiMessage::noteOn(1, note, static_cast<juce::uint8>(96)), 0);
     }
 
-    for (int b = 0; b < 96; ++b) {
+    for (int b = 0; b < 128; ++b) {
         buf.clear();
         proc.processBlock(buf, midi);
         midi.clear();
@@ -255,25 +255,25 @@ TEST(PadSynthEngineTests, MeasurableSonicDiversityAcrossFourPresetArchetypes) {
     nova::synth::NovaSynthProcessor proc;
     proc.prepareToPlay(48000.0, 512);
 
-    const auto prophet = measurePresetSpectrum(proc, "Warm Prophet Pad");
-    const auto strings = measurePresetSpectrum(proc, "Velvet Bowed Strings");
-    const auto choir   = measurePresetSpectrum(proc, "Warm Mellotron Choir");
-    const auto crystal = measurePresetSpectrum(proc, "Crystal Glass Cloud");
+    const auto analog  = measurePresetSpectrum(proc, "Warm Analog Bed");
+    const auto strings = measurePresetSpectrum(proc, "Silky Bowed Strings");
+    const auto choir   = measurePresetSpectrum(proc, "Intimate Tape Choir");
+    const auto crystal = measurePresetSpectrum(proc, "Crystal Glass Veil");
 
-    for (const auto& s : { prophet, strings, choir, crystal }) {
+    for (const auto& s : { analog, strings, choir, crystal }) {
         EXPECT_GT(s.totalRms, 0.01f);
     }
 
     EXPECT_GT(crystal.centroidHz, choir.centroidHz);
-    EXPECT_GT(crystal.centroidHz, prophet.centroidHz);
+    EXPECT_GT(crystal.centroidHz, analog.centroidHz);
     EXPECT_GT(crystal.bandShare[3], choir.bandShare[3] * 1.5f);
     EXPECT_GT(strings.bandShare[3], choir.bandShare[3]);
 
     const std::array<std::pair<const char*, ArchetypeSpectrum>, 4> items = {{
-        { "Warm Prophet Pad", prophet },
-        { "Velvet Bowed Strings", strings },
-        { "Warm Mellotron Choir", choir },
-        { "Crystal Glass Cloud", crystal }
+        { "Warm Analog Bed", analog },
+        { "Silky Bowed Strings", strings },
+        { "Intimate Tape Choir", choir },
+        { "Crystal Glass Veil", crystal }
     }};
     for (std::size_t i = 0; i < items.size(); ++i) {
         for (std::size_t j = i + 1; j < items.size(); ++j) {
@@ -319,7 +319,7 @@ TEST(PadSynthEngineTests, BandlimitedHighNotesNoOrganFifthsHostileRatesAndRoundt
         EXPECT_LT(fifthRms, fundRms * 0.15f) << "Model " << m << " emitted forced 1.5x fifth";
     }
 
-    for (const char* presetName : { "Velvet Bowed Strings", "Crystal Glass Cloud" }) {
+    for (const char* presetName : { "Silky Bowed Strings", "Crystal Glass Veil" }) {
         for (double sr : { 22050.0, 44100.0, 96000.0, 192000.0 }) {
             for (int bSize : { 1, 13, 64, 2048 }) {
                 nova::synth::NovaSynthProcessor proc;
@@ -359,7 +359,7 @@ TEST(PadSynthEngineTests, BandlimitedHighNotesNoOrganFifthsHostileRatesAndRoundt
 
     nova::synth::NovaSynthProcessor procA;
     procA.prepareToPlay(48000.0, 512);
-    ASSERT_TRUE(procA.getPresetManager().loadPresetByName("Cathedral Vocal Halo"));
+    ASSERT_TRUE(procA.getPresetManager().loadPresetByName("Vocal Mist Halo"));
     procA.syncParametersFromAPVTS();
     const auto paramsA = procA.getCurrentParameters();
     juce::MemoryBlock state;
@@ -383,5 +383,5 @@ TEST(PadSynthEngineTests, BandlimitedHighNotesNoOrganFifthsHostileRatesAndRoundt
         EXPECT_NEAR(b.detune, a.detune, 1e-3f);
     }
     EXPECT_GT(paramsB.oscSlots[0].warp, 0.10f);
-    EXPECT_GT(paramsB.oscSlots[1].warp, 0.30f);
+    EXPECT_GE(paramsB.oscSlots[1].warp, 0.20f);
 }

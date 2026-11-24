@@ -55,17 +55,36 @@ void WorshipSynthEngine::processMasterEffectsChain(float* outLeft, float* outRig
     const float revMod = modMatrix_.getModulationOffset(ModMatrix::Destination::ReverbMix);
     const float shimMod = modMatrix_.getModulationOffset(ModMatrix::Destination::ShimmerAmount);
     const float vcMod = modMatrix_.getModulationOffset(ModMatrix::Destination::VocalCarve);
-    if (std::abs(revMod) > 0.001f || std::abs(shimMod) > 0.001f || std::abs(vcMod) > 0.001f) {
-        auto revParams = reverb_.getParameters();
-        revParams.mix = std::clamp(params_.reverbMix + params_.macroShimmer * 0.25f + revMod, 0.0f, 1.0f);
-        revParams.shimmerOctave = std::clamp(params_.reverbShimmer + params_.macroShimmer * 0.50f + shimMod, 0.0f, 1.0f);
-        revParams.shimmerLowCutHz = 540.0f;
-        WorshipSynthAirStage::applyReverbAirCoupling(params_.macroAir, params_.macroWarmth, revParams);
-        const float cCut = cutoffSmoother_.getCurrentValue();
-        const float cOpen = (cCut > 800.0f) ? std::clamp((cCut - 800.0f) / 3200.0f, 0.0f, 1.0f) : 0.0f;
-        revParams.vocalCarve = std::clamp(
-            params_.vocalCarve + vcMod + cOpen * (0.35f + 0.65f * std::max(modWheel_, 1.0f - params_.macroWarmth)) * 0.40f,
-            0.0f, 1.0f);
+    const float airMod = modMatrix_.getModulationOffset(ModMatrix::Destination::AirAmount);
+    const float panMod = modMatrix_.getModulationOffset(ModMatrix::Destination::PanSpread);
+    const float panDepth = std::clamp(modMatrix_.getTotalDepth(ModMatrix::Destination::PanSpread), 0.0f, 1.0f);
+
+    const auto curRev = reverb_.getParameters();
+    auto revParams = curRev;
+    revParams.mix = std::clamp(params_.reverbMix + params_.macroShimmer * 0.25f + revMod, 0.0f, 1.0f);
+    revParams.shimmerOctave = std::clamp(params_.reverbShimmer + params_.macroShimmer * 0.50f + shimMod, 0.0f, 1.0f);
+    revParams.shimmerLowCutHz = 540.0f;
+    const float effAir = std::clamp(params_.macroAir + airMod, 0.0f, 1.0f);
+    WorshipSynthAirStage::applyReverbAirCoupling(effAir, params_.macroWarmth, revParams);
+    const float cCut = cutoffSmoother_.getCurrentValue();
+    const float cOpen = (cCut > 800.0f) ? std::clamp((cCut - 800.0f) / 3200.0f, 0.0f, 1.0f) : 0.0f;
+    revParams.vocalCarve = std::clamp(
+        params_.vocalCarve + vcMod + cOpen * (0.35f + 0.65f * std::max(modWheel_, 1.0f - params_.macroWarmth)) * 0.40f,
+        0.0f, 1.0f);
+    const float baseRevWidth = (panDepth > 0.25f) ? std::clamp(1.0f - 0.72f * panDepth, 0.38f, 1.0f) : 1.0f;
+    const float panWidthScale = (panDepth > 0.25f) ? 0.85f : 0.50f;
+    revParams.stereoWidth = std::clamp(baseRevWidth + panMod * panWidthScale, 0.25f, 1.15f);
+
+    const bool revDirty = std::abs(revMod) > 0.001f || std::abs(shimMod) > 0.001f
+        || std::abs(vcMod) > 0.001f || std::abs(airMod) > 0.001f
+        || std::abs(revParams.mix - curRev.mix) > 1e-4f
+        || std::abs(revParams.shimmerOctave - curRev.shimmerOctave) > 1e-4f
+        || std::abs(revParams.highCutHz - curRev.highCutHz) > 1e-4f
+        || std::abs(revParams.highDamping - curRev.highDamping) > 1e-4f
+        || std::abs(revParams.shimmerHighCutHz - curRev.shimmerHighCutHz) > 1e-4f
+        || std::abs(revParams.vocalCarve - curRev.vocalCarve) > 1e-4f
+        || std::abs(revParams.stereoWidth - curRev.stereoWidth) > 1e-4f;
+    if (revDirty) {
         reverb_.setParameters(revParams);
     }
 

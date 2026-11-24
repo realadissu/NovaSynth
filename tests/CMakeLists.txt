@@ -7,6 +7,8 @@ add_executable(NovaPluginsTests
     NovaSynthPadLivelinessTests.cpp
     NovaSynthAirAndNoiseTests.cpp
     NovaSynthFactoryPresetsTests.cpp
+    NovaSynthSwellAuditTests.cpp
+    NovaSynthSwellDynamicsTests.cpp
     PadSynthEngineTests.cpp
 )
 

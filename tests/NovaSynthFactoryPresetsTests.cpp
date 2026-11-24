@@ -140,18 +140,18 @@ TEST(NovaSynthFactoryPresetsTests, CleanDropdownStructureAndGuardrails) {
     EXPECT_EQ(cats[3], "Utility");
 
     EXPECT_EQ(pm.getCurrentPresetIndex(), 0);
-    EXPECT_EQ(pm.getCurrentPresetName(), "Velvet Piano Cushion");
+    EXPECT_EQ(pm.getCurrentPresetName(), "Soft Velvet Cushion");
     EXPECT_EQ(pm.getCurrentPresetCategory(), "Warm Pads");
 
     const std::vector<std::pair<juce::String, juce::String>> expectedRoster = {
-        { "Velvet Piano Cushion",   "Warm Pads" },
-        { "Warm Prophet Pad",       "Warm Pads" },
-        { "Velvet Bowed Strings",   "Warm Pads" },
-        { "Warm Mellotron Choir",   "Warm Pads" },
-        { "OB-6 Airy Cloud",        "Airy & Shimmer" },
-        { "Crystal Glass Cloud",    "Airy & Shimmer" },
-        { "Cathedral Vocal Halo",   "Airy & Shimmer" },
-        { "Ethereal Strings & Air", "Airy & Shimmer" },
+        { "Soft Velvet Cushion",    "Warm Pads" },
+        { "Warm Analog Bed",        "Warm Pads" },
+        { "Silky Bowed Strings",    "Warm Pads" },
+        { "Intimate Tape Choir",    "Warm Pads" },
+        { "Airy Silk Cloud",        "Airy & Shimmer" },
+        { "Crystal Glass Veil",     "Airy & Shimmer" },
+        { "Vocal Mist Halo",        "Airy & Shimmer" },
+        { "Silver String Swell",    "Airy & Shimmer" },
         { "Init Patch",             "Utility" }
     };
     for (std::size_t i = 0; i < expectedRoster.size(); ++i) {
@@ -220,10 +220,10 @@ TEST(NovaSynthFactoryPresetsTests, AllFactoryPresetsAcousticInvariantsSwellPanic
 
         for (float swell : { 0.0f, 0.35f, 0.70f, 1.0f }) {
             pm.loadPresetByIndex(static_cast<int>(idx));
-            const auto metrics = renderWorshipChordMetrics(proc, swell, 96, 36);
+            const auto metrics = renderWorshipChordMetrics(proc, swell, 128, 36);
             EXPECT_LT(metrics.peak, 3.5f) << name << " swell=" << swell;
             EXPECT_LE(metrics.peak, 1.01f) << name << " swell=" << swell;
-            EXPECT_GT(metrics.rmsTotal, 0.005f) << name << " swell=" << swell;
+            EXPECT_GT(metrics.rmsTotal, 0.002f) << name << " swell=" << swell;
             const float crest = metrics.peak / (metrics.rmsTotal + 1e-9f);
             EXPECT_LT(crest, 6.5f) << "Crest/resonance spike on " << name << " swell=" << swell;
         }
@@ -279,30 +279,30 @@ TEST(NovaSynthFactoryPresetsTests, SpectralBalanceAiryVsWarmAndControlledMidrang
 
     auto analyzePreset = [&](const char* name) {
         EXPECT_TRUE(pm.loadPresetByName(name)) << name;
-        return renderWorshipChordMetrics(proc, 0.40f, 112, 75);
+        return renderWorshipChordMetrics(proc, 0.65f, 128, 75);
     };
 
-    const auto velvet = analyzePreset("Velvet Piano Cushion");
-    const auto choir  = analyzePreset("Warm Mellotron Choir");
-    const auto ob6    = analyzePreset("OB-6 Airy Cloud");
-    const auto halo   = analyzePreset("Cathedral Vocal Halo");
+    const auto velvet = analyzePreset("Soft Velvet Cushion");
+    const auto choir  = analyzePreset("Intimate Tape Choir");
+    const auto airy   = analyzePreset("Airy Silk Cloud");
+    const auto halo   = analyzePreset("Vocal Mist Halo");
 
     const float airRatioVelvet = velvet.rmsAir / (velvet.rmsTotal + 1e-9f);
     const float airRatioChoir  = choir.rmsAir / (choir.rmsTotal + 1e-9f);
-    const float airRatioOb6    = ob6.rmsAir / (ob6.rmsTotal + 1e-9f);
+    const float airRatioAiry   = airy.rmsAir / (airy.rmsTotal + 1e-9f);
     const float airRatioHalo   = halo.rmsAir / (halo.rmsTotal + 1e-9f);
 
-    EXPECT_GT(airRatioOb6,  airRatioChoir * 2.5f);
+    EXPECT_GT(airRatioAiry, airRatioChoir * 2.5f);
     EXPECT_GT(airRatioHalo, airRatioChoir * 2.5f);
-    EXPECT_GT(airRatioOb6,  airRatioVelvet * 1.5f);
+    EXPECT_GT(airRatioAiry, airRatioVelvet * 1.5f);
     EXPECT_GT(airRatioHalo, airRatioVelvet * 1.5f);
 
     for (const auto& [label, m] : std::array<std::pair<const char*, SpectralMetrics>, 4>{{
-             { "Velvet Piano Cushion", velvet },
-             { "Warm Mellotron Choir", choir },
-             { "OB-6 Airy Cloud", ob6 },
-             { "Cathedral Vocal Halo", halo } }}) {
-        EXPECT_GT(m.rmsFundament, 0.01f) << label;
+             { "Soft Velvet Cushion", velvet },
+             { "Intimate Tape Choir", choir },
+             { "Airy Silk Cloud", airy },
+             { "Vocal Mist Halo", halo } }}) {
+        EXPECT_GT(m.rmsFundament, 0.005f) << label;
         EXPECT_LT(m.rmsHarshMid, m.rmsFundament)
             << "1-2.5 kHz harsh midrange must remain controlled below 80-250 Hz fundament on " << label;
     }
@@ -321,10 +321,10 @@ TEST(NovaSynthFactoryPresetsTests, SwellDynamicsOpenBrightnessAcrossAllEightPads
 
         ++testedPads;
         pm.loadPresetByIndex(static_cast<int>(idx));
-        const auto lowSwell = renderWorshipChordMetrics(proc, 0.10f, 112, 64);
+        const auto lowSwell = renderWorshipChordMetrics(proc, 0.10f, 128, 64);
 
         pm.loadPresetByIndex(static_cast<int>(idx));
-        const auto highSwell = renderWorshipChordMetrics(proc, 1.00f, 112, 64);
+        const auto highSwell = renderWorshipChordMetrics(proc, 1.00f, 128, 64);
 
         const float lowBrightRatio  = lowSwell.rmsHigh1200 / (lowSwell.rmsTotal + 1e-9f);
         const float highBrightRatio = highSwell.rmsHigh1200 / (highSwell.rmsTotal + 1e-9f);

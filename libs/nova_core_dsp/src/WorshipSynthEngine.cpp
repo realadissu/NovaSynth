@@ -71,7 +71,8 @@ void WorshipSynthEngine::prepare(double sampleRate, int maxBlockSize) {
 
     cutoffSmoother_.prepare(sampleRate_, 12.0f);   cutoff2Smoother_.prepare(sampleRate_, 12.0f);
     masterGainSmoother_.prepare(sampleRate_, 12.0f); polyHeadroomSmoother_.prepare(sampleRate_, 25.0f);
-    polyHeadroomSmoother_.reset(1.0f);               droneToneSmoother_.prepare(sampleRate_, 15.0f);
+    polyHeadroomSmoother_.reset(1.0f);               swellGainSmoother_.prepare(sampleRate_, 25.0f);
+    swellGainSmoother_.reset(1.0f);                  droneToneSmoother_.prepare(sampleRate_, 15.0f);
     droneFilterL_.prepare(sampleRate_);             droneFilterR_.prepare(sampleRate_);
 
     const std::size_t maxBlock = static_cast<std::size_t>(std::max(maxBlockSize, 2048));
@@ -100,6 +101,7 @@ void WorshipSynthEngine::reset() noexcept {
         v.driftSampleCounter = 0;
     }
     polyHeadroomSmoother_.reset(1.0f);
+    swellGainSmoother_.reset(1.0f);
     voiceCounter_ = 0;
     physicalHeldNotes_.fill(false);
     latchedCount_ = 0;
@@ -121,7 +123,31 @@ void WorshipSynthEngine::reset() noexcept {
     reverb_.reset();
 }
 
+float WorshipSynthEngine::computeTargetSwellGain() const noexcept {
+    const float totalPosDepth = std::clamp(modMatrix_.getTotalDepth(ModMatrix::Destination::SwellGain), 0.0f, 1.0f);
+    if (totalPosDepth > 1e-4f) {
+        float rawMod = modMatrix_.getModulationOffset(ModMatrix::Destination::SwellGain);
+        if (!std::isfinite(rawMod)) rawMod = 0.0f;
+        const float swellDb = std::clamp((rawMod - totalPosDepth) * 18.0f, -24.0f, 6.0f);
+        return std::pow(10.0f, swellDb / 20.0f);
+    }
+    return 1.0f;
+}
+
 void WorshipSynthEngine::snapSmoothersToTarget() noexcept {
+    modMatrix_.setSourceValue(ModMatrix::Source::ModWheel, modWheel_);
+    modMatrix_.setSourceValue(ModMatrix::Source::MacroWarmth, params_.macroWarmth);
+    modMatrix_.setSourceValue(ModMatrix::Source::MacroMotion, params_.macroMotion);
+    modMatrix_.setSourceValue(ModMatrix::Source::MacroShimmer, params_.macroShimmer);
+    modMatrix_.setSourceValue(ModMatrix::Source::MacroAir, params_.macroAir);
+    modMatrix_.evaluate();
+
+    swellGainSmoother_.setTargetValue(computeTargetSwellGain());
+    swellGainSmoother_.snapToTarget();
+
+    const float airMod = modMatrix_.getModulationOffset(ModMatrix::Destination::AirAmount);
+    airStage_.setMacroAir(std::clamp(params_.macroAir + airMod, 0.0f, 1.0f));
+
     cutoffSmoother_.snapToTarget();   cutoff2Smoother_.snapToTarget();
     masterGainSmoother_.snapToTarget(); droneToneSmoother_.snapToTarget();
     polyHeadroomSmoother_.reset(1.0f);
@@ -162,7 +188,10 @@ void WorshipSynthEngine::setParameters(const Parameters& params) noexcept {
     const float targetCutoff2 = std::clamp(params_.filter2CutoffHz, 40.0f, 19000.0f);
     cutoff2Smoother_.setTargetValue(targetCutoff2);
 
-    airStage_.setMacroAir(params_.macroAir);
+    const float airMod = modMatrix_.getModulationOffset(ModMatrix::Destination::AirAmount);
+    const float effAir = std::clamp(params_.macroAir + airMod, 0.0f, 1.0f);
+    airStage_.setMacroAir(effAir);
+    swellGainSmoother_.setTargetValue(computeTargetSwellGain());
 
     StereoBbdChorus::Parameters cp;
     cp.enabled = params_.chorusEnabled;
@@ -184,12 +213,17 @@ void WorshipSynthEngine::setParameters(const Parameters& params) noexcept {
     revParams.shimmerOctave    = std::clamp(params_.reverbShimmer + params_.macroShimmer * 0.50f, 0.0f, 1.0f);
     revParams.shimmerFifth     = 0.0f;
     revParams.shimmerLowCutHz  = 540.0f;
-    WorshipSynthAirStage::applyReverbAirCoupling(params_.macroAir, params_.macroWarmth, revParams);
+    WorshipSynthAirStage::applyReverbAirCoupling(effAir, params_.macroWarmth, revParams);
     const float cutoffOpen = (targetCutoff > 800.0f) ? std::clamp((targetCutoff - 800.0f) / 3200.0f, 0.0f, 1.0f) : 0.0f;
     const float coupledCarve = std::clamp(params_.vocalCarve + cutoffOpen * (1.0f - params_.macroWarmth) * 0.40f, 0.0f, 1.0f);
     revParams.ducking          = std::clamp(params_.reverbDucking, 0.0f, 1.0f);
     revParams.vocalCarve       = coupledCarve;
     revParams.freeze           = params_.reverbFreeze;
+    const float panDepth = std::clamp(modMatrix_.getTotalDepth(ModMatrix::Destination::PanSpread), 0.0f, 1.0f);
+    const float panMod = modMatrix_.getModulationOffset(ModMatrix::Destination::PanSpread);
+    const float baseRevWidth = (panDepth > 0.25f) ? std::clamp(1.0f - 0.72f * panDepth, 0.38f, 1.0f) : 1.0f;
+    const float panWidthScale = (panDepth > 0.25f) ? 0.85f : 0.50f;
+    revParams.stereoWidth      = std::clamp(baseRevWidth + panMod * panWidthScale, 0.25f, 1.15f);
     reverb_.setParameters(revParams);
 
     masterGainSmoother_.setTargetValue(std::pow(10.0f, std::clamp(params_.masterGainDb, -24.0f, 12.0f) / 20.0f));

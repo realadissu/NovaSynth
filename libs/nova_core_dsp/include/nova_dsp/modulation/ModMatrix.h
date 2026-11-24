@@ -120,6 +120,8 @@ public:
         PanSpread,
         DelayMix,
         DelayFeedback,
+        SwellGain,
+        AirAmount,
 
         Count
     };
@@ -184,6 +186,8 @@ public:
             case Destination::PanSpread:       return "Pan Spread";
             case Destination::DelayMix:        return "Delay Mix";
             case Destination::DelayFeedback:   return "Delay Feedback";
+            case Destination::SwellGain:       return "Swell Volume";
+            case Destination::AirAmount:       return "Air Amount";
             case Destination::Count:           return "None";
         }
     }

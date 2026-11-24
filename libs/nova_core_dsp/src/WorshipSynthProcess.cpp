@@ -98,8 +98,17 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
         for (int s = 0; s < numSamples; ++s) {
             lastLfo1 = lfo1_.processSample();
             lastLfo2 = lfo2_.processSample();
-            (void)lfo3_.processSample();
-            (void)lfo4_.processSample();
+            lastLfo3 = lfo3_.processSample();
+            lastLfo4 = lfo4_.processSample();
+        }
+        modMatrix_.setSourceValue(ModMatrix::Source::Lfo1, lastLfo1);
+        modMatrix_.setSourceValue(ModMatrix::Source::Lfo2, lastLfo2);
+        modMatrix_.setSourceValue(ModMatrix::Source::Lfo3, lastLfo3);
+        modMatrix_.setSourceValue(ModMatrix::Source::Lfo4, lastLfo4);
+        modMatrix_.evaluate();
+        swellGainSmoother_.setTargetValue(computeTargetSwellGain());
+        for (int s = 0; s < numSamples; ++s) {
+            (void)swellGainSmoother_.getNextValue();
         }
     } else {
         int activeNonDroneVoices = 0, activeVoiceCount = 0;
@@ -147,6 +156,7 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
                 modMatrix_.setSourceValue(ModMatrix::Source::Lfo1, lfo1Val); modMatrix_.setSourceValue(ModMatrix::Source::Lfo2, lfo2Val);
                 modMatrix_.setSourceValue(ModMatrix::Source::Lfo3, lfo3Val); modMatrix_.setSourceValue(ModMatrix::Source::Lfo4, lfo4Val);
                 modMatrix_.evaluate();
+                swellGainSmoother_.setTargetValue(computeTargetSwellGain());
 
                 const float lfo1RMod = modMatrix_.getModulationOffset(ModMatrix::Destination::Lfo1Rate);
                 if (std::abs(lfo1RMod) > 1e-4f) {
@@ -304,8 +314,15 @@ void WorshipSynthEngine::processBlock(float* outLeft, float* outRight, int numSa
                 synthR = mid - side;
             }
 
+            if ((s & 15) == 0) {
+                const float airMod = modMatrix_.getModulationOffset(ModMatrix::Destination::AirAmount);
+                airStage_.setMacroAir(std::clamp(params_.macroAir + airMod, 0.0f, 1.0f));
+            }
             airStage_.processSample(synthL, synthR, (s & 15) == 0);
             chorus_.process(synthL, synthR, synthL, synthR);
+            const float swellGain = swellGainSmoother_.getNextValue();
+            synthL *= swellGain;
+            synthR *= swellGain;
 
             droneToneSmoother_.setTargetValue(std::clamp(params_.droneTone, 0.0f, 1.0f));
             const float toneNorm = droneToneSmoother_.getNextValue();

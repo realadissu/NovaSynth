@@ -341,28 +341,32 @@ TEST(PsychoacousticPadOptimizationTests, LinearHeadroomScalingNoTanhFlutterInWar
     EXPECT_LT(peakTex, 4.0f);
 }
 
-TEST(PsychoacousticPadOptimizationTests, VelvetPianoCushionPresetSettings) {
+TEST(PsychoacousticPadOptimizationTests, SoftVelvetCushionPresetSettings) {
     nova::synth::NovaSynthProcessor processor;
     processor.prepareToPlay(48000.0, 512);
 
     auto& pm = processor.getPresetManager();
-    ASSERT_TRUE(pm.loadPresetByName("Velvet Piano Cushion"));
+    ASSERT_TRUE(pm.loadPresetByName("Soft Velvet Cushion"));
 
     auto& apvts = processor.getAPVTS();
     EXPECT_FLOAT_EQ(apvts.getRawParameterValue("filterType")->load(), 3.0f);
-    EXPECT_FLOAT_EQ(apvts.getRawParameterValue("filterCutoffHz")->load(), 1150.0f);
-    EXPECT_FLOAT_EQ(apvts.getRawParameterValue("filterKeyTrack")->load(), 0.45f);
+    EXPECT_FLOAT_EQ(apvts.getRawParameterValue("filterCutoffHz")->load(), 420.0f);
+    EXPECT_FLOAT_EQ(apvts.getRawParameterValue("filterKeyTrack")->load(), 0.46f);
     EXPECT_FLOAT_EQ(apvts.getRawParameterValue("filter2Type")->load(), 3.0f);
-    EXPECT_FLOAT_EQ(apvts.getRawParameterValue("vocalCarve")->load(), 0.45f);
+    EXPECT_FLOAT_EQ(apvts.getRawParameterValue("vocalCarve")->load(), 0.48f);
     EXPECT_FLOAT_EQ(apvts.getRawParameterValue("analogDrift")->load(), 0.48f);
     EXPECT_FLOAT_EQ(apvts.getRawParameterValue("osc1_fine")->load(), -5.0f);
     EXPECT_FLOAT_EQ(apvts.getRawParameterValue("osc2_fine")->load(), 6.0f);
-    EXPECT_GE(apvts.getRawParameterValue("osc1_spread")->load(), 0.80f);
-    EXPECT_GE(apvts.getRawParameterValue("osc2_spread")->load(), 0.80f);
+    EXPECT_GE(apvts.getRawParameterValue("osc1_spread")->load(), 0.42f);
+    EXPECT_LE(apvts.getRawParameterValue("osc1_spread")->load(), 0.58f);
+    EXPECT_GE(apvts.getRawParameterValue("osc2_spread")->load(), 0.42f);
+    EXPECT_LE(apvts.getRawParameterValue("osc2_spread")->load(), 0.58f);
     EXPECT_FLOAT_EQ(apvts.getRawParameterValue("chorusEnabled")->load(), 1.0f);
     EXPECT_FLOAT_EQ(apvts.getRawParameterValue("chorusMode")->load(), 0.0f);
-    EXPECT_FLOAT_EQ(apvts.getRawParameterValue("chorusMix")->load(), 0.40f);
-    EXPECT_FLOAT_EQ(apvts.getRawParameterValue("reverbDecay")->load(), 4.2f);
+    EXPECT_FLOAT_EQ(apvts.getRawParameterValue("chorusMix")->load(), 0.30f);
+    EXPECT_FLOAT_EQ(apvts.getRawParameterValue("reverbDry")->load(), 0.45f);
+    EXPECT_FLOAT_EQ(apvts.getRawParameterValue("reverbMix")->load(), 0.72f);
+    EXPECT_FLOAT_EQ(apvts.getRawParameterValue("reverbDecay")->load(), 5.2f);
     EXPECT_FLOAT_EQ(apvts.getRawParameterValue("reverbShimmer")->load(), 0.0f);
 }
 

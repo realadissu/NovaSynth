@@ -245,7 +245,7 @@ TEST(NovaSynthBugfixRegressionTests, DeadParametersNowActiveInOscillatorsChorusA
     nova::synth::NovaSynthProcessor proc;
     proc.prepareToPlay(kSr, 512);
     ASSERT_NE(proc.getAPVTS().getParameter("chorusWarmth"), nullptr);
-    ASSERT_TRUE(proc.getPresetManager().loadPresetByName("Velvet Piano Cushion"));
+    ASSERT_TRUE(proc.getPresetManager().loadPresetByName("Soft Velvet Cushion"));
     proc.syncParametersFromAPVTS();
     EXPECT_NEAR(proc.getCurrentParameters().chorusWarmth, 0.72f, 1e-3f);
 

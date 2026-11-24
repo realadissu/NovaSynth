@@ -307,6 +307,7 @@ TEST(NovaSynthPadLivelinessTests, OscFineCentsDetunesFundamentalAndRoundtripsSta
     constexpr int kBlock = 512;
     nova::synth::NovaSynthProcessor proc;
     proc.prepareToPlay(kSr, kBlock);
+    ASSERT_TRUE(proc.getPresetManager().loadPresetByName("Init Patch"));
     setProcParam(proc, "activeOscCount", 1.0f);
     setProcParam(proc, "osc1_enabled", 1.0f);
     setProcParam(proc, "osc1_sourceType", 0.0f);
