@@ -10,6 +10,7 @@ add_executable(NovaPluginsTests
     NovaSynthSwellAuditTests.cpp
     NovaSynthSwellDynamicsTests.cpp
     PadSynthEngineTests.cpp
+    DualEngineReverbShimmerAndCloudPadTests.cpp
 )
 
 target_link_libraries(NovaPluginsTests PRIVATE

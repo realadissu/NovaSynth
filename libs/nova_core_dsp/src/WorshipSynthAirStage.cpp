@@ -67,7 +67,7 @@ void WorshipSynthAirStage::applyReverbAirCoupling(float macroAir,
 
     revParams.highCutHz = std::clamp(7500.0f + airNorm * 9000.0f, 7500.0f, 16500.0f);
     revParams.highDamping = std::clamp(0.58f - airNorm * 0.36f, 0.22f, 0.58f);
-    revParams.shimmerHighCutHz = std::clamp(9000.0f + airNorm * 6500.0f, 9000.0f, 15500.0f);
+    revParams.shimmerHighCutHz = std::clamp(4800.0f + airNorm * 3400.0f, 4800.0f, 8200.0f);
 }
 
 } // namespace nova::dsp

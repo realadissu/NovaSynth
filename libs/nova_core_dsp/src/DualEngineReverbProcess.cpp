@@ -248,80 +248,13 @@ void DualEngineReverb::processBlock(float* leftChannel, float* rightChannel, int
         const float instantTank = 0.5f * (std::abs(lateOutL) + std::abs(lateOutR));
         runningTankEnergy = 0.995f * runningTankEnergy + 0.005f * instantTank;
 
-        // 7. Valhalla-Style Regenerative Dual-Grain Shimmer Cloud
-        // Driven primarily by the normalized FDN tank readout (lateOutL/R * 1.18f) so shimmer swells
-        // organically from the reverb tail and cascades across octaves (f0 -> 2*f0 -> 4*f0 -> 8*f0),
-        // with a gentle diffused-input seed (diffL/R * 0.25f) so the first octave bloom starts smoothly.
+        // 7. Detuned Regenerative Dual-Grain Shimmer Cloud (implemented in DualEngineReverbShimmer.cpp)
         float shimmerHaloL = 0.0f;
         float shimmerHaloR = 0.0f;
         if (shimOct > 0.0005f || shimFifth > 0.0005f) {
-            const float shimInL = lateOutL * 1.28f + (isFrozen ? 0.0f : diffL * 0.52f);
-            const float shimInR = lateOutR * 1.28f + (isFrozen ? 0.0f : diffR * 0.52f);
-
-            // HighPass at 185 Hz before pitch shifting keeps low-frequency mud out of the grains
-            const float hpL = shimmerHighPassL_.processSample(shimInL);
-            const float hpR = shimmerHighPassR_.processSample(shimInR);
-
-            float sL = 0.0f;
-            float sR = 0.0f;
-            if (shimOct > 0.0005f) {
-                switch (params_.shimmerPitchMode) {
-                    case 1: { // +2 Octaves (+24st) via smooth 2x -> 2x cascade
-                        const float oct1L = shimmerInterStageL_.processSample(octaveShifterL_.process(hpL, 2.0f));
-                        const float oct1R = shimmerInterStageR_.processSample(octaveShifterR_.process(hpR, 2.0f));
-                        sL = octave2ShifterL_.process(oct1L, 2.0f);
-                        sR = octave2ShifterR_.process(oct1R, 2.0f);
-                        break;
-                    }
-                    case 2: { // +1 & +2 Octaves Combined - Lush Majestic Worship Halo
-                        const float oct1L = octaveShifterL_.process(hpL, 2.0f);
-                        const float oct1R = octaveShifterR_.process(hpR, 2.0f);
-                        const float filt1L = shimmerInterStageL_.processSample(oct1L);
-                        const float filt1R = shimmerInterStageR_.processSample(oct1R);
-                        const float oct2L = octave2ShifterL_.process(filt1L, 2.0f);
-                        const float oct2R = octave2ShifterR_.process(filt1R, 2.0f);
-                        sL = oct1L * 0.72f + oct2L * 0.48f;
-                        sR = oct1R * 0.72f + oct2R * 0.48f;
-                        break;
-                    }
-                    case 3: // -1 Octave Sub - Deep Atmospheric Foundation
-                        sL = octaveShifterL_.process(hpL, 0.5f);
-                        sR = octaveShifterR_.process(hpR, 0.5f);
-                        break;
-                    case 0: // +1 Octave (+12st) - Classic Valhalla Angelic Bloom
-                    default:
-                        sL = octaveShifterL_.process(hpL, 2.0f);
-                        sR = octaveShifterR_.process(hpR, 2.0f);
-                        break;
-                }
-            }
-
-            // Harmonic Fifth (+7st): gentle fifth glow
-            if (shimFifth > 0.0005f && !isFrozen) {
-                const float fL = fifthShifterL_.process(hpL * 0.75f, 1.498307f);
-                const float fR = fifthShifterR_.process(hpR * 0.75f, 1.498307f);
-                sL = sL * (shimOct > 0.0005f ? 1.0f : 0.0f) + fL * 0.65f;
-                sR = sR * (shimOct > 0.0005f ? 1.0f : 0.0f) + fR * 0.65f;
-            }
-
-            // Warm 5.2 kHz LowPass melts away ultrasonic grain edges so ascending octaves stay silky
-            sL = shimmerSilkL_.processSample(sL);
-            sR = shimmerSilkR_.processSample(sR);
-
-            // 2-stage prime allpass diffusion + stereo cross-scattering for enveloping cloud width
-            sL = shimmerDiffusersL_[0].process(sL);
-            sR = shimmerDiffusersR_[0].process(sR);
-            const float crossL = 0.84f * sL + 0.16f * sR;
-            const float crossR = 0.84f * sR + 0.16f * sL;
-            const float cloudL = shimmerDiffusersL_[1].process(crossL);
-            const float cloudR = shimmerDiffusersR_[1].process(crossR);
-
-            shimmerCloudDelayL_.write(flushDenormal(cloudL));
-            shimmerCloudDelayR_.write(flushDenormal(cloudR));
-
-            // Delayed stereo halo tap from the cloud (after ~38ms diffusion delay) for wide cathedral bloom
-            shimmerHaloL = shimmerCloudDelayL_.readInt(shimmerCloudTapSamples_[9]) * activeShim;
-            shimmerHaloR = shimmerCloudDelayR_.readInt(shimmerCloudTapSamples_[10]) * activeShim;
+            processShimmerSample(lateOutL, lateOutR, diffL, diffR,
+                                 shimOct, shimFifth, activeShim, isFrozen,
+                                 shimmerHaloL, shimmerHaloR);
         } else {
             shimmerCloudDelayL_.write(0.0f);
             shimmerCloudDelayR_.write(0.0f);

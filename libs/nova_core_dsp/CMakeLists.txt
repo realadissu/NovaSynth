@@ -2,6 +2,7 @@ add_library(nova_core_dsp STATIC
     src/AnalogDriftGenerator.cpp
     src/DualEngineReverb.cpp
     src/DualEngineReverbProcess.cpp
+    src/DualEngineReverbShimmer.cpp
     src/MultiEngineOscillator.cpp
     src/MultiEngineOscillatorEngines.cpp
     src/MultiEngineOscillatorPreview.cpp

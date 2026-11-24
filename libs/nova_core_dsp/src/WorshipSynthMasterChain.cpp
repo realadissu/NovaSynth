@@ -53,7 +53,11 @@ void WorshipSynthEngine::processMasterEffectsChain(float* outLeft, float* outRig
     }
 
     const float revMod = modMatrix_.getModulationOffset(ModMatrix::Destination::ReverbMix);
-    const float shimMod = modMatrix_.getModulationOffset(ModMatrix::Destination::ShimmerAmount);
+    const float rawShimMod = modMatrix_.getModulationOffset(ModMatrix::Destination::ShimmerAmount);
+    const float shimDepth = modMatrix_.getTotalDepth(ModMatrix::Destination::ShimmerAmount);
+    const float shimMod = (rawShimMod > 0.0f && shimDepth >= rawShimMod && shimDepth > 0.01f)
+        ? ((rawShimMod * rawShimMod) / shimDepth)
+        : rawShimMod;
     const float vcMod = modMatrix_.getModulationOffset(ModMatrix::Destination::VocalCarve);
     const float airMod = modMatrix_.getModulationOffset(ModMatrix::Destination::AirAmount);
     const float panMod = modMatrix_.getModulationOffset(ModMatrix::Destination::PanSpread);

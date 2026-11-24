@@ -203,6 +203,12 @@ private:
         [[nodiscard]] float process(float input, float pitchRatio) noexcept;
     };
 
+    void processShimmerSample(float lateOutL, float lateOutR,
+                              float diffL, float diffR,
+                              float shimOct, float shimFifth,
+                              float activeShim, bool isFrozen,
+                              float& shimmerHaloL, float& shimmerHaloR) noexcept;
+
     double sampleRate_ = 48000.0;
     Parameters params_{};
     bool isTankSilent_ = true;

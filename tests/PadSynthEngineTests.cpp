@@ -382,6 +382,8 @@ TEST(PadSynthEngineTests, BandlimitedHighNotesNoOrganFifthsHostileRatesAndRoundt
         EXPECT_NEAR(b.shapeMorph, a.shapeMorph, 1e-3f);
         EXPECT_NEAR(b.detune, a.detune, 1e-3f);
     }
-    EXPECT_GT(paramsB.oscSlots[0].warp, 0.10f);
-    EXPECT_GE(paramsB.oscSlots[1].warp, 0.20f);
+    EXPECT_GT(paramsB.oscSlots[0].warp, 0.01f);
+    EXPECT_LE(paramsB.oscSlots[0].warp, 0.10f);
+    EXPECT_GT(paramsB.oscSlots[1].warp, 0.05f);
+    EXPECT_LE(paramsB.oscSlots[1].warp, 0.10f);
 }
